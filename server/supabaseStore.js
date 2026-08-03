@@ -4,6 +4,11 @@
 // "leads" table holds one row per lead. Only dirty leads are re-upserted on
 // each persist, so large imports stay efficient.
 import { createClient } from '@supabase/supabase-js'
+import WebSocket from 'ws'
+
+// Node 20 has no native global WebSocket; supabase-js's realtime client
+// requires one to exist just to construct, even though we never use realtime.
+if (typeof globalThis.WebSocket === 'undefined') globalThis.WebSocket = WebSocket
 
 const LEADS_TABLE = 'leads'
 const META_TABLE = 'app_state'
