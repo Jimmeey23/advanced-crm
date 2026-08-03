@@ -1046,6 +1046,19 @@ app.get('/api/respondio/conversations/:leadId', async (req, res) => {
   }
 })
 
+app.get('/api/respondio/templates', async (req, res) => {
+  if (!respondio.isConfigured(db)) return res.json({ configured: false, templates: [] })
+  try {
+    const channelId = await respondio.resolveChannelId(db, 'whatsapp')
+    if (!channelId) return res.json({ configured: true, templates: [], error: 'No WhatsApp channel found in your Respond.io workspace.' })
+    const all = await respondio.listTemplates(db, channelId)
+    const templates = all.filter(t => !t.status || String(t.status).toLowerCase() === 'approved')
+    res.json({ configured: true, channelId, templates })
+  } catch (e) {
+    res.status(502).json({ configured: true, templates: [], error: e.message })
+  }
+})
+
 app.post('/api/respondio/send', async (req, res) => {
   const lead = leadById(req.body.leadId)
   if (!lead) return res.status(404).json({ error: 'Lead not found' })

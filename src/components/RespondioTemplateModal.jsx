@@ -12,15 +12,46 @@ function getLibrary(settingsTemplates) {
   return Array.isArray(settingsTemplates) && settingsTemplates.length ? settingsTemplates : defaults
 }
 
+// Convert a Respond.io WhatsApp template (from /api/respondio/templates) into
+// the shape this modal renders: one parameter slot per {{n}} placeholder in
+// the template's body component.
+function fromApiTemplate(t) {
+  const body = (t.components || []).find(c => c.type === 'body')
+  const count = (body?.text?.match(/\{\{\d+\}\}/g) || []).length
+  return {
+    id: String(t.id),
+    name: t.name,
+    label: t.name,
+    language: t.languageCode,
+    category: t.category,
+    namespace: t.namespace || '',
+    channelId: t.channelId,
+    parameters: Array.from({ length: count }, (_, i) => `Variable ${i + 1}`)
+  }
+}
+
 export default function RespondioTemplateModal({ open, onClose, lead }) {
   const { boot, refreshData, toast } = useApp()
-  const templates = useMemo(() => getLibrary(boot?.settings?.respondio?.wabaTemplates), [boot])
+  const [apiTemplates, setApiTemplates] = useState(null)
+  const [loadError, setLoadError] = useState('')
+  const manualTemplates = useMemo(() => getLibrary(boot?.settings?.respondio?.wabaTemplates), [boot])
+  const templates = apiTemplates?.length ? apiTemplates : manualTemplates
   const [templateId, setTemplateId] = useState('')
   const [values, setValues] = useState([])
   const [sending, setSending] = useState(false)
   const [error, setError] = useState('')
 
   const firstMessage = !(lead?.respondio?.lastOutboundAt || (lead?.followUps || []).some(f => f.via === 'respondio'))
+
+  useEffect(() => {
+    if (!open) return
+    api.get('/api/respondio/templates')
+      .then(r => {
+        setApiTemplates(Array.isArray(r.templates) ? r.templates.map(fromApiTemplate) : [])
+        setLoadError(r.templates?.length ? '' : (r.error || 'No approved WABA templates found on your Respond.io WhatsApp channel.'))
+      })
+      .catch(e => { setApiTemplates([]); setLoadError(e.message) })
+  }, [open])
 
   useEffect(() => {
     if (!open) return
@@ -57,6 +88,7 @@ export default function RespondioTemplateModal({ open, onClose, lead }) {
           namespace: selected?.namespace || '',
           category: selected?.category || '',
           channel: 'whatsapp',
+          channelId: selected?.channelId,
           parameters: values
         },
         logFollowUp: true
@@ -97,7 +129,11 @@ export default function RespondioTemplateModal({ open, onClose, lead }) {
           <select className="input" value={templateId} onChange={e => setTemplateId(e.target.value)}>
             {templates.map(t => <option key={t.id} value={t.id}>{t.label || t.name}</option>)}
           </select>
-          <div className="text-[11px] text-slate-500 mt-1 flex items-center gap-1.5"><Sparkles size={11} /> Approved WABA template linked in your Respond.io settings</div>
+          <div className="text-[11px] text-slate-500 mt-1 flex items-center gap-1.5">
+            <Sparkles size={11} />
+            {apiTemplates?.length ? 'Live approved templates from your Respond.io WhatsApp channel' : 'Manually configured in Settings > Integrations'}
+          </div>
+          {loadError && !apiTemplates?.length && <p className="text-[11px] text-amber-400 mt-1">{loadError}</p>}
         </div>
 
         <div className="space-y-2">

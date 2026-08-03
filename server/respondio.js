@@ -7,12 +7,16 @@
 //   GET  /v2/contact/{identifier}                      -> get contact (404 = not found)
 //   POST /v2/contact/create_or_update/{identifier}     -> create/update contact
 //   POST /v2/contact/list                              -> list contacts (body: { search, filter })
-//   POST /v2/contact/{identifier}/message              -> send a message
+//   POST /v2/contact/{identifier}/message              -> send a message (body: { channelId, message })
 //   GET  /v2/contact/{identifier}/message/list         -> conversation history (?limit=)
 //   POST /v2/contact/{identifier}/conversation/status  -> open/close conversation
 //   GET  /v2/space/user                                -> workspace users
 //   GET  /v2/space/channel                             -> workspace channels
+//   GET  /v2/space/channel/{channelId}/template        -> approved WABA templates for a channel
 // where identifier is one of id:<id>, email:<addr>, phone:+<digits>.
+// channelId is a numeric Respond.io channel ID, not a channel name — pass
+// null to fall back to the contact's last-interacted channel (fails with a
+// 404 for contacts that have never been messaged before).
 const BASE = 'https://api.respond.io/v2'
 
 export function apiKey(db) {
@@ -100,10 +104,48 @@ export async function testConnection(db) {
     user = (list && list[0]) || u?.user || null
   } catch (e) { /* token already validated by the caller; identity is a bonus */ }
   try {
-    const c = await api(db, '/space/channel')
-    channels = asList({ data: c })
+    channels = await listChannels(db)
   } catch (e) { /* optional */ }
   return { ok: true, data: user, channels }
+}
+
+// List workspace channels (GET /space/channel).
+export async function listChannels(db) {
+  const c = await api(db, '/space/channel')
+  return asList(c)
+}
+
+// Respond.io's documented `source` enum (whatsapp, whatsapp_cloud,
+// 360dialog_whatsapp, ...) doesn't cover every value workspaces actually get
+// back — e.g. a Meta-managed WABA channel reports source "whatsapp_business".
+// Match by substring instead of an exact enum to avoid missing real channels.
+function isWhatsAppSource(source) {
+  return /whatsapp/i.test(String(source || ''))
+}
+
+// Resolve the numeric channelId to send through for a given logical channel
+// ('whatsapp' | 'sms' | 'email' | 'call'). Respond.io's message API takes a
+// top-level channelId (not a channel name) — passing none falls back to the
+// contact's last-interacted channel, which fails with a 404 ("no last
+// interacted channel") for brand-new contacts.
+export async function resolveChannelId(db, channel) {
+  const configured = db?.settings?.respondio?.channelIds?.[channel]
+  if (configured) return Number(configured)
+  if (channel !== 'whatsapp') return null
+  try {
+    const channels = await listChannels(db)
+    const match = channels.find(c => isWhatsAppSource(c.source))
+    return match?.id ?? null
+  } catch (e) {
+    return null
+  }
+}
+
+// List approved WhatsApp templates for a channel (GET /space/channel/{id}/template).
+export async function listTemplates(db, channelId) {
+  if (!channelId) return []
+  const data = await api(db, `/space/channel/${channelId}/template`)
+  return asList(data)
 }
 
 // Look up the lead's contact in Respond.io by identifier. Returns the contact
@@ -154,9 +196,10 @@ export async function setConversationStatus(db, lead, status) {
 export async function sendMessage(db, lead, text, channel) {
   const identifier = leadIdentifier(db, lead)
   if (!identifier) throw new Error('Lead has no email or phone to use as a Respond.io identifier.')
+  const channelId = await resolveChannelId(db, channel)
   const data = await api(db, `/contact/${identifier}/message`, {
     method: 'POST',
-    body: { message: { type: 'text', text } }
+    body: { channelId, message: { type: 'text', text } }
   })
   return pickContact(data) || data
 }
@@ -167,23 +210,21 @@ export async function sendTemplateMessage(db, lead, template) {
   if (!template?.name) throw new Error('A WhatsApp template name is required.')
 
   const parameters = Array.isArray(template.parameters) ? template.parameters : []
+  const components = parameters.length
+    ? [{ type: 'body', parameters: parameters.map(p => ({ type: 'text', text: String(p ?? '').trim() })) }]
+    : []
+  const channelId = template.channelId || await resolveChannelId(db, template.channel || 'whatsapp')
   const body = {
+    channelId,
     message: {
-      type: 'template',
+      type: 'whatsapp_template',
       template: {
         name: String(template.name).trim(),
-        language: String(template.language || 'en').trim(),
-        parameters: parameters.map((p, index) => ({
-          type: 'text',
-          text: String(p ?? '').trim(),
-          index: index + 1
-        }))
+        languageCode: String(template.language || template.languageCode || 'en').trim(),
+        components
       }
     }
   }
-  if (template.category) body.message.template.category = String(template.category).trim()
-  if (template.channel) body.message.channel = template.channel
-  if (template.namespace) body.message.template.namespace = String(template.namespace).trim()
 
   const data = await api(db, `/contact/${identifier}/message`, {
     method: 'POST',
@@ -218,12 +259,12 @@ export async function syncLeadConversations(db, lead) {
 
   const messages = raw
     .map(m => ({
-      id: m.id,
-      direction: m.direction || (m.sender?.type === 'contact' ? 'inbound' : 'outbound'),
-      type: m.type || 'text',
-      content: m.content || m.text || '',
-      sentAt: m.sentAt || m.createdAt || m.timestamp || null,
-      channel: m.channel || m.channelId || null
+      id: m.messageId || m.id,
+      direction: m.traffic === 'incoming' ? 'inbound' : 'outbound',
+      type: m.message?.type || 'text',
+      content: m.message?.text || m.message?.template?.name || '',
+      sentAt: m.timestamp || m.sentAt || m.createdAt || m.status?.[0]?.timestamp || null,
+      channel: m.channelId || null
     }))
     .sort((a, b) => String(a.sentAt || '').localeCompare(String(b.sentAt || '')))
 
