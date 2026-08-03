@@ -68,9 +68,14 @@ export async function loadState() {
   }
 }
 
-export async function persistState(state, dirtyLeadIds = []) {
+export async function persistState(state, dirtyLeadIds = [], deletedLeadIds = []) {
   const c = getClient()
   if (!c) return
+
+  if (deletedLeadIds.length) {
+    const { error } = await c.from(LEADS_TABLE).delete().in('id', deletedLeadIds)
+    if (error) throw new Error(`supabase delete leads: ${error.message}`)
+  }
 
   const meta = {
     version: state.version,
@@ -102,6 +107,31 @@ export async function persistState(state, dirtyLeadIds = []) {
       if (error) throw new Error(`supabase persist leads: ${error.message}`)
     }
   }
+}
+
+// Subscribes to Postgres changes on both tables and calls `onChange` (debounced)
+// whenever a row is inserted/updated/deleted directly in Supabase — e.g. by
+// someone editing the table in the Supabase dashboard, or another server
+// instance. Requires the tables to be added to the `supabase_realtime`
+// publication (see server/sql/schema.sql).
+let realtimeChannel = null
+// onLeadChange({ eventType, id, data }) and onMetaChange({ eventType, data }) let the
+// caller patch just the affected row instead of reloading the entire dataset —
+// important once the leads table has thousands of rows.
+export function subscribeChanges({ onLeadChange, onMetaChange }) {
+  const c = getClient()
+  if (!c || realtimeChannel) return
+  realtimeChannel = c.channel('db-changes')
+    .on('postgres_changes', { event: '*', schema: 'public', table: LEADS_TABLE }, (payload) => {
+      const row = payload.eventType === 'DELETE' ? payload.old : payload.new
+      onLeadChange({ eventType: payload.eventType, id: row?.id, data: row?.data })
+    })
+    .on('postgres_changes', { event: '*', schema: 'public', table: META_TABLE }, (payload) => {
+      onMetaChange({ eventType: payload.eventType, data: payload.new?.data })
+    })
+    .subscribe((status) => {
+      if (status === 'SUBSCRIBED') console.log('[supabase] realtime subscription active')
+    })
 }
 
 export function describe() {

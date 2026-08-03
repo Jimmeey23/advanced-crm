@@ -58,6 +58,82 @@ export const scoreColor = (score) => {
 
 export const AVATAR_COLORS = ['#f43f5e', '#8b5cf6', '#06b6d4', '#f59e0b', '#10b981', '#6366f1', '#ec4899', '#14b8a6', '#e11d48', '#7c3aed']
 
+// ---------- Airtable-style column engine ----------
+// Base (built-in) fields available to formula/lookup columns and the table.
+export function baseColumnValue(id, l, lookup) {
+  const owner = lookup?.asnById?.[l.associateId]
+  const loc = lookup?.locById?.[l.locationId]
+  switch (id) {
+    case 'phone': return l.phone || ''
+    case 'source': return l.sourceName || ''
+    case 'owner': return owner?.name || 'Unassigned'
+    case 'location': return loc?.name || ''
+    case 'score': return l.ai?.score ?? null
+    case 'risk': return l.ai?.risk || ''
+    case 'valueEstimate': return l.valueEstimate ?? null
+    case 'classType': return l.classType || ''
+    case 'missedCount': return l.fu?.missedCount ?? 0
+    case 'lastOutreachDays': return l.fu?.lastOutreachDays ?? null
+    case 'created': return l.createdAt || ''
+    case 'remarks': return l.remarks || ''
+    case 'stage': return l.stage || ''
+    case 'status': return l.status || ''
+    case 'fullName': return l.fullName || ''
+    case 'email': return l.email || ''
+    default: return ''
+  }
+}
+
+const FORMULA_CONTEXT_FIELDS = [
+  'fullName', 'phone', 'email', 'source', 'owner', 'location', 'score', 'risk',
+  'valueEstimate', 'classType', 'missedCount', 'lastOutreachDays', 'created', 'remarks', 'stage', 'status'
+]
+
+export function buildFormulaContext(l, lookup) {
+  const ctx = {}
+  for (const f of FORMULA_CONTEXT_FIELDS) ctx[f] = baseColumnValue(f, l, lookup)
+  return ctx
+}
+
+// Formulas are short JS expressions the user types for their own saved column
+// config (e.g. "score * 2" or "valueEstimate > 50000 ? 'big' : 'small'").
+// Scoped to just the lead's field values via `with` — no DOM/network access
+// beyond what a same-origin <script> already has in this app.
+export function evalFormula(formula, ctx) {
+  try {
+    // eslint-disable-next-line no-new-func
+    const fn = new Function(...Object.keys(ctx), `try { return (${formula}); } catch (e) { return null; }`)
+    return fn(...Object.values(ctx))
+  } catch (e) {
+    return null
+  }
+}
+
+export function lookupColumnValue(relatedTable, relatedField, l, lookup) {
+  const src = relatedTable === 'associate' ? lookup?.asnById?.[l.associateId] : lookup?.locById?.[l.locationId]
+  return src?.[relatedField] ?? null
+}
+
+export function formatColumnValue(value, col) {
+  if (value === null || value === undefined || value === '') return '—'
+  const decimals = col.decimals ?? 0
+  switch (col.type) {
+    case 'number': {
+      const n = Number(value)
+      if (isNaN(n)) return String(value)
+      return `${n.toFixed(decimals)}${col.unit ? ` ${col.unit}` : ''}`
+    }
+    case 'currency': return money(Number(value) || 0)
+    case 'percent': {
+      const n = Number(value)
+      if (isNaN(n)) return String(value)
+      return `${n.toFixed(decimals)}%`
+    }
+    case 'date': return fmtDate(value)
+    default: return String(value)
+  }
+}
+
 export function downloadText(filename, text) {
   const blob = new Blob([text], { type: 'text/csv;charset=utf-8;' })
   const url = URL.createObjectURL(blob)

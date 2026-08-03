@@ -2,15 +2,30 @@ import React, { useMemo, useState } from 'react'
 import {
   Search, SlidersHorizontal, ChevronDown, ChevronRight, X, Download,
   Table as TableIcon, LayoutGrid, Rows3, PieChart, KanbanSquare, CalendarDays,
-  Phone, MessageCircle, Mail, MessageSquareText, Sparkles
+  Phone, MessageCircle, Mail, MessageSquareText, Sparkles, Trash2, CheckSquare, Square
 } from 'lucide-react'
 import { useApp } from '../store.jsx'
 import { useFetch } from '../hooks.js'
 import { api, buildQuery } from '../api.js'
 import { Avatar, ScorePill, Empty } from '../ui.jsx'
-import { fmtDate, stageClass, riskClass, daysFromNow, downloadText, money } from '../lib.js'
+import { fmtDate, stageClass, riskClass, daysFromNow, downloadText, money, baseColumnValue, buildFormulaContext, evalFormula, lookupColumnValue, formatColumnValue } from '../lib.js'
 import Tip from '../components/Tip.jsx'
 import ComposeModal from '../components/ComposeModal.jsx'
+import ColumnManager, { DEFAULT_COLUMNS } from '../components/ColumnManager.jsx'
+
+const COLUMNS_KEY = 'p57_leads_columns_v1'
+function loadColumns() {
+  try {
+    const raw = localStorage.getItem(COLUMNS_KEY)
+    if (raw) return JSON.parse(raw)
+  } catch (e) { /* ignore */ }
+  return DEFAULT_COLUMNS.map(c => ({ ...c }))
+}
+function getColumnValue(col, l, lookup) {
+  if (col.kind === 'formula') return evalFormula(col.formula, buildFormulaContext(l, lookup))
+  if (col.kind === 'lookup') return lookupColumnValue(col.relatedTable, col.relatedField, l, lookup)
+  return baseColumnValue(col.field, l, lookup)
+}
 
 const EMPTY_FILTERS = {
   locationId: '', stage: '', status: '', associateId: '', sourceName: '', channel: '',
@@ -58,6 +73,20 @@ export default function Leads({ initialSearch = '' }) {
   const [groupBy, setGroupBy] = useState('')
   const [collapsed, setCollapsed] = useState({})
   const [composeLead, setComposeLead] = useState(null)
+  const [selected, setSelected] = useState(() => new Set())
+  const [bulkBusy, setBulkBusy] = useState(false)
+  const [columns, setColumnsRaw] = useState(loadColumns)
+  const [density, setDensity] = useState(() => localStorage.getItem('p57_leads_density') || 'comfortable')
+  const setColumns = (updater) => setColumnsRaw(prev => {
+    const next = typeof updater === 'function' ? updater(prev) : updater
+    try { localStorage.setItem(COLUMNS_KEY, JSON.stringify(next)) } catch (e) { /* ignore */ }
+    return next
+  })
+  const toggleDensity = () => setDensity(d => {
+    const next = d === 'comfortable' ? 'compact' : 'comfortable'
+    try { localStorage.setItem('p57_leads_density', next) } catch (e) { /* ignore */ }
+    return next
+  })
   const pageSize = 25
 
   const hasFilters = Object.values(filters).some(Boolean) || search
@@ -71,6 +100,48 @@ export default function Leads({ initialSearch = '' }) {
   const changeStage = async (lead, stage) => {
     try { await api.patch(`/api/leads/${lead.id}`, { stage }); refreshData() }
     catch (e) { toast(e.message, 'error') }
+  }
+
+  const toggleSelect = (id) => setSelected(s => {
+    const n = new Set(s)
+    n.has(id) ? n.delete(id) : n.add(id)
+    return n
+  })
+  const toggleSelectAll = () => setSelected(s => s.size === items.length ? new Set() : new Set(items.map(l => l.id)))
+  const clearSelection = () => setSelected(new Set())
+
+  const bulkChangeStage = async (stage) => {
+    if (!stage || !selected.size) return
+    setBulkBusy(true)
+    try {
+      const { updated } = await api.patch('/api/leads/bulk', { ids: [...selected], patch: { stage } })
+      toast(`Moved ${updated} lead${updated === 1 ? '' : 's'} to ${stage}`)
+      clearSelection(); refreshData()
+    } catch (e) { toast(e.message, 'error') }
+    setBulkBusy(false)
+  }
+
+  const bulkAssign = async (associateId) => {
+    if (!associateId || !selected.size) return
+    setBulkBusy(true)
+    try {
+      const { updated } = await api.patch('/api/leads/bulk', { ids: [...selected], patch: { associateId } })
+      toast(`Reassigned ${updated} lead${updated === 1 ? '' : 's'}`)
+      clearSelection(); refreshData()
+    } catch (e) { toast(e.message, 'error') }
+    setBulkBusy(false)
+  }
+
+  const bulkDelete = async () => {
+    if (!selected.size) return
+    if (!window.confirm(`Delete ${selected.size} lead${selected.size === 1 ? '' : 's'}? This can't be undone.`)) return
+    setBulkBusy(true)
+    try {
+      const { deleted } = await api.delete('/api/leads/bulk', { ids: [...selected] })
+      toast(`Deleted ${deleted} lead${deleted === 1 ? '' : 's'}`)
+      clearSelection(); refreshData()
+    } catch (e) { toast(e.message, 'error') }
+    setBulkBusy(false)
   }
 
   const exportCsv = () => {
@@ -123,6 +194,27 @@ export default function Leads({ initialSearch = '' }) {
         </div>
       )}
 
+      {/* bulk selection toolbar */}
+      {selected.size > 0 && (
+        <div className="card p-3 flex flex-wrap items-center gap-3 border-rose-400/25" style={{ animation: 'fadeIn .15s ease' }}>
+          <span className="chip bg-rose-500/15 border border-rose-400/30 text-rose-300 !px-2.5 !py-1 text-[12px] font-semibold">{selected.size} selected</span>
+          <select className="input !w-auto !py-1.5 !text-[12.5px]" disabled={bulkBusy} defaultValue="" onChange={e => { bulkChangeStage(e.target.value); e.target.value = '' }}>
+            <option value="" disabled>Change stage…</option>
+            {(boot?.stages || []).map(s => <option key={s} value={s}>{s}</option>)}
+          </select>
+          <select className="input !w-auto !py-1.5 !text-[12.5px]" disabled={bulkBusy} defaultValue="" onChange={e => { bulkAssign(e.target.value); e.target.value = '' }}>
+            <option value="" disabled>Reassign owner…</option>
+            {(boot?.associates || []).map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+          </select>
+          <button className="btn btn-ghost !py-1.5 !text-[12.5px] text-rose-300 hover:!bg-rose-500/10" disabled={bulkBusy} onClick={bulkDelete}>
+            <Trash2 size={13} /> Delete
+          </button>
+          <button className="btn btn-ghost !py-1.5 !text-[12.5px] ml-auto" onClick={clearSelection}>
+            <X size={13} /> Clear selection
+          </button>
+        </div>
+      )}
+
       {/* toolbar */}
       <div className="flex flex-wrap items-center gap-3">
         <div className="relative w-[240px]">
@@ -147,6 +239,14 @@ export default function Leads({ initialSearch = '' }) {
             <ChevronDown size={14} className={`transition-transform ${sortDir === 'asc' ? 'rotate-180' : ''}`} />
           </button>
           <button className="btn btn-ghost !py-2" onClick={exportCsv}><Download size={14} /> Export</button>
+          {view === 'table' && (
+            <>
+              <button className="btn btn-ghost !py-2" onClick={toggleDensity} title="Row density">
+                <Rows3 size={14} /> {density === 'compact' ? 'Compact' : 'Comfortable'}
+              </button>
+              <ColumnManager columns={columns} setColumns={setColumns} />
+            </>
+          )}
           <div className="flex rounded-xl overflow-hidden border border-white/10">
             {VIEWS.map(v => {
               const Icon = v.icon
@@ -233,6 +333,8 @@ export default function Leads({ initialSearch = '' }) {
               items={items} boot={boot} lookup={lookup} openLead={openLead}
               changeStage={changeStage} grouped={grouped} collapsed={collapsed} toggleGroup={toggleGroup}
               onMessage={setComposeLead}
+              selected={selected} toggleSelect={toggleSelect} toggleSelectAll={toggleSelectAll}
+              columns={columns} density={density}
             />
           )}
           {view === 'cards' && <CardsView items={items} lookup={lookup} openLead={openLead} grouped={grouped} collapsed={collapsed} toggleGroup={toggleGroup} boot={boot} onMessage={setComposeLead} />}
@@ -283,7 +385,7 @@ function GroupSummary({ list, lookup }) {
   )
 }
 
-function TableView({ items, boot, lookup, openLead, changeStage, grouped, collapsed, toggleGroup, onMessage }) {
+function TableView({ items, boot, lookup, openLead, changeStage, grouped, collapsed, toggleGroup, onMessage, selected, toggleSelect, toggleSelectAll, columns, density }) {
   if (grouped) {
     return (
       <div className="divide-y divide-white/5">
@@ -296,44 +398,47 @@ function TableView({ items, boot, lookup, openLead, changeStage, grouped, collap
                 <span className="font-display text-[13.5px] font-semibold text-white">{g.key}</span>
                 <GroupSummary list={g.list} lookup={lookup} />
               </button>
-              {isOpen && <TableGrid items={g.list} boot={boot} lookup={lookup} openLead={openLead} changeStage={changeStage} onMessage={onMessage} />}
+              {isOpen && <TableGrid items={g.list} boot={boot} lookup={lookup} openLead={openLead} changeStage={changeStage} onMessage={onMessage} selected={selected} toggleSelect={toggleSelect} toggleSelectAll={toggleSelectAll} columns={columns} density={density} />}
             </div>
           )
         })}
       </div>
     )
   }
-  return <TableGrid items={items} boot={boot} lookup={lookup} openLead={openLead} changeStage={changeStage} onMessage={onMessage} />
+  return <TableGrid items={items} boot={boot} lookup={lookup} openLead={openLead} changeStage={changeStage} onMessage={onMessage} selected={selected} toggleSelect={toggleSelect} toggleSelectAll={toggleSelectAll} columns={columns} density={density} />
 }
 
 const FU_LABELS = ['1', '2', '3', '4']
 
-function TableGrid({ items, boot, lookup, openLead, changeStage, onMessage }) {
+function TableGrid({ items, boot, lookup, openLead, changeStage, onMessage, selected, toggleSelect, toggleSelectAll, columns, density }) {
   const cadenceDays = boot?.settings?.cadence?.outreachDays || 7
+  const allChecked = items.length > 0 && items.every(l => selected?.has(l.id))
+  const visibleCols = (columns || []).filter(c => !c.hidden)
+  const py = density === 'compact' ? 'py-1.5' : ''
   return (
     <div className="overflow-x-auto scrollbar-thin">
       <table className="data-table">
         <thead>
           <tr className="text-[10.5px] uppercase tracking-wider text-slate-500 border-b border-white/8">
+            <th className="px-4 py-3 font-semibold w-[36px]">
+              <button className="flex items-center justify-center text-slate-400 hover:text-white" onClick={toggleSelectAll} title={allChecked ? 'Deselect all' : 'Select all'}>
+                {allChecked ? <CheckSquare size={15} className="text-rose-400" /> : <Square size={15} />}
+              </button>
+            </th>
             <th className="px-4 py-3 font-semibold">Lead</th>
-            <th className="px-4 py-3 font-semibold">Phone</th>
-            <th className="px-4 py-3 font-semibold">Source</th>
             <th className="px-4 py-3 font-semibold">Stage</th>
-            <th className="px-4 py-3 font-semibold">Owner</th>
-            <th className="px-4 py-3 font-semibold">Location</th>
-            <th className="px-4 py-3 font-semibold">Score</th>
+            {visibleCols.map(c => <th key={c.id} className="px-4 py-3 font-semibold">{c.label}</th>)}
             <th className="px-4 py-3 font-semibold">Next</th>
             <th className="px-4 py-3 font-semibold text-center" colSpan={4}>Follow-ups</th>
-            <th className="px-4 py-3 font-semibold">Created</th>
             <th className="px-4 py-3 font-semibold text-right">Message</th>
           </tr>
           <tr className="text-[9.5px] uppercase tracking-wider text-slate-600 border-b border-white/5">
-            <th colSpan={8} />
+            <th colSpan={4 + visibleCols.length} />
             <th className="px-1 py-1.5 text-center font-semibold text-slate-500 mono">{FU_LABELS[0]}</th>
             <th className="px-1 py-1.5 text-center font-semibold text-slate-500 mono">{FU_LABELS[1]}</th>
             <th className="px-1 py-1.5 text-center font-semibold text-slate-500 mono">{FU_LABELS[2]}</th>
             <th className="px-1 py-1.5 text-center font-semibold text-slate-500 mono">{FU_LABELS[3]}</th>
-            <th colSpan={2} />
+            <th />
           </tr>
         </thead>
         <tbody>
@@ -342,31 +447,35 @@ function TableGrid({ items, boot, lookup, openLead, changeStage, onMessage }) {
             const nextFu = l.followUps?.find(f => f.date && f.done === false && f.date !== '-')
             const dueIn = nextFu ? daysFromNow(nextFu.date) : null
             return (
-              <tr key={l.id} className="border-b border-white/5 hover:bg-white/[0.035] cursor-pointer transition-colors" onClick={() => openLead(l.id)}>
-                <td className="px-4">
+              <tr key={l.id} className={`border-b border-white/5 hover:bg-white/[0.035] cursor-pointer transition-colors ${selected?.has(l.id) ? 'bg-rose-500/[0.05]' : ''}`} onClick={() => openLead(l.id)}>
+                <td className={`px-4 ${py}`} onClick={e => e.stopPropagation()}>
+                  <button className="flex items-center justify-center text-slate-400 hover:text-white" onClick={() => toggleSelect(l.id)}>
+                    {selected?.has(l.id) ? <CheckSquare size={15} className="text-rose-400" /> : <Square size={15} />}
+                  </button>
+                </td>
+                <td className={`px-4 ${py}`}>
                   <div className="flex items-center gap-2.5">
-                    <Avatar name={l.fullName} color={owner?.color} size={34} />
+                    <Avatar name={l.fullName} color={owner?.color} size={density === 'compact' ? 24 : 34} />
                     <div className="min-w-0">
                       <div className="text-[13px] font-semibold text-white truncate max-w-[160px]">{l.fullName}</div>
-                      <div className="text-[11px] text-slate-500 truncate max-w-[160px]">{l.email}</div>
+                      {density !== 'compact' && <div className="text-[11px] text-slate-500 truncate max-w-[160px]">{l.email}</div>}
                     </div>
                   </div>
                 </td>
-                <td className="px-4 text-[12.5px] text-slate-300 mono">{l.phone || '—'}</td>
-                <td className="px-4 text-[12.5px] text-slate-400">{l.sourceName}</td>
-                <td className="px-4">
+                <td className={`px-4 ${py}`}>
                   <select className="input !py-1 !text-[11.5px] !w-auto" value={l.stage} onClick={e => e.stopPropagation()} onChange={e => changeStage(l, e.target.value)}>
                     {(boot?.stages || []).map(s => <option key={s}>{s}</option>)}
                   </select>
                 </td>
-                <td className="px-4">
-                  {owner ? (
-                    <span className="flex items-center gap-1.5 text-[12px] text-slate-300"><Avatar name={owner.name} color={owner.color} size={18} /> {owner.name.split(' ')[0]}</span>
-                  ) : <span className="chip !py-0.5 !px-2 text-[10px] bg-amber-400/10 text-amber-300 border border-amber-400/20">Unassigned</span>}
-                </td>
-                <td className="px-4 text-[12px] text-slate-400">{lookup.locById[l.locationId]?.name?.split(',')[0] || '—'}</td>
-                <td className="px-4"><ScorePill score={l.ai.score} /></td>
-                <td className="px-4">
+                {visibleCols.map(c => {
+                  const val = getColumnValue(c, l, lookup)
+                  return (
+                    <td key={c.id} className={`px-4 ${py} text-[12.5px] ${c.type === 'number' || c.type === 'currency' || c.type === 'percent' ? 'mono text-slate-300' : 'text-slate-400'}`}>
+                      {formatColumnValue(val, c)}
+                    </td>
+                  )
+                })}
+                <td className={`px-4 ${py}`}>
                   {nextFu ? (
                     <div>
                       <span className={`text-[12px] mono ${dueIn < 0 ? 'text-rose-400 font-semibold' : 'text-slate-400'}`}>
@@ -405,7 +514,6 @@ function TableGrid({ items, boot, lookup, openLead, changeStage, onMessage }) {
                     <FuCell lead={l} ch={ch} />
                   </td>
                 ))}
-                <td className="px-4 text-[12px] text-slate-500">{fmtDate(l.createdAt)}</td>
                 <td className="px-4 text-right" onClick={e => e.stopPropagation()}>
                   <button className="btn btn-ghost !p-1.5 !text-[11px]" onClick={() => onMessage(l)} title="Send a message via Respond.io">
                     <MessageCircle size={13} className="text-emerald-400" />

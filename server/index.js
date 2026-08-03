@@ -3,7 +3,7 @@ import fs from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import express from 'express'
 import multer from 'multer'
-import { init, load, save, uid, nowIso, reset, markDirty } from './db.js'
+import { init, load, save, uid, nowIso, reset, markDirty, markDeleted, onRemoteChange } from './db.js'
 import { enrichAll, enrichLead } from './ai.js'
 import { assignLead } from './roundRobin.js'
 import * as momence from './momence.js'
@@ -369,6 +369,34 @@ app.patch('/api/leads/:id', (req, res) => {
   if (req.body.associateId) log('assign', `Assigned ${lead.fullName}`, lead.id)
   if (req.body.stage && req.body.stage !== before) log('stage', `${lead.fullName} moved ${before} → ${req.body.stage}`, lead.id)
   res.json(enrichLead(lead, db))
+})
+
+app.patch('/api/leads/bulk', (req, res) => {
+  const ids = Array.isArray(req.body?.ids) ? req.body.ids : []
+  const patch = req.body?.patch || {}
+  let updated = 0
+  for (const id of ids) {
+    const lead = leadById(id)
+    if (!lead) continue
+    const before = lead.stage
+    safePatch(lead, patch)
+    markDirty(lead.id)
+    if (patch.stage && patch.stage !== before) log('stage', `${lead.fullName} moved ${before} → ${patch.stage}`)
+    updated++
+  }
+  log('lead', `Bulk updated ${updated} lead${updated === 1 ? '' : 's'}`)
+  res.json({ ok: true, updated })
+})
+
+app.delete('/api/leads/bulk', (req, res) => {
+  const ids = new Set(Array.isArray(req.body?.ids) ? req.body.ids : [])
+  const before = db.leads.length
+  db.leads = db.leads.filter(l => !ids.has(l.id))
+  const deleted = before - db.leads.length
+  for (const id of ids) markDeleted(id)
+  save()
+  log('lead', `Bulk deleted ${deleted} lead${deleted === 1 ? '' : 's'}`)
+  res.json({ ok: true, deleted })
 })
 
 app.post('/api/leads/:id/followups', (req, res) => {
@@ -742,16 +770,19 @@ app.get('/api/analytics/performance', (req, res) => {
   const row = buckets.map(b => ({ ...b, newLeads: 0, won: 0, revenue: 0, followUps: 0, missed: 0 }))
   const idx = Object.fromEntries(row.map((r, i) => [r.key, i]))
 
+  const validDate = (v) => v && v !== '-' && !isNaN(new Date(v).getTime())
+
   for (const l of db.leads) {
-    if (!l.createdAt) continue
-    const ck = fmt(new Date(l.createdAt))
-    if (idx[ck] !== undefined) row[idx[ck]].newLeads++
-    if (l.status === 'won' && l.convertedAt) {
+    if (validDate(l.createdAt)) {
+      const ck = fmt(new Date(l.createdAt))
+      if (idx[ck] !== undefined) row[idx[ck]].newLeads++
+    }
+    if (l.status === 'won' && validDate(l.convertedAt)) {
       const wk = fmt(new Date(l.convertedAt))
       if (idx[wk] !== undefined) { row[idx[wk]].won++; row[idx[wk]].revenue += l.valueEstimate || 0 }
     }
     for (const f of l.followUps || []) {
-      if (!f.date) continue
+      if (!validDate(f.date)) continue
       const fk = fmt(new Date(f.date))
       if (idx[fk] !== undefined) {
         row[idx[fk]].followUps++
@@ -962,22 +993,46 @@ app.get('/api/analytics/performance/details', (req, res) => {
   const row = buckets.map(b => ({ ...b, newLeads: [], won: [], missed: [] }))
   const idx = Object.fromEntries(row.map((r, i) => [r.key, i]))
 
+  const validDate2 = (v) => v && v !== '-' && !isNaN(new Date(v).getTime())
+
   for (const l of db.leads) {
-    if (!l.createdAt) continue
-    const ck = fmt(new Date(l.createdAt))
-    if (idx[ck] !== undefined && row[idx[ck]].newLeads.length < 200) row[idx[ck]].newLeads.push({ id: l.id, fullName: l.fullName, stage: l.stage, status: l.status })
-    if (l.status === 'won' && l.convertedAt) {
+    if (validDate2(l.createdAt)) {
+      const ck = fmt(new Date(l.createdAt))
+      if (idx[ck] !== undefined && row[idx[ck]].newLeads.length < 200) row[idx[ck]].newLeads.push({ id: l.id, fullName: l.fullName, stage: l.stage, status: l.status })
+    }
+    if (l.status === 'won' && validDate2(l.convertedAt)) {
       const wk = fmt(new Date(l.convertedAt))
       if (idx[wk] !== undefined && row[idx[wk]].won.length < 200) row[idx[wk]].won.push({ id: l.id, fullName: l.fullName, stage: l.stage, value: l.valueEstimate })
     }
     for (const f of l.followUps || []) {
-      if (!f.date || f.done !== false) continue
+      if (!validDate2(f.date) || f.done !== false) continue
       const fk = fmt(new Date(f.date))
       if (idx[fk] !== undefined && row[idx[fk]].missed.length < 200) row[idx[fk]].missed.push({ id: l.id, fullName: l.fullName, date: f.date, comments: f.comments })
     }
   }
 
   res.json({ range, buckets: row })
+})
+
+// ---------- realtime (SSE) ----------
+// Notifies open browser tabs when Supabase reports a change we didn't just
+// make ourselves (two-way sync), so the UI can refetch instead of going stale.
+
+const sseClients = new Set()
+
+app.get('/api/events', (req, res) => {
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    Connection: 'keep-alive'
+  })
+  res.write('retry: 3000\n\n')
+  sseClients.add(res)
+  req.on('close', () => sseClients.delete(res))
+})
+
+onRemoteChange(() => {
+  for (const res of sseClients) res.write(`data: ${JSON.stringify({ type: 'remote-change' })}\n\n`)
 })
 
 // ---------- static hosting ----------

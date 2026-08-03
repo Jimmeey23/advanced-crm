@@ -1,7 +1,7 @@
 import React, { useState } from 'react'
 import {
   LayoutDashboard, KanbanSquare, Users, UploadCloud, Settings, Search,
-  Bell, Plus, Zap, Link2, ShieldCheck, Sun, Moon, BarChart3
+  Bell, Plus, Zap, Link2, ShieldCheck, Sun, Moon, BarChart3, ChevronsLeft, ChevronsRight
 } from 'lucide-react'
 import { AppProvider, Toasts, useApp } from './store.jsx'
 import Dashboard from './pages/Dashboard.jsx'
@@ -27,19 +27,21 @@ const NAV = [
 ]
 
 function Sidebar() {
-  const { view, navigate, boot, alerts } = useApp()
+  const { view, navigate, boot, alerts, sidebarCollapsed, toggleSidebar } = useApp()
   const momenceOn = boot?.settings?.momence?.configured || boot?.settings?.momence?.connected
   const rrEnabled = boot?.settings?.roundRobin?.enabled
   const highCount = alerts.filter(a => a.level === 'high').length
 
   return (
-    <aside className="w-[248px] shrink-0 h-full flex flex-col border-r border-white/6 bg-[#0a0d18]/80 backdrop-blur-xl">
-      <div className="px-5 pt-6 pb-5 flex items-center gap-3">
+    <aside className={`${sidebarCollapsed ? 'w-[72px]' : 'w-[248px]'} shrink-0 h-full flex flex-col border-r border-white/6 bg-[#0a0d18]/80 backdrop-blur-xl transition-[width] duration-200`}>
+      <div className={`px-5 pt-6 pb-5 flex items-center gap-3 ${sidebarCollapsed ? '!px-0 justify-center' : ''}`}>
         <Logo size={40} />
-        <div>
-          <div className="font-display font-bold text-white leading-tight text-[15px]">{boot?.settings?.org?.name || 'Lead Studio'}</div>
-          <div className="text-[11px] text-slate-400 -mt-0.5 tracking-wide">{boot?.settings?.org?.brand || 'PHYSIQUE 57'}</div>
-        </div>
+        {!sidebarCollapsed && (
+          <div className="min-w-0">
+            <div className="font-display font-bold text-white leading-tight text-[15px] truncate">{boot?.settings?.org?.name || 'Lead Studio'}</div>
+            <div className="text-[11px] text-slate-400 -mt-0.5 tracking-wide truncate">{boot?.settings?.org?.brand || 'PHYSIQUE 57'}</div>
+          </div>
+        )}
       </div>
 
       <nav className="flex-1 px-3 space-y-1 overflow-y-auto scrollbar-thin">
@@ -50,15 +52,16 @@ function Sidebar() {
             <button
               key={item.id}
               onClick={() => navigate(item.id)}
-              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-[13px] font-medium transition-all ${
+              title={sidebarCollapsed ? item.label : undefined}
+              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-[13px] font-medium transition-all ${sidebarCollapsed ? 'justify-center !px-0' : ''} ${
                 active
                   ? 'bg-gradient-to-r from-rose-500/15 to-fuchsia-500/10 text-white border border-rose-400/20'
                   : 'text-slate-400 hover:text-slate-100 hover:bg-white/5 border border-transparent'
               }`}
             >
               <Icon size={17} className={active ? 'text-rose-400' : ''} />
-              <span className="flex-1 text-left">{item.label}</span>
-              {item.id === 'dashboard' && highCount > 0 && (
+              {!sidebarCollapsed && <span className="flex-1 text-left">{item.label}</span>}
+              {!sidebarCollapsed && item.id === 'dashboard' && highCount > 0 && (
                 <span className="chip !px-1.5 !py-0.5 text-[10px]" style={{ background: 'rgba(244,63,94,.2)', color: '#fda4af' }}>{highCount}</span>
               )}
             </button>
@@ -66,25 +69,35 @@ function Sidebar() {
         })}
       </nav>
 
-      <div className="px-4 pb-5 space-y-2.5">
-        <div className="card !rounded-xl p-3">
-          <div className="flex items-center gap-2 text-[11px] font-semibold text-slate-300 mb-1.5">
-            <Zap size={13} className={rrEnabled ? 'text-amber-400' : 'text-slate-500'} />
-            Round-robin assignment
+      {!sidebarCollapsed && (
+        <div className="px-4 pb-5 space-y-2.5">
+          <div className="card !rounded-xl p-3">
+            <div className="flex items-center gap-2 text-[11px] font-semibold text-slate-300 mb-1.5">
+              <Zap size={13} className={rrEnabled ? 'text-amber-400' : 'text-slate-500'} />
+              Round-robin assignment
+            </div>
+            <div className="flex items-center gap-2">
+              <span className={`w-1.5 h-1.5 rounded-full ${rrEnabled ? 'bg-emerald-400' : 'bg-slate-500'}`} />
+              <span className="text-[11.5px] text-slate-400">{rrEnabled ? 'Auto-assigning new leads' : 'Manual assignment'}</span>
+            </div>
           </div>
-          <div className="flex items-center gap-2">
-            <span className={`w-1.5 h-1.5 rounded-full ${rrEnabled ? 'bg-emerald-400' : 'bg-slate-500'}`} />
-            <span className="text-[11.5px] text-slate-400">{rrEnabled ? 'Auto-assigning new leads' : 'Manual assignment'}</span>
+          <div className="card !rounded-xl p-3 flex items-center gap-3">
+            {momenceOn ? <Link2 size={15} className="text-emerald-400" /> : <ShieldCheck size={15} className="text-slate-500" />}
+            <div>
+              <div className="text-[11.5px] font-semibold text-slate-300">{momenceOn ? 'Momence connected' : 'Momence not linked'}</div>
+              <div className="text-[10.5px] text-slate-500">Sales & class history sync</div>
+            </div>
           </div>
         </div>
-        <div className="card !rounded-xl p-3 flex items-center gap-3">
-          {momenceOn ? <Link2 size={15} className="text-emerald-400" /> : <ShieldCheck size={15} className="text-slate-500" />}
-          <div>
-            <div className="text-[11.5px] font-semibold text-slate-300">{momenceOn ? 'Momence connected' : 'Momence not linked'}</div>
-            <div className="text-[10.5px] text-slate-500">Sales & class history sync</div>
-          </div>
-        </div>
-      </div>
+      )}
+
+      <button
+        className="mx-3 mb-3 flex items-center justify-center gap-2 py-2 rounded-xl text-slate-400 hover:text-white hover:bg-white/5 border border-white/8 text-[11.5px] font-medium transition-colors"
+        onClick={toggleSidebar}
+        title={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+      >
+        {sidebarCollapsed ? <ChevronsRight size={15} /> : <><ChevronsLeft size={15} /> Collapse</>}
+      </button>
     </aside>
   )
 }

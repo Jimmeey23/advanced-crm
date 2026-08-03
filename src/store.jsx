@@ -46,7 +46,10 @@ export function AppProvider({ children }) {
   const setTheme = useCallback((t) => setThemeState(t === 'light' ? 'light' : 'dark'), [])
   const setAccent = useCallback((a) => setAccentState(['rose', 'violet', 'amber', 'emerald', 'cyan'].includes(a) ? a : 'rose'), [])
 
-  const refreshData = useCallback(() => setDataVersion(v => v + 1), [])
+  const refreshData = useCallback(() => {
+    setDataVersion(v => v + 1)
+    api.get('/api/bootstrap').then(setBoot).catch(() => {})
+  }, [])
   const refreshAlerts = useCallback(async () => {
     try { setAlerts(await api.get('/api/alerts')) } catch (e) { /* ignore */ }
   }, [])
@@ -55,6 +58,15 @@ export function AppProvider({ children }) {
     api.get('/api/bootstrap').then(setBoot).catch(() => {})
     refreshAlerts()
   }, [refreshAlerts])
+
+  // Two-way sync: when Supabase reports a remote change (edited directly in
+  // Supabase, or by another server instance), refetch instead of going stale.
+  useEffect(() => {
+    const es = new EventSource('/api/events')
+    es.onmessage = () => { refreshData(); refreshAlerts() }
+    es.onerror = () => { /* browser auto-reconnects */ }
+    return () => es.close()
+  }, [refreshData, refreshAlerts])
 
   useEffect(() => {
     refreshAlerts()
@@ -69,6 +81,26 @@ export function AppProvider({ children }) {
 
   const openLead = useCallback((leadId) => setDrawerLeadId(leadId), [])
   const closeLead = useCallback(() => setDrawerLeadId(null), [])
+
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
+    try { return localStorage.getItem('p57_sidebar_collapsed') === '1' } catch (e) { return false }
+  })
+  const setSidebarCollapsedPersist = useCallback((v) => {
+    setSidebarCollapsed(v)
+    try { localStorage.setItem('p57_sidebar_collapsed', v ? '1' : '0') } catch (e) { /* ignore */ }
+  }, [])
+  const toggleSidebar = useCallback(() => setSidebarCollapsedPersist(!sidebarCollapsed), [sidebarCollapsed, setSidebarCollapsedPersist])
+
+  // Escape: close the lead drawer (if open) and collapse the sidebar in one press.
+  useEffect(() => {
+    const h = (e) => {
+      if (e.key !== 'Escape') return
+      setDrawerLeadId(id => id ? null : id)
+      setSidebarCollapsedPersist(true)
+    }
+    window.addEventListener('keydown', h)
+    return () => window.removeEventListener('keydown', h)
+  }, [setSidebarCollapsedPersist])
 
   const toast = useCallback((message, kind = 'success') => {
     const id = ++toastId.current
@@ -85,6 +117,7 @@ export function AppProvider({ children }) {
 
   const value = {
     boot, lookup, alerts, toasts, drawerLeadId, view, viewParams, theme, setTheme, accent, setAccent,
+    sidebarCollapsed, toggleSidebar,
     refreshData, refreshAlerts, navigate, openLead, closeLead, toast, dataVersion
   }
 
