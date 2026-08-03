@@ -150,13 +150,13 @@ export default function Import() {
               </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
               {FIELDS.map(f => (
-                <div key={f.key} className="flex items-center gap-2.5">
-                  <span className="w-[150px] shrink-0 text-[12.5px] text-slate-300">
+                <div key={f.key} className="grid grid-cols-[180px_minmax(0,1fr)] items-center gap-3">
+                  <span className="shrink-0 text-[12.5px] text-slate-300 leading-tight">
                     {f.label} {f.required && <span className="text-rose-400">*</span>}
                   </span>
-                  <select className="input !py-1.5" value={mapping[f.key] || ''} onChange={e => setMapField(f.key, e.target.value)}>
+                  <select className="input !py-1.5 min-w-0" value={mapping[f.key] || ''} onChange={e => setMapField(f.key, e.target.value)}>
                     <option value="">— skip —</option>
                     {parsed.columns.map(c => <option key={c} value={c}>{c}</option>)}
                   </select>
@@ -165,17 +165,17 @@ export default function Import() {
             </div>
             <div className="mt-3">
               <div className="text-[12.5px] text-slate-300 mb-2">Follow-up pairs (date + comments)</div>
-              <div className="space-y-2">
+              <div className="space-y-3">
                 {[1, 2, 3, 4].map(idx => {
                   const p = (mapping.followUps || []).find(x => x.index === idx)
                   return (
-                    <div key={idx} className="grid grid-cols-[1fr_1fr] gap-2 items-center">
-                      <span className="text-[11.5px] text-slate-500 w-16">Follow-up {idx}</span>
-                      <select className="input !py-1 !text-[11.5px]" value={p?.date || ''} onChange={e => setFollowUp(idx, 'date', e.target.value)}>
+                    <div key={idx} className="grid grid-cols-[120px_minmax(0,1fr)_minmax(0,1fr)] gap-2 items-center">
+                      <span className="text-[11.5px] text-slate-500">Follow-up {idx}</span>
+                      <select className="input !py-1 !text-[11.5px] min-w-0" value={p?.date || ''} onChange={e => setFollowUp(idx, 'date', e.target.value)}>
                         <option value="">— date —</option>
                         {parsed.columns.map(c => <option key={c} value={c}>{c}</option>)}
                       </select>
-                      <select className="input !py-1 !text-[11.5px]" value={p?.comments || ''} onChange={e => setFollowUp(idx, 'comments', e.target.value)}>
+                      <select className="input !py-1 !text-[11.5px] min-w-0" value={p?.comments || ''} onChange={e => setFollowUp(idx, 'comments', e.target.value)}>
                         <option value="">— comments —</option>
                         {parsed.columns.map(c => <option key={c} value={c}>{c}</option>)}
                       </select>

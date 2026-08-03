@@ -4,7 +4,9 @@ export function parseCsv(text) {
   const result = Papa.parse(text, {
     header: true,
     skipEmptyLines: 'greedy',
-    transformHeader: h => (h || '').replace(/^\uFEFF/, '').trim()
+    delimitersToGuess: [',', '\t', ';', '|'],
+    transformHeader: h => (h || '').replace(/^\uFEFF/, '').trim(),
+    dynamicTyping: false
   })
   return {
     columns: result.meta.fields || [],
