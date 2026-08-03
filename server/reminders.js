@@ -20,6 +20,9 @@ function buildDigest(db) {
   const rows = []
   for (const lead of db.leads) {
     if (lead.status !== 'open') continue
+    // Only leads created directly in the app — CSV-imported (historical)
+    // leads never generate reminder emails.
+    if (lead.createdAtByImport) continue
     const pending = (lead.followUps || [])
       .filter(f => f.date && f.date !== '-' && !f.done)
       .sort((a, b) => a.date.localeCompare(b.date))
@@ -70,10 +73,12 @@ function digestHtml(rows) {
 }
 
 export async function runReminderDigest(db) {
+  // Off by default — both switches must be explicitly turned on in
+  // Settings before any reminder email goes out.
   const rem = db.settings.reminders || {}
-  if (rem.emailReminders === false) return { skipped: true, reason: 'reminders disabled' }
+  if (rem.emailReminders !== true) return { skipped: true, reason: 'reminders disabled' }
   const cfg = db.settings.mailtrap || {}
-  if (cfg.enabled === false) return { skipped: true, reason: 'email disabled' }
+  if (cfg.enabled !== true) return { skipped: true, reason: 'email disabled' }
 
   const todayKey = new Date().toISOString().slice(0, 10)
   if (cfg.lastDigestDate === todayKey) return { skipped: true, reason: 'already sent today' }
@@ -88,7 +93,6 @@ export async function runReminderDigest(db) {
     byOwner.get(r.owner.id).rows.push(r)
   }
 
-  const support = db.settings.business?.supportEmail
   const sent = []
   const sendOne = async (to, ownerName, ownerRows) => {
     try {
@@ -104,10 +108,11 @@ export async function runReminderDigest(db) {
     }
   }
 
+  // Each associate only receives their own assigned leads — no blanket
+  // "everyone's follow-ups" copy to a shared support inbox.
   for (const [, v] of byOwner) {
     if (v.email) await sendOne(v.email, v.name, v.rows)
   }
-  if (support) await sendOne(support, 'Studio team', rows)
 
   cfg.lastDigestDate = todayKey
   save()

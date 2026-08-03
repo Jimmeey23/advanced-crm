@@ -12,7 +12,7 @@ import * as respondio from './respondio.js'
 import * as mailer from './mailer.js'
 import * as supabase from './supabaseStore.js'
 import { runReminderDigest, startReminderScheduler } from './reminders.js'
-import { parseCsv, autoMap, normalizeStage, normalizeStatus } from './csv.js'
+import { parseCsv, autoMap, normalizeStage, normalizeStatus, parseFlexibleDate } from './csv.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -354,13 +354,26 @@ app.get('/api/leads/:id', (req, res) => {
   res.json(enrichLead(lead, db))
 })
 
+// Preserve full timestamp precision for already-valid ISO datetimes (e.g.
+// from the Add Lead form or Momence sync); fall back to the flexible parser
+// — which only resolves to a date, not a time — for anything else (CSV
+// imports, mixed/relative/malformed formats), and to "now" if unparseable.
+function resolveCreatedAt(raw) {
+  if (raw && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(String(raw))) {
+    const d = new Date(raw)
+    if (!isNaN(d.getTime())) return d.toISOString()
+  }
+  const parsed = raw ? parseFlexibleDate(raw) : null
+  return parsed ? new Date(parsed).toISOString() : nowIso()
+}
+
 function createLeadFrom(payload) {
   const lead = {
     id: uid('lead'),
     fullName: (payload.fullName || payload.name || 'Unnamed Lead').trim(),
     phone: payload.phone || '',
     email: payload.email || '-',
-    createdAt: payload.createdAt ? new Date(payload.createdAt).toISOString() : nowIso(),
+    createdAt: resolveCreatedAt(payload.createdAt),
     sourceId: payload.sourceId || null,
     sourceName: payload.sourceName || 'Website Form',
     memberId: payload.memberId || null,
@@ -528,7 +541,7 @@ app.post('/api/leads/import/apply', (req, res) => {
       const followUps = (mapping.followUps || [])
         .filter(p => p.date || p.comments)
         .map((p, idx) => {
-          const date = p.date && row[p.date] && row[p.date] !== '-' ? String(row[p.date]).slice(0, 10) : null
+          const date = p.date ? parseFlexibleDate(row[p.date]) : null
           return {
             id: uid('fu'),
             date,
@@ -544,11 +557,11 @@ app.post('/api/leads/import/apply', (req, res) => {
         fullName: String(fullName).trim(),
         phone: String(get('phone') || '').trim(),
         email: String(get('email') || '-').trim() || '-',
-        createdAt: get('createdAt') || nowIso(),
+        createdAt: parseFlexibleDate(get('createdAt')) || nowIso(),
         sourceName: get('sourceName') || 'Website Form',
         sourceId: get('sourceId'),
         memberId: get('memberId'),
-        convertedAt: get('convertedAt'),
+        convertedAt: parseFlexibleDate(get('convertedAt')),
         stage: stageVal,
         status: get('status'),
         associateName: get('associate'),
@@ -1069,7 +1082,7 @@ app.post('/api/respondio/send', async (req, res) => {
 
 app.get('/api/mailtrap/status', (req, res) => {
   const c = mailer.config(db)
-  res.json({ configured: mailer.isConfigured(db), enabled: c.enabled !== false, host: c.host, fromEmail: c.fromEmail, digestEnabled: db.settings.reminders?.emailReminders !== false })
+  res.json({ configured: mailer.isConfigured(db), enabled: c.enabled === true, host: c.host, fromEmail: c.fromEmail, digestEnabled: db.settings.reminders?.emailReminders === true })
 })
 
 app.post('/api/mailtrap/test', async (req, res) => {

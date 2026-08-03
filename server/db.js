@@ -102,10 +102,25 @@ export async function saveNow() {
   lastLocalWriteAt = Date.now()
 }
 
+// Debounced disk write for remote-originated changes. A bulk edit (CSV
+// import, backfill, bulk action) touching thousands of rows makes Supabase
+// Realtime echo back thousands of individual change events in quick
+// succession — writing the full state to disk on every single one of them
+// serializes ~24k lead objects per event and pegs the event loop for
+// minutes. Coalesce into one write after the burst quiets down instead.
+let remoteWriteTimer = null
+function scheduleRemoteWrite() {
+  clearTimeout(remoteWriteTimer)
+  remoteWriteTimer = setTimeout(() => {
+    try { writeFile() } catch (e) { console.error('[db] remote write failed', e.message) }
+  }, 500)
+}
+
 // Fired when Supabase Realtime reports a change we didn't just make ourselves
 // (e.g. a row edited directly in the Supabase dashboard, or by another server
 // instance). Patches just the affected row/meta fields — a full reload would
 // mean re-fetching every page of a large leads table on every single edit.
+let remoteLeadChangeCount = 0
 function applyRemoteLeadChange({ eventType, id, data }) {
   if (Date.now() - lastLocalWriteAt < 2000 || !state || !id) return
   const idx = state.leads.findIndex(l => l.id === id)
@@ -115,8 +130,9 @@ function applyRemoteLeadChange({ eventType, id, data }) {
     if (idx !== -1) state.leads[idx] = data
     else state.leads.push(data)
   }
-  writeFile()
-  console.log(`[db] applied remote lead change (${eventType} ${id})`)
+  scheduleRemoteWrite()
+  remoteLeadChangeCount++
+  if (remoteLeadChangeCount % 200 === 1) console.log(`[db] applying remote lead changes… (${remoteLeadChangeCount} so far, latest ${eventType} ${id})`)
   if (remoteChangeCb) remoteChangeCb()
 }
 
@@ -124,7 +140,7 @@ const META_FIELDS = ['settings', 'locations', 'associates', 'stages', 'sources',
 function applyRemoteMetaChange({ data }) {
   if (Date.now() - lastLocalWriteAt < 2000 || !state || !data) return
   for (const field of META_FIELDS) if (field in data) state[field] = data[field]
-  writeFile()
+  scheduleRemoteWrite()
   console.log('[db] applied remote settings/meta change')
   if (remoteChangeCb) remoteChangeCb()
 }

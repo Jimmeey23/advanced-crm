@@ -12,7 +12,9 @@ export function config(db) {
     pass: (process.env.USER_MAILTRAP_PASS || '').trim() || db?.settings?.mailtrap?.pass?.trim() || '',
     fromEmail: (process.env.USER_MAILTRAP_FROM_EMAIL || '').trim() || db?.settings?.mailtrap?.fromEmail?.trim() || 'studio@physique57.in',
     fromName: (process.env.USER_MAILTRAP_FROM_NAME || '').trim() || db?.settings?.mailtrap?.fromName?.trim() || 'Physique 57 Lead Studio',
-    enabled: db?.settings?.mailtrap?.enabled !== false
+    // Off by default — outbound email only fires once explicitly enabled in
+    // Settings, never just because credentials happen to be configured.
+    enabled: db?.settings?.mailtrap?.enabled === true
   }
 }
 

@@ -63,7 +63,7 @@ export default function SettingsPage() {
   const [testResp, setTestResp] = useState(false)
   const [testRespResult, setTestRespResult] = useState(null)
 
-  const [mailSet, setMailSet] = useState({ host: '', port: 2525, user: '', pass: '', fromEmail: '', fromName: '' })
+  const [mailSet, setMailSet] = useState({ host: '', port: 2525, user: '', pass: '', fromEmail: '', fromName: '', enabled: false })
   const [mailStatus, setMailStatus] = useState(null)
   const [testMail, setTestMail] = useState(false)
   const [testMailResult, setTestMailResult] = useState(null)
@@ -99,7 +99,7 @@ export default function SettingsPage() {
     api.get('/api/respondio/status').then(s => setRespStatus(s)).catch(() => {})
     api.get('/api/mailtrap/status').then(s => {
       setMailStatus(s)
-      setMailSet(m => ({ ...m, host: s.host || '', fromEmail: s.fromEmail || '' }))
+      setMailSet(m => ({ ...m, host: s.host || '', fromEmail: s.fromEmail || '', enabled: s.enabled === true }))
     }).catch(() => {})
   }, [boot])
 
@@ -403,6 +403,11 @@ export default function SettingsPage() {
               </div>
               <p className="text-[11.5px] text-slate-500 mt-3 flex items-center gap-1.5"><Sparkles size={11} /> Insights and suggested messages are generated from conversation history, stage, source and engagement — no external API key required.</p>
             </Section>
+            <Section icon={<Mail size={15} className="text-cyan-400" />} title="Email reminders" desc="Off by default. When on, sends a daily digest to each associate for their own open, non-imported leads only — never a blanket copy to support, never for CSV-imported leads.">
+              <Toggle on={rem.emailReminders === true} onChange={v => setRem({ ...rem, emailReminders: v })} title="Enable email reminders" desc="Also requires 'Enable outbound email' under Integrations → Mailtrap.">
+                <p className="text-[11.5px] text-slate-500">Covers only leads created directly in the app (Add Lead) — leads brought in via CSV import are always excluded.</p>
+              </Toggle>
+            </Section>
             <Section icon={<Zap size={15} className="text-amber-400" />} title="Round-robin assignment" desc="Automatically assign incoming leads.">
               <Toggle on={rr.enabled} onChange={v => setRr({ ...rr, enabled: v })} title="Round-robin lead assignment" desc="Assign every incoming lead to the next associate in rotation for its studio.">
                 <div className="flex items-center gap-3">
@@ -492,12 +497,15 @@ export default function SettingsPage() {
               )}
             </Section>
 
-            <Section icon={<Mail size={15} className={mailStatus?.configured ? 'text-emerald-400' : 'text-slate-500'} />} title="Mailtrap email reminders" desc="SMTP sending for test emails and the daily follow-up digest sent to associates and the support inbox.">
-              {mailStatus?.configured ? (
-                <span className="chip bg-emerald-500/10 text-emerald-300 border border-emerald-400/20"><ShieldCheck size={11} /> Configured · {mailStatus.host}</span>
-              ) : (
-                <span className="chip bg-white/5 border border-white/10 text-slate-400">Not configured</span>
-              )}
+            <Section icon={<Mail size={15} className={mailStatus?.configured ? 'text-emerald-400' : 'text-slate-500'} />} title="Mailtrap email reminders" desc="SMTP sending for test emails and the daily follow-up digest. Off by default — nothing sends until enabled below, even if credentials are filled in.">
+              <div className="flex flex-wrap items-center gap-2 mb-3">
+                {mailStatus?.configured ? (
+                  <span className="chip bg-emerald-500/10 text-emerald-300 border border-emerald-400/20"><ShieldCheck size={11} /> Configured · {mailStatus.host}</span>
+                ) : (
+                  <span className="chip bg-white/5 border border-white/10 text-slate-400">Not configured</span>
+                )}
+              </div>
+              <ToggleMini label="Enable outbound email" value={mailSet.enabled === true} onChange={v => setMailSet({ ...mailSet, enabled: v })} />
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
                 <div><label className="label">SMTP host</label><input className="input" value={mailSet.host} onChange={e => setMailSet({ ...mailSet, host: e.target.value })} placeholder="live.smtp.mailtrap.io" /></div>
                 <div><label className="label">Port</label><input className="input" type="number" value={mailSet.port} onChange={e => setMailSet({ ...mailSet, port: Number(e.target.value) })} placeholder="2525" /></div>
@@ -521,7 +529,7 @@ export default function SettingsPage() {
               <div className="mt-4 rounded-xl bg-white/[0.03] border border-white/6 px-4 py-3 flex flex-wrap items-center gap-3">
                 <div className="flex-1 min-w-[220px]">
                   <div className="text-[12.5px] font-semibold text-white">Follow-up digest</div>
-                  <div className="text-[11px] text-slate-500">Daily email to each associate and the support inbox listing follow-ups due in the next 3 days and overdue items.</div>
+                  <div className="text-[11px] text-slate-500">Daily email to each associate listing only their own follow-ups due in the next 3 days or overdue — never for CSV-imported leads. Requires "Enable outbound email" and "Enable email reminders" (below) to be on.</div>
                 </div>
                 <button className="btn btn-soft !py-1.5 !text-[12px]" onClick={sendDigest} disabled={mailDigest}>{mailDigest ? <Spinner size={13} /> : <Send size={13} />} Send digest now</button>
               </div>

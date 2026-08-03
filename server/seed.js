@@ -290,10 +290,10 @@ export function seed() {
         skipInactive: true,
         rotation: {}
       },
-      reminders: { followUpEnabled: true, leadAgeEnabled: true, highValueEnabled: true, emailReminders: true },
+      reminders: { followUpEnabled: true, leadAgeEnabled: true, highValueEnabled: true, emailReminders: false },
       gpt: { apiKey: '', model: 'gpt-4o-mini', enabled: true },
       respondio: { apiKey: '', workspaceId: '' },
-      mailtrap: { host: '', port: 2525, user: '', pass: '', fromEmail: 'studio@physique57.in', fromName: 'Physique 57 Lead Studio', enabled: true }
+      mailtrap: { host: '', port: 2525, user: '', pass: '', fromEmail: 'studio@physique57.in', fromName: 'Physique 57 Lead Studio', enabled: false }
     },
     locations,
     associates,
