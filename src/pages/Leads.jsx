@@ -1,0 +1,769 @@
+import React, { useMemo, useState } from 'react'
+import {
+  Search, SlidersHorizontal, ChevronDown, ChevronRight, X, Download,
+  Table as TableIcon, LayoutGrid, Rows3, PieChart, KanbanSquare, CalendarDays,
+  Phone, MessageCircle, Mail, MessageSquareText, Sparkles
+} from 'lucide-react'
+import { useApp } from '../store.jsx'
+import { useFetch } from '../hooks.js'
+import { api, buildQuery } from '../api.js'
+import { Avatar, ScorePill, Empty } from '../ui.jsx'
+import { fmtDate, stageClass, riskClass, daysFromNow, downloadText, money } from '../lib.js'
+import Tip from '../components/Tip.jsx'
+import ComposeModal from '../components/ComposeModal.jsx'
+
+const EMPTY_FILTERS = {
+  locationId: '', stage: '', status: '', associateId: '', sourceName: '', channel: '',
+  classType: '', risk: '', minScore: '', maxScore: '', dateFrom: '', dateTo: '', createdWithinDays: ''
+}
+
+const VIEWS = [
+  { id: 'table', label: 'Table', icon: TableIcon },
+  { id: 'cards', label: 'Cards', icon: LayoutGrid },
+  { id: 'compact', label: 'Compact', icon: Rows3 },
+  { id: 'summary', label: 'Summary', icon: PieChart },
+  { id: 'kanban', label: 'Kanban', icon: KanbanSquare },
+  { id: 'timeline', label: 'Timeline', icon: CalendarDays }
+]
+
+const CHANNELS = {
+  call: { icon: Phone, label: 'Call', color: '#38bdf8' },
+  whatsapp: { icon: MessageCircle, label: 'WhatsApp', color: '#34d399' },
+  email: { icon: Mail, label: 'Email', color: '#a78bfa' },
+  sms: { icon: MessageSquareText, label: 'SMS', color: '#fbbf24' }
+}
+
+const GROUP_OPTIONS = [
+  { id: '', label: 'No grouping' },
+  { id: 'locationId', label: 'Location' },
+  { id: 'stage', label: 'Stage' },
+  { id: 'status', label: 'Status' },
+  { id: 'sourceName', label: 'Source' },
+  { id: 'associateId', label: 'Owner' },
+  { id: 'classType', label: 'Class type' },
+  { id: 'risk', label: 'AI risk' }
+]
+
+export default function Leads({ initialSearch = '' }) {
+  const { boot, lookup, openLead, refreshData, toast, navigate, dataVersion } = useApp()
+  const [search, setSearch] = useState(initialSearch)
+  const [filters, setFilters] = useState(EMPTY_FILTERS)
+
+  React.useEffect(() => { if (initialSearch) { setSearch(initialSearch); setPage(0) } }, [initialSearch])
+  const [panelOpen, setPanelOpen] = useState(false)
+  const [page, setPage] = useState(0)
+  const [sortBy, setSortBy] = useState('createdAt')
+  const [sortDir, setSortDir] = useState('desc')
+  const [view, setView] = useState('table')
+  const [groupBy, setGroupBy] = useState('')
+  const [collapsed, setCollapsed] = useState({})
+  const [composeLead, setComposeLead] = useState(null)
+  const pageSize = 25
+
+  const hasFilters = Object.values(filters).some(Boolean) || search
+  const q = buildQuery({ ...filters, search: search.trim() || undefined, page, pageSize, sortBy, sortDir })
+
+  const { data, loading, reload } = useFetch(() => api.get(`/api/leads?${q}`), [q, dataVersion])
+
+  const setF = (k) => (e) => { setFilters(f => ({ ...f, [k]: e.target.value })); setPage(0) }
+  const clearFilters = () => { setFilters(EMPTY_FILTERS); setSearch(''); setPage(0) }
+
+  const changeStage = async (lead, stage) => {
+    try { await api.patch(`/api/leads/${lead.id}`, { stage }); refreshData() }
+    catch (e) { toast(e.message, 'error') }
+  }
+
+  const exportCsv = () => {
+    const rows = data?.items || []
+    const head = ['Full Name', 'Phone', 'Email', 'Source', 'Stage', 'Status', 'Owner', 'Location', 'Class Type', 'AI Score', 'Created At', 'Remarks', 'Missed Follow-ups']
+    const lines = [head.join(',')]
+    for (const l of rows) {
+      const esc = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`
+      lines.push([l.fullName, l.phone, l.email, l.sourceName, l.stage, l.status, lookup.asnById[l.associateId]?.name || '', lookup.locById[l.locationId]?.name || '', l.classType, l.ai.score, l.createdAt, l.remarks, l.fu?.missedCount || 0].map(esc).join(','))
+    }
+    downloadText(`leads-${new Date().toISOString().slice(0, 10)}.csv`, lines.join('\n'))
+    toast('Exported CSV')
+  }
+
+  const pages = Math.max(1, Math.ceil((data?.total || 0) / pageSize))
+  const items = data?.items || []
+
+  const cadenceDays = boot?.settings?.cadence?.outreachDays || 7
+  const missedLeads = items.filter(l => l.fu?.missedCount > 0)
+  const outreachLeads = items.filter(l => l.status === 'open' && l.fu?.lastOutreachDays > cadenceDays)
+
+  const grouped = useMemo(() => {
+    if (!groupBy) return null
+    const map = new Map()
+    for (const l of items) {
+      const k = groupKey(l, groupBy, lookup)
+      if (!map.has(k)) map.set(k, [])
+      map.get(k).push(l)
+    }
+    return [...map.entries()].map(([key, list]) => ({ key, list }))
+  }, [items, groupBy, lookup])
+
+  const toggleGroup = (key) => setCollapsed(c => ({ ...c, [key]: !c[key] }))
+
+  return (
+    <div className="p-6 space-y-4">
+      {/* AI intelligence banner */}
+      {(missedLeads.length > 0 || outreachLeads.length > 0) && (
+        <div className="card p-4 flex flex-wrap items-center gap-3 border-amber-400/20" style={{ background: 'linear-gradient(135deg, rgba(245,158,11,0.08), rgba(244,63,94,0.05))' }}>
+          <span className="w-9 h-9 rounded-xl bg-amber-400/15 border border-amber-400/25 flex items-center justify-center shrink-0"><Sparkles size={16} className="text-amber-400" /></span>
+          <div className="flex-1 min-w-[220px]">
+            <div className="font-display font-semibold text-white text-[13px]">AI missed follow-up & outreach detection</div>
+            <div className="text-[12px] text-slate-400 mt-0.5">
+              {missedLeads.length > 0 && <span className="text-amber-300 font-medium">{missedLeads.length} leads have missed follow-ups · </span>}
+              {outreachLeads.length > 0 && <span className="text-rose-300 font-medium">{outreachLeads.length} leads need outreach (idle &gt; {cadenceDays}d) · </span>}
+              hover the Call / WhatsApp / Email / SMS indicators for AI-suggested messages.
+            </div>
+          </div>
+          <button className="btn btn-ghost !py-1.5 !text-[12px]" onClick={() => setView('table')}>View in table</button>
+        </div>
+      )}
+
+      {/* toolbar */}
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="relative w-[240px]">
+          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
+          <input className="input !pl-9" placeholder="Search name, phone, email…" value={search} onChange={e => { setSearch(e.target.value); setPage(0) }} />
+        </div>
+        <button className={`btn ${panelOpen ? 'btn-soft' : 'btn-ghost'} !py-2`} onClick={() => setPanelOpen(o => !o)}>
+          <SlidersHorizontal size={14} /> Filters {hasFilters && <span className="chip !px-1.5 !py-0.5 !text-[10px] bg-rose-500/20 text-rose-300">!</span>}
+        </button>
+        {hasFilters && <button className="btn btn-ghost !py-2" onClick={clearFilters}><X size={14} /> Clear</button>}
+        <select className="input !w-auto !py-1.5" value={groupBy} onChange={e => { setGroupBy(e.target.value); setCollapsed({}) }}>
+          {GROUP_OPTIONS.map(g => <option key={g.id} value={g.id}>{g.id ? `Group by: ${g.label}` : 'No grouping'}</option>)}
+        </select>
+        <div className="ml-auto flex items-center gap-2">
+          <select className="input !w-auto !py-1.5" value={sortBy} onChange={e => { setSortBy(e.target.value); setPage(0) }}>
+            <option value="createdAt">Sort: Created</option>
+            <option value="fullName">Sort: Name</option>
+            <option value="stage">Sort: Stage</option>
+            <option value="ai.score">Sort: Score</option>
+          </select>
+          <button className="btn btn-ghost !py-2" onClick={() => setSortDir(d => d === 'asc' ? 'desc' : 'asc')}>
+            <ChevronDown size={14} className={`transition-transform ${sortDir === 'asc' ? 'rotate-180' : ''}`} />
+          </button>
+          <button className="btn btn-ghost !py-2" onClick={exportCsv}><Download size={14} /> Export</button>
+          <div className="flex rounded-xl overflow-hidden border border-white/10">
+            {VIEWS.map(v => {
+              const Icon = v.icon
+              return (
+                <button
+                  key={v.id}
+                  className={`px-2.5 py-2 ${view === v.id ? 'text-white bg-rose-500/25' : 'text-slate-400 hover:text-white bg-white/5'} border-l border-white/10 first:border-l-0 transition-colors`}
+                  onClick={() => setView(v.id)}
+                  title={v.label}
+                >
+                  <Icon size={14} />
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      </div>
+
+      {/* filter panel */}
+      {panelOpen && (
+        <div className="card p-4 grid grid-cols-2 md:grid-cols-4 xl:grid-cols-6 gap-3" style={{ animation: 'fadeIn .15s ease' }}>
+          <Filter label="Location" value={filters.locationId} onChange={setF('locationId')}>
+            <option value="">All locations</option>
+            {(boot?.locations || []).map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
+          </Filter>
+          <Filter label="Stage" value={filters.stage} onChange={setF('stage')}>
+            <option value="">All stages</option>
+            {(boot?.stages || []).map(s => <option key={s}>{s}</option>)}
+          </Filter>
+          <Filter label="Status" value={filters.status} onChange={setF('status')}>
+            <option value="">All statuses</option>
+            <option value="open">Open</option><option value="won">Won</option><option value="lost">Lost</option>
+          </Filter>
+          <Filter label="Associate" value={filters.associateId} onChange={setF('associateId')}>
+            <option value="">All associates</option>
+            {(boot?.associates || []).map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+          </Filter>
+          <Filter label="Source" value={filters.sourceName} onChange={setF('sourceName')}>
+            <option value="">All sources</option>
+            {(boot?.sources || []).map(s => <option key={s}>{s}</option>)}
+          </Filter>
+          <Filter label="Channel" value={filters.channel} onChange={setF('channel')}>
+            <option value="">All channels</option>
+            {(boot?.channels || []).map(c => <option key={c}>{c}</option>)}
+          </Filter>
+          <Filter label="Class type" value={filters.classType} onChange={setF('classType')}>
+            <option value="">All classes</option>
+            {(boot?.classTypes || []).map(c => <option key={c}>{c}</option>)}
+          </Filter>
+          <Filter label="AI risk" value={filters.risk} onChange={setF('risk')}>
+            <option value="">All</option>
+            <option value="hot">Hot</option><option value="warm">Warm</option><option value="cold">Cold</option>
+          </Filter>
+          <div>
+            <label className="text-[10.5px] uppercase tracking-wider text-slate-500 font-semibold mb-1 block">Min score</label>
+            <input className="input !py-1.5" type="number" min={0} max={100} placeholder="e.g. 70" value={filters.minScore} onChange={setF('minScore')} />
+          </div>
+          <div>
+            <label className="text-[10.5px] uppercase tracking-wider text-slate-500 font-semibold mb-1 block">Created in last</label>
+            <select className="input !py-1.5" value={filters.createdWithinDays} onChange={setF('createdWithinDays')}>
+              <option value="">Any time</option>
+              <option value="7">7 days</option><option value="30">30 days</option><option value="90">90 days</option>
+            </select>
+          </div>
+          <div>
+            <label className="text-[10.5px] uppercase tracking-wider text-slate-500 font-semibold mb-1 block">Created from</label>
+            <input className="input !py-1.5" type="date" value={filters.dateFrom} onChange={setF('dateFrom')} />
+          </div>
+          <div>
+            <label className="text-[10.5px] uppercase tracking-wider text-slate-500 font-semibold mb-1 block">Created to</label>
+            <input className="input !py-1.5" type="date" value={filters.dateTo} onChange={setF('dateTo')} />
+          </div>
+        </div>
+      )}
+
+      {view === 'summary' && <SummaryView items={items} boot={boot} lookup={lookup} />}
+      {view === 'timeline' && <TimelineView items={items} lookup={lookup} openLead={openLead} />}
+      {view === 'kanban' && <KanbanView items={items} boot={boot} lookup={lookup} openLead={openLead} changeStage={changeStage} />}
+
+      {view !== 'summary' && view !== 'timeline' && view !== 'kanban' && (
+        <div className="card overflow-hidden">
+          {view === 'table' && (
+            <TableView
+              items={items} boot={boot} lookup={lookup} openLead={openLead}
+              changeStage={changeStage} grouped={grouped} collapsed={collapsed} toggleGroup={toggleGroup}
+              onMessage={setComposeLead}
+            />
+          )}
+          {view === 'cards' && <CardsView items={items} lookup={lookup} openLead={openLead} grouped={grouped} collapsed={collapsed} toggleGroup={toggleGroup} boot={boot} onMessage={setComposeLead} />}
+          {view === 'compact' && <CompactView items={items} lookup={lookup} openLead={openLead} boot={boot} onMessage={setComposeLead} />}
+          {!loading && !items.length && <Empty icon={<Search size={20} />} title="No leads match your filters" subtitle="Try adjusting the filters, or import a CSV of leads." />}
+        </div>
+      )}
+
+      {/* pagination */}
+      <div className="flex items-center justify-between text-[12.5px] text-slate-400">
+        <span>Showing {items.length} of {data?.total || 0} leads</span>
+        <div className="flex items-center gap-2">
+          <button className="btn btn-ghost !py-1.5 !px-3" disabled={page === 0} onClick={() => setPage(p => Math.max(0, p - 1))}>Prev</button>
+          <span className="mono">{page + 1} / {pages}</span>
+          <button className="btn btn-ghost !py-1.5 !px-3" disabled={page >= pages - 1} onClick={() => setPage(p => Math.min(pages - 1, p + 1))}>Next</button>
+        </div>
+      </div>
+
+      <ComposeModal open={!!composeLead} onClose={() => setComposeLead(null)} lead={composeLead} />
+    </div>
+  )
+}
+
+function groupKey(l, by, lookup) {
+  switch (by) {
+    case 'locationId': return lookup.locById[l.locationId]?.name || 'Unassigned'
+    case 'stage': return l.stage || 'Unknown'
+    case 'status': return (l.status || 'open').toUpperCase()
+    case 'sourceName': return l.sourceName || 'Unknown'
+    case 'associateId': return lookup.asnById[l.associateId]?.name || 'Unassigned'
+    case 'classType': return l.classType || 'None'
+    case 'risk': return l.ai?.risk || 'cold'
+    default: return ''
+  }
+}
+
+function GroupSummary({ list, lookup }) {
+  const won = list.filter(l => l.status === 'won').length
+  const totalValue = list.reduce((s, l) => s + (l.valueEstimate || 0), 0)
+  const avgScore = list.length ? Math.round(list.reduce((s, l) => s + (l.ai?.score || 0), 0) / list.length) : 0
+  return (
+    <span className="flex items-center gap-2.5 text-[11.5px] text-slate-400">
+      <span className="chip bg-white/5 border border-white/10 text-slate-300 !px-2 !py-0.5">{list.length} leads</span>
+      <span className="text-emerald-400 font-semibold">{won} won</span>
+      <span className="mono">{money(totalValue)}</span>
+      <span className="flex items-center gap-1"><Sparkles size={11} className="text-fuchsia-400" /> {avgScore} avg</span>
+    </span>
+  )
+}
+
+function TableView({ items, boot, lookup, openLead, changeStage, grouped, collapsed, toggleGroup, onMessage }) {
+  if (grouped) {
+    return (
+      <div className="divide-y divide-white/5">
+        {grouped.map(g => {
+          const isOpen = !collapsed[g.key]
+          return (
+            <div key={g.key}>
+              <button className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-white/[0.03] transition-colors text-left" onClick={() => toggleGroup(g.key)}>
+                <ChevronRight size={14} className={`text-slate-500 transition-transform ${isOpen ? 'rotate-90' : ''}`} />
+                <span className="font-display text-[13.5px] font-semibold text-white">{g.key}</span>
+                <GroupSummary list={g.list} lookup={lookup} />
+              </button>
+              {isOpen && <TableGrid items={g.list} boot={boot} lookup={lookup} openLead={openLead} changeStage={changeStage} onMessage={onMessage} />}
+            </div>
+          )
+        })}
+      </div>
+    )
+  }
+  return <TableGrid items={items} boot={boot} lookup={lookup} openLead={openLead} changeStage={changeStage} onMessage={onMessage} />
+}
+
+const FU_LABELS = ['1', '2', '3', '4']
+
+function TableGrid({ items, boot, lookup, openLead, changeStage, onMessage }) {
+  const cadenceDays = boot?.settings?.cadence?.outreachDays || 7
+  return (
+    <div className="overflow-x-auto scrollbar-thin">
+      <table className="data-table">
+        <thead>
+          <tr className="text-[10.5px] uppercase tracking-wider text-slate-500 border-b border-white/8">
+            <th className="px-4 py-3 font-semibold">Lead</th>
+            <th className="px-4 py-3 font-semibold">Phone</th>
+            <th className="px-4 py-3 font-semibold">Source</th>
+            <th className="px-4 py-3 font-semibold">Stage</th>
+            <th className="px-4 py-3 font-semibold">Owner</th>
+            <th className="px-4 py-3 font-semibold">Location</th>
+            <th className="px-4 py-3 font-semibold">Score</th>
+            <th className="px-4 py-3 font-semibold">Next</th>
+            <th className="px-4 py-3 font-semibold text-center" colSpan={4}>Follow-ups</th>
+            <th className="px-4 py-3 font-semibold">Created</th>
+            <th className="px-4 py-3 font-semibold text-right">Message</th>
+          </tr>
+          <tr className="text-[9.5px] uppercase tracking-wider text-slate-600 border-b border-white/5">
+            <th colSpan={8} />
+            <th className="px-1 py-1.5 text-center font-semibold text-slate-500 mono">{FU_LABELS[0]}</th>
+            <th className="px-1 py-1.5 text-center font-semibold text-slate-500 mono">{FU_LABELS[1]}</th>
+            <th className="px-1 py-1.5 text-center font-semibold text-slate-500 mono">{FU_LABELS[2]}</th>
+            <th className="px-1 py-1.5 text-center font-semibold text-slate-500 mono">{FU_LABELS[3]}</th>
+            <th colSpan={2} />
+          </tr>
+        </thead>
+        <tbody>
+          {items.map(l => {
+            const owner = lookup.asnById[l.associateId]
+            const nextFu = l.followUps?.find(f => f.date && f.done === false && f.date !== '-')
+            const dueIn = nextFu ? daysFromNow(nextFu.date) : null
+            return (
+              <tr key={l.id} className="border-b border-white/5 hover:bg-white/[0.035] cursor-pointer transition-colors" onClick={() => openLead(l.id)}>
+                <td className="px-4">
+                  <div className="flex items-center gap-2.5">
+                    <Avatar name={l.fullName} color={owner?.color} size={34} />
+                    <div className="min-w-0">
+                      <div className="text-[13px] font-semibold text-white truncate max-w-[160px]">{l.fullName}</div>
+                      <div className="text-[11px] text-slate-500 truncate max-w-[160px]">{l.email}</div>
+                    </div>
+                  </div>
+                </td>
+                <td className="px-4 text-[12.5px] text-slate-300 mono">{l.phone || '—'}</td>
+                <td className="px-4 text-[12.5px] text-slate-400">{l.sourceName}</td>
+                <td className="px-4">
+                  <select className="input !py-1 !text-[11.5px] !w-auto" value={l.stage} onClick={e => e.stopPropagation()} onChange={e => changeStage(l, e.target.value)}>
+                    {(boot?.stages || []).map(s => <option key={s}>{s}</option>)}
+                  </select>
+                </td>
+                <td className="px-4">
+                  {owner ? (
+                    <span className="flex items-center gap-1.5 text-[12px] text-slate-300"><Avatar name={owner.name} color={owner.color} size={18} /> {owner.name.split(' ')[0]}</span>
+                  ) : <span className="chip !py-0.5 !px-2 text-[10px] bg-amber-400/10 text-amber-300 border border-amber-400/20">Unassigned</span>}
+                </td>
+                <td className="px-4 text-[12px] text-slate-400">{lookup.locById[l.locationId]?.name?.split(',')[0] || '—'}</td>
+                <td className="px-4"><ScorePill score={l.ai.score} /></td>
+                <td className="px-4">
+                  {nextFu ? (
+                    <div>
+                      <span className={`text-[12px] mono ${dueIn < 0 ? 'text-rose-400 font-semibold' : 'text-slate-400'}`}>
+                        {fmtDate(nextFu.date)}{dueIn < 0 ? ` (${-dueIn}d)` : ''}
+                      </span>
+                      {(l.fu?.missedCount > 0 || (l.status === 'open' && l.fu?.lastOutreachDays > cadenceDays)) && (
+                        <div className="mt-1 flex flex-wrap gap-1">
+                          {l.fu?.missedCount > 0 && (
+                            <span className="chip !px-1.5 !py-0.5 text-[9px] bg-rose-500/20 text-rose-300" title="Cadence deviation — follow-up tasks missed">
+                              {l.fu.missedCount} missed
+                            </span>
+                          )}
+                          {l.status === 'open' && l.fu?.lastOutreachDays > cadenceDays && (
+                            <span className="chip !px-1.5 !py-0.5 text-[9px] bg-amber-500/15 text-amber-300 border border-amber-400/20" title={`No outreach in ${l.fu.lastOutreachDays}d (cadence ${cadenceDays}d)`}>
+                              idle {l.fu.lastOutreachDays}d
+                            </span>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div>
+                      <span className="text-[12px] text-slate-600">—</span>
+                      {l.status === 'open' && l.fu?.lastOutreachDays > cadenceDays && (
+                        <div className="mt-1">
+                          <span className="chip !px-1.5 !py-0.5 text-[9px] bg-amber-500/15 text-amber-300 border border-amber-400/20" title={`No outreach in ${l.fu.lastOutreachDays}d (cadence ${cadenceDays}d)`}>
+                            idle {l.fu.lastOutreachDays}d
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </td>
+                {['call', 'whatsapp', 'email', 'sms'].map(ch => (
+                  <td key={ch} className="px-1 text-center">
+                    <FuCell lead={l} ch={ch} />
+                  </td>
+                ))}
+                <td className="px-4 text-[12px] text-slate-500">{fmtDate(l.createdAt)}</td>
+                <td className="px-4 text-right" onClick={e => e.stopPropagation()}>
+                  <button className="btn btn-ghost !p-1.5 !text-[11px]" onClick={() => onMessage(l)} title="Send a message via Respond.io">
+                    <MessageCircle size={13} className="text-emerald-400" />
+                  </button>
+                </td>
+              </tr>
+            )
+          })}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+function FuCell({ lead, ch }) {
+  const o = lead.fu?.outreach?.[ch]
+  const filled = !!o?.filled
+  const missed = filled && o?.pending
+  const today = new Date().toISOString().slice(0, 10)
+  const isMissed = missed && missed < today
+  const suggestion = lead.ai?.followupSuggestions?.find(s => s.channel === ch)?.text
+  const Icon = CHANNELS[ch].icon
+  const color = CHANNELS[ch].color
+  return (
+    <Tip content={<FuTip lead={lead} ch={ch} o={o} suggestion={suggestion} isMissed={isMissed} />}>
+      <span
+        className={`inline-flex w-6 h-6 rounded-lg items-center justify-center border transition-colors ${filled ? 'border-emerald-400/50 bg-emerald-400/15' : 'border-white/8 bg-white/[0.03]'}`}
+        title={filled ? `Last ${CHANNELS[ch].label}: ${o.date}` : `No ${CHANNELS[ch].label} logged`}
+      >
+        {filled
+          ? <Icon size={12} style={{ color: isMissed ? '#fb7185' : '#34d399' }} />
+          : <span className="text-slate-600">—</span>}
+      </span>
+    </Tip>
+  )
+}
+
+function FuTip({ lead, ch, o, suggestion, isMissed }) {
+  const meta = CHANNELS[ch]
+  return (
+    <div className="space-y-1.5 min-w-[220px]">
+      <div className="flex items-center gap-2">
+        <span className="w-6 h-6 rounded-lg flex items-center justify-center" style={{ background: `${meta.color}1e`, color: meta.color }}>
+          <meta.icon size={12} />
+        </span>
+        <span className="text-[12px] font-bold text-white">{meta.label}</span>
+        {isMissed && <span className="chip !px-1.5 !py-0.5 text-[9px] bg-rose-500/20 text-rose-300">missed</span>}
+        {o?.filled && !isMissed && <span className="chip !px-1.5 !py-0.5 text-[9px] bg-emerald-500/15 text-emerald-300">done</span>}
+        {o?.date && <span className="ml-auto text-[11px] text-slate-500 mono">{fmtDate(o.date)}</span>}
+      </div>
+      <div className="text-[11.5px] text-slate-400 leading-relaxed">{o?.comments || `No ${meta.label} follow-up logged yet.`}</div>
+      {suggestion && (
+        <div className="rounded-lg bg-fuchsia-500/10 border border-fuchsia-400/20 px-2.5 py-2">
+          <div className="text-[9.5px] uppercase tracking-wider text-fuchsia-300 font-bold mb-0.5 flex items-center gap-1"><Sparkles size={10} /> AI suggested message</div>
+          <div className="text-[11.5px] text-slate-300 leading-relaxed">“{suggestion}”</div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function CardsView({ items, lookup, openLead, grouped, collapsed, toggleGroup, boot, onMessage }) {
+  const inner = (list) => (
+    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-3 p-4">
+      {list.map(l => {
+        const owner = lookup.asnById[l.associateId]
+        const nextFu = l.followUps?.find(f => f.date && f.done === false && f.date !== '-')
+        return (
+          <button key={l.id} className="text-left card card-hover !rounded-xl p-3.5" onClick={() => openLead(l.id)}>
+            <div className="flex items-center gap-2.5 mb-2">
+              <Avatar name={l.fullName} color={owner?.color} size={34} />
+              <div className="flex-1 min-w-0">
+                <div className="text-[13px] font-semibold text-white truncate">{l.fullName}</div>
+                <div className="text-[11px] text-slate-500 truncate">{lookup.locById[l.locationId]?.name?.split(',')[0] || '—'}</div>
+              </div>
+              <ScorePill score={l.ai.score} />
+            </div>
+            <div className="flex flex-wrap items-center gap-1.5 mb-2.5">
+              <span className={`chip !py-0.5 !px-2 text-[10px] ${riskClass(l.ai.risk)}`}>{l.ai.risk}</span>
+              <span className="chip bg-white/5 border border-white/10 text-slate-400 !py-0.5 !px-2 text-[10px]">{l.stage}</span>
+              <span className="chip bg-white/5 border border-white/10 text-slate-400 !py-0.5 !px-2 text-[10px]">{l.sourceName}</span>
+            </div>
+            <div className="text-[11.5px] text-slate-400 truncate mb-2.5">{l.ai?.nextAction?.text}</div>
+            <div className="flex items-center gap-2 border-t border-white/6 pt-2">
+              <span className="text-[11px] text-slate-500 truncate flex-1">{owner ? owner.name : 'Unassigned'}</span>
+              {['call', 'whatsapp', 'email', 'sms'].map(ch => {
+                const filled = !!l.fu?.outreach?.[ch]?.filled
+                const Icon = CHANNELS[ch].icon
+                return (
+                  <span key={ch} className={`inline-flex w-5 h-5 rounded-md items-center justify-center border ${filled ? 'border-emerald-400/50 bg-emerald-400/15 text-emerald-400' : 'border-white/8 bg-white/[0.03] text-slate-600'}`} title={`${CHANNELS[ch].label}: ${filled ? 'done' : 'not logged'}`}>
+                    <Icon size={10} />
+                  </span>
+                )
+              })}
+              {nextFu && <span className="text-[11px] mono text-slate-500">{fmtDate(nextFu.date)}</span>}
+              <span role="button" tabIndex={0} className="inline-flex w-6 h-6 rounded-md items-center justify-center border border-emerald-400/40 bg-emerald-400/10 text-emerald-400 hover:bg-emerald-400/20" title="Message via Respond.io" onClick={e => { e.stopPropagation(); onMessage(l) }}>
+                <MessageCircle size={11} />
+              </span>
+            </div>
+          </button>
+        )
+      })}
+    </div>
+  )
+
+  if (grouped) {
+    return (
+      <div className="divide-y divide-white/5">
+        {grouped.map(g => {
+          const isOpen = !collapsed[g.key]
+          return (
+            <div key={g.key}>
+              <button className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-white/[0.03] text-left" onClick={() => toggleGroup(g.key)}>
+                <ChevronRight size={14} className={`text-slate-500 transition-transform ${isOpen ? 'rotate-90' : ''}`} />
+                <span className="font-display text-[13.5px] font-semibold text-white">{g.key}</span>
+                <GroupSummary list={g.list} lookup={lookup} />
+              </button>
+              {isOpen && inner(g.list)}
+            </div>
+          )
+        })}
+      </div>
+    )
+  }
+  return inner(items)
+}
+
+function CompactView({ items, lookup, openLead, boot, onMessage }) {
+  return (
+    <div className="divide-y divide-white/5">
+      {items.map(l => {
+        const owner = lookup.asnById[l.associateId]
+        const nextFu = l.followUps?.find(f => f.date && f.done === false && f.date !== '-')
+        return (
+          <button key={l.id} className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-white/[0.03] text-left transition-colors" onClick={() => openLead(l.id)}>
+            <Avatar name={l.fullName} color={owner?.color} size={28} />
+            <div className="min-w-0 w-[200px]">
+              <div className="text-[12.5px] font-semibold text-white truncate">{l.fullName}</div>
+              <div className="text-[10.5px] text-slate-500 truncate">{l.phone}</div>
+            </div>
+            <span className={`chip !py-0.5 !px-2 text-[10px] hidden sm:inline-flex ${riskClass(l.ai.risk)}`}>{l.ai.risk}</span>
+            <span className="text-[12px] text-slate-400 w-[130px] truncate hidden md:block">{l.stage}</span>
+            <span className="text-[12px] text-slate-400 w-[120px] truncate hidden lg:block">{owner?.name || 'Unassigned'}</span>
+            <div className="flex items-center gap-1.5 ml-auto">
+              {['call', 'whatsapp', 'email', 'sms'].map(ch => {
+                const filled = !!l.fu?.outreach?.[ch]?.filled
+                const Icon = CHANNELS[ch].icon
+                return (
+                  <span key={ch} className={`inline-flex w-5 h-5 rounded-md items-center justify-center border ${filled ? 'border-emerald-400/50 bg-emerald-400/15 text-emerald-400' : 'border-white/8 bg-white/[0.03] text-slate-600'}`}>
+                    <Icon size={10} />
+                  </span>
+                )
+              })}
+              {nextFu && <span className={`text-[11px] mono ml-1 ${daysFromNow(nextFu.date) < 0 ? 'text-rose-400' : 'text-slate-500'}`}>{fmtDate(nextFu.date)}</span>}
+              <ScorePill score={l.ai.score} />
+              <span role="button" tabIndex={0} className="inline-flex w-6 h-6 rounded-md items-center justify-center border border-emerald-400/40 bg-emerald-400/10 text-emerald-400 hover:bg-emerald-400/20" title="Message via Respond.io" onClick={e => { e.stopPropagation(); onMessage(l) }}>
+                <MessageCircle size={11} />
+              </span>
+            </div>
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+function SummaryView({ items, boot, lookup }) {
+  const byStage = {}
+  const bySource = {}
+  const byOwner = {}
+  let open = 0, won = 0, lost = 0, hot = 0, estValue = 0, scores = []
+  for (const l of items) {
+    byStage[l.stage] = (byStage[l.stage] || 0) + 1
+    bySource[l.sourceName] = (bySource[l.sourceName] || 0) + 1
+    const oname = lookup.asnById[l.associateId]?.name || 'Unassigned'
+    byOwner[oname] = (byOwner[oname] || 0) + 1
+    if (l.status === 'open') { open++; if (l.ai?.risk === 'hot') hot++ }
+    if (l.status === 'won') won++
+    if (l.status === 'lost') lost++
+    estValue += l.valueEstimate || 0
+    scores.push(l.ai?.score || 0)
+  }
+  const avgScore = scores.length ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length) : 0
+  const maxStage = Math.max(1, ...Object.values(byStage))
+  const stageCols = { 'New Lead': '#3b82f6', Contacted: '#6366f1', 'Trial Booked': '#06b6d4', 'Trial Completed': '#10b981', 'Follow Up': '#f59e0b', 'Proposal Sent': '#a855f7', Negotiation: '#ec4899', Won: '#34d399', Lost: '#94a3b8' }
+
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+      <div className="card p-4">
+        <h3 className="font-display font-semibold text-white text-[13px] mb-3">Pipeline value</h3>
+        <div className="grid grid-cols-2 gap-2 mb-4">
+          <Mini label="Open leads" value={open} color="#06b6d4" />
+          <Mini label="Hot right now" value={hot} color="#fb7185" />
+          <Mini label="Won" value={won} color="#34d399" />
+          <Mini label="Lost" value={lost} color="#94a3b8" />
+        </div>
+        <div className="flex items-center justify-between text-[12px]">
+          <span className="text-slate-400">Est. pipeline</span>
+          <span className="font-display font-bold text-white mono">{money(estValue)}</span>
+        </div>
+        <div className="flex items-center justify-between text-[12px] mt-1.5">
+          <span className="text-slate-400">Avg intent score</span>
+          <span className="mono text-fuchsia-300 font-semibold">{avgScore}</span>
+        </div>
+      </div>
+
+      <div className="card p-4">
+        <h3 className="font-display font-semibold text-white text-[13px] mb-3">Stage distribution</h3>
+        <div className="space-y-2">
+          {Object.entries(byStage).map(([stage, count]) => (
+            <div key={stage} className="flex items-center gap-2 text-[12px]">
+              <span className="w-[120px] text-slate-400 truncate">{stage}</span>
+              <div className="flex-1 h-2 rounded-full bg-white/5 overflow-hidden">
+                <div className="h-full rounded-full" style={{ width: `${(count / maxStage) * 100}%`, background: stageCols[stage] || '#94a3b8' }} />
+              </div>
+              <span className="mono text-slate-300 w-6 text-right">{count}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="card p-4">
+        <h3 className="font-display font-semibold text-white text-[13px] mb-3">Source mix</h3>
+        <div className="space-y-2">
+          {Object.entries(bySource).sort((a, b) => b[1] - a[1]).map(([src, count]) => (
+            <div key={src} className="flex items-center gap-2 text-[12px]">
+              <span className="w-[140px] text-slate-400 truncate">{src}</span>
+              <div className="flex-1 h-2 rounded-full bg-white/5 overflow-hidden">
+                <div className="h-full rounded-full bg-violet-400/70" style={{ width: `${(count / Math.max(1, ...Object.values(bySource))) * 100}%` }} />
+              </div>
+              <span className="mono text-slate-300 w-6 text-right">{count}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="card p-4 md:col-span-2 xl:col-span-1">
+        <h3 className="font-display font-semibold text-white text-[13px] mb-3">Owner load</h3>
+        <div className="space-y-2">
+          {Object.entries(byOwner).sort((a, b) => b[1] - a[1]).map(([name, count]) => (
+            <div key={name} className="flex items-center gap-2 text-[12px]">
+              <span className="w-[140px] text-slate-400 truncate">{name}</span>
+              <div className="flex-1 h-2 rounded-full bg-white/5 overflow-hidden">
+                <div className="h-full rounded-full bg-emerald-400/70" style={{ width: `${(count / Math.max(1, ...Object.values(byOwner))) * 100}%` }} />
+              </div>
+              <span className="mono text-slate-300 w-6 text-right">{count}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function Mini({ label, value, color }) {
+  return (
+    <div className="rounded-xl bg-white/[0.03] border border-white/6 px-3 py-2">
+      <div className="font-display text-[19px] font-bold mono" style={{ color }}>{value}</div>
+      <div className="text-[10px] uppercase tracking-wider text-slate-500 mt-0.5">{label}</div>
+    </div>
+  )
+}
+
+function KanbanView({ items, boot, lookup, openLead, changeStage }) {
+  const map = {}
+  for (const s of boot?.stages || []) map[s] = []
+  for (const l of items) (map[l.stage] = map[l.stage] || []).push(l)
+  const cols = (boot?.stages || []).map(s => ({ stage: s, leads: map[s] || [] }))
+  return (
+    <div className="flex gap-3 overflow-x-auto scrollbar-thin pb-2 -mx-1 px-1">
+      {cols.map(col => (
+        <div key={col.stage} className="flex flex-col w-[240px] shrink-0 rounded-2xl bg-white/[0.03] border border-white/6">
+          <div className="px-3 py-2.5 flex items-center gap-2">
+            <span className="font-display text-[12.5px] font-semibold text-slate-200">{col.stage}</span>
+            <span className="ml-auto chip bg-white/6 border border-white/10 text-slate-400 mono !py-0.5 !px-2 text-[11px]">{col.leads.length}</span>
+          </div>
+          <div className="flex-1 px-2 pb-2 space-y-2 max-h-[560px] overflow-y-auto scrollbar-thin">
+            {col.leads.map(l => {
+              const owner = lookup.asnById[l.associateId]
+              return (
+                <div key={l.id} className="card card-hover !rounded-xl p-3 cursor-pointer" onClick={() => openLead(l.id)}>
+                  <div className="flex items-center gap-2 mb-1.5">
+                    <Avatar name={l.fullName} color={owner?.color} size={26} />
+                    <div className="flex-1 min-w-0">
+                      <div className="text-[12.5px] font-semibold text-white truncate">{l.fullName}</div>
+                      <div className="text-[10.5px] text-slate-500 truncate">{owner?.name || 'Unassigned'}</div>
+                    </div>
+                    <ScorePill score={l.ai.score} />
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    {['call', 'whatsapp', 'email', 'sms'].map(ch => {
+                      const filled = !!l.fu?.outreach?.[ch]?.filled
+                      const Icon = CHANNELS[ch].icon
+                      return (
+                        <span key={ch} className={`inline-flex w-4.5 h-4.5 rounded items-center justify-center border ${filled ? 'border-emerald-400/50 bg-emerald-400/15 text-emerald-400' : 'border-white/8 bg-white/[0.03] text-slate-600'}`}>
+                          <Icon size={9} />
+                        </span>
+                      )
+                    })}
+                  </div>
+                </div>
+              )
+            })}
+            {!col.leads.length && <div className="text-[11px] text-slate-600 text-center py-5">No leads</div>}
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function TimelineView({ items, lookup, openLead }) {
+  const groups = useMemo(() => {
+    const map = new Map()
+    for (const l of items) {
+      const key = (l.createdAt || '').slice(0, 7) || 'unknown'
+      if (!map.has(key)) map.set(key, [])
+      map.get(key).push(l)
+    }
+    return [...map.entries()].sort((a, b) => (a[0] < b[0] ? 1 : -1))
+  }, [items])
+
+  return (
+    <div className="space-y-4">
+      {groups.map(([month, list]) => (
+        <div key={month} className="card p-4">
+          <div className="flex items-center gap-3 mb-3">
+            <span className="font-display font-semibold text-white text-[13px]">{new Date(month + '-01').toLocaleString('en-US', { month: 'long', year: 'numeric' })}</span>
+            <span className="chip bg-white/5 border border-white/10 text-slate-400 !px-2 !py-0.5">{list.length} leads</span>
+            <span className="chip bg-emerald-500/10 text-emerald-300 border border-emerald-400/20 !px-2 !py-0.5">{list.filter(l => l.status === 'won').length} won</span>
+          </div>
+          <div className="space-y-1">
+            {list.map(l => {
+              const owner = lookup.asnById[l.associateId]
+              return (
+                <button key={l.id} className="w-full flex items-center gap-3 px-3 py-2 rounded-xl hover:bg-white/[0.04] text-left transition-colors" onClick={() => openLead(l.id)}>
+                  <Avatar name={l.fullName} color={owner?.color} size={26} />
+                  <div className="flex-1 min-w-0">
+                    <div className="text-[12.5px] font-semibold text-white truncate">{l.fullName}</div>
+                    <div className="text-[11px] text-slate-500 truncate">{l.ai?.nextAction?.text}</div>
+                  </div>
+                  <span className={`chip !py-0.5 !px-2 text-[10px] ${stageClass(l.stage)}`}>{l.stage}</span>
+                  <span className="text-[11px] text-slate-500 mono hidden sm:block">{fmtDate(l.createdAt)}</span>
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function Filter({ label, value, onChange, children }) {
+  return (
+    <div>
+      <label className="text-[10.5px] uppercase tracking-wider text-slate-500 font-semibold mb-1 block">{label}</label>
+      <select className="input !py-1.5" value={value} onChange={onChange}>{children}</select>
+    </div>
+  )
+}

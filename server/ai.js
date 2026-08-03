@@ -1,0 +1,286 @@
+// Lightweight rule-based intelligence layer.
+// Generates lead scores, sentiment signals, insights and next-best-action
+// suggestions. Pure heuristics — no external LLM required.
+
+const POSITIVE = [
+  'interested', 'keen', 'love', 'loved', 'confirm', 'confirmed', 'ready', 'enroll',
+  'enrollment', 'excited', 'booked', 'book', 'yes', 'great', 'payment link',
+  'start next month', 'annual plan', 'buddy', 'tour', 'brochure', 'wants to start',
+  'will confirm', 'warm', 'trial class this week'
+]
+const NEGATIVE = [
+  'not interested', 'no response', 'not answering', 'different studio',
+  'budget constraints', "don't want", 'dont want', 'revisit later',
+  'won\'t', 'wont', 'declined', 'decided to go', 'no further', 'lost'
+]
+const NEUTRAL = ['will get back', 'get back', 'let us know', 'next week', 'schedule shared', 'will call', 'keep well', 'not keeping well']
+
+const STAGE_WEIGHT = {
+  'New Lead': 5, 'Contacted': 12, 'Trial Booked': 26, 'Trial Completed': 32,
+  'Follow Up': 16, 'Proposal Sent': 40, 'Negotiation': 52, 'Won': 96, 'Lost': 4
+}
+const SOURCE_WEIGHT = {
+  'Client Referral': 12, 'Walk-in': 10, Instagram: 8, 'Website Form': 7,
+  'Google Ads': 6, 'Marketing Event': 9, Facebook: 5, 'WhatsApp Campaign': 6
+}
+
+function daysBetween(a, b) {
+  return Math.round((new Date(b).getTime() - new Date(a).getTime()) / 86400000)
+}
+
+function textOf(lead) {
+  const parts = [lead.remarks || '']
+  for (const fu of lead.followUps || []) parts.push(fu.comments || '')
+  return parts.join(' \u2E31 ').toLowerCase()
+}
+
+function sentimentOf(lead) {
+  const text = textOf(lead)
+  let pos = 0, neg = 0, neu = 0
+  for (const k of POSITIVE) if (text.includes(k)) pos++
+  for (const k of NEGATIVE) if (text.includes(k)) neg++
+  for (const k of NEUTRAL) if (text.includes(k)) neu++
+  if (pos > neg) return 'positive'
+  if (neg > pos) return 'negative'
+  return neu > 0 ? 'neutral' : 'unknown'
+}
+
+function scoreLead(lead, db) {
+  let score = 35
+  score += STAGE_WEIGHT[lead.stage] || 8
+  score += SOURCE_WEIGHT[lead.sourceName] || 4
+  if (lead.memberId) score += 5
+
+  const fups = lead.followUps || []
+  score += Math.min(fups.length * 3, 12)
+
+  if (fups.length) {
+    const lastDate = fups[fups.length - 1].date
+    const d = daysBetween(lastDate, new Date())
+    if (d <= 3) score += 6
+    else if (d <= 7) score += 4
+    else if (d <= 14) score += 2
+    else if (d > 21) score -= 3
+  }
+
+  const senti = sentimentOf(lead)
+  if (senti === 'positive') score += 8
+  if (senti === 'negative') score -= 6
+
+  if (lead.stage === 'Won') score = Math.max(score, 92)
+  if (lead.stage === 'Lost') score = Math.min(score, 18)
+  return Math.max(0, Math.min(100, Math.round(score)))
+}
+
+function nextBestAction(lead) {
+  const senti = sentimentOf(lead)
+  if (lead.status === 'won') return { label: 'Onboarding', text: 'Welcome the new member, book their first class and ask for referrals.' }
+  if (lead.status === 'lost') return { label: 'Nurture', text: 'Log the reason, add to the reactivation list and revisit in 90 days.' }
+  if (senti === 'negative') return { label: 'Re-engage', text: 'Try a different angle (new schedule, promo) or park in the nurture list.' }
+
+  const byStage = {
+    'New Lead': { label: 'First outreach', text: 'Contact within 24 hours — call first, then follow up on WhatsApp with a studio intro.' },
+    Contacted: { label: 'Qualify interest', text: 'Share trial class slots for their studio and try to lock a date and time.' },
+    'Trial Booked': { label: 'Confirm trial', text: 'Send a reminder and waiver link 24 hours before the trial class.' },
+    'Trial Completed': { label: 'Close after trial', text: 'Ask for feedback, share membership plans and propose a start date.' },
+    'Follow Up': { label: 'Value nudge', text: 'Send a personalised nudge (new schedule, limited offer) and request a call.' },
+    'Proposal Sent': { label: 'Follow up proposal', text: 'Soft-ask on the proposal — address objections and confirm pricing window.' },
+    Negotiation: { label: 'Close the deal', text: 'Prepare a final offer within approval limits and aim to close this week.' }
+  }
+  return byStage[lead.stage] || { label: 'Reach out', text: 'Touch base and advance the conversation toward a trial class.' }
+}
+
+function insightsFor(lead, score) {
+  const out = []
+  const days = lead.createdAt ? daysBetween(lead.createdAt, new Date()) : 0
+  const fups = lead.followUps || []
+
+  if (lead.sourceName === 'Client Referral') out.push('Referred by an existing customer — typically 2x close rate.')
+  else if (lead.sourceName === 'Walk-in') out.push('Walk-in leads convert well — capture intent before they cool off.')
+  else if (lead.sourceName === 'Instagram' || lead.sourceName === 'Facebook') out.push('Social lead — warm up quickly while brand interest is fresh.')
+
+  if (lead.memberId) out.push('Already present in Momence — pull sales & class history to personalise the pitch.')
+
+  if (fups.length) {
+    const last = daysBetween(fups[fups.length - 1].date, new Date())
+    if (last > 14) out.push(`No meaningful contact for ${last} days — risk of going cold.`)
+    else if (last <= 3) out.push('Replied/contacted within the last 3 days — momentum is good.')
+  } else if (days > 21) {
+    out.push(`Assigned ${days} days ago with no follow-up logged yet — needs attention.`)
+  }
+
+  const senti = sentimentOf(lead)
+  if (senti === 'positive') out.push('Follow-up language is positive — strong buying signals.')
+  if (senti === 'negative') out.push('Recent communication signals low interest — consider a fresh approach.')
+
+  if (score >= 70) out.push('High-scoring lead — prioritise in today\u2019s queue.')
+  if (score >= 50 && score < 70) out.push('Moderate intent — a well-timed nudge can move this forward.')
+
+  const trialStages = ['Trial Booked', 'Trial Completed']
+  if (trialStages.includes(lead.stage) && !lead.memberId) out.push('Create the Momence member record now to map future sales history.')
+
+  if (lead.status === 'won') out.push('Won — referrer credit and a Google review ask can generate more referrals.')
+  return out.slice(0, 5)
+}
+
+function bestContactTime(lead) {
+  const senti = sentimentOf(lead)
+  const engaged = (lead.followUps || []).length
+  if (engaged >= 3) return 'Evening (5\u20138pm) — most engaged with this pattern'
+  if (senti === 'positive') return 'Morning (9\u201311am) — high responsiveness signal'
+  return 'Midday (12\u20132pm) — try a WhatsApp message first'
+}
+
+const CHANNELS = ['call', 'whatsapp', 'email', 'sms']
+const CHANNEL_LABEL = { call: 'Call', whatsapp: 'WhatsApp', email: 'Email', sms: 'SMS' }
+
+// Build per-channel outreach summary for the lead.
+function channelOutreach(lead) {
+  const out = {}
+  for (const ch of CHANNELS) {
+    out[ch] = { filled: false, date: null, comments: null, pending: null }
+  }
+  const fups = (lead.followUps || []).filter(f => f.comments && f.comments !== '-')
+  for (const f of fups) {
+    const ch = CHANNELS.includes(f.channel) ? f.channel : null
+    if (!ch) continue
+    const cur = out[ch]
+    if (!cur.date || f.date > cur.date) {
+      cur.filled = true
+      cur.date = f.date
+      cur.comments = f.comments
+      cur.pending = f.done === false ? f.date : null
+    }
+  }
+  return out
+}
+
+function missedFollowUps(lead) {
+  const today = new Date().toISOString().slice(0, 10)
+  if (lead.status !== 'open') return []
+  return (lead.followUps || []).filter(f => f.date && f.date !== '-' && f.done === false && f.date < today)
+}
+
+function lastOutreachDays(lead) {
+  const fups = (lead.followUps || []).filter(f => f.comments && f.comments !== '-')
+  if (!fups.length) return lead.createdAt ? Math.round((Date.now() - new Date(lead.createdAt).getTime()) / 86400000) : 99
+  const last = fups.map(f => f.date).sort().slice(-1)[0]
+  return Math.max(0, Math.round((Date.now() - new Date(last).getTime()) / 86400000))
+}
+
+// AI: generate ready-to-send follow-up message drafts per channel.
+export function suggestFollowups(lead) {
+  const senti = sentimentOf(lead)
+  const first = (lead.fullName || 'there').split(' ')[0]
+  const center = lead.center || 'your studio'
+  const stage = lead.stage || 'New Lead'
+  const missed = missedFollowUps(lead)
+  const lastDays = lastOutreachDays(lead)
+  const out = []
+
+  if (lead.status === 'won') {
+    out.push({ channel: 'whatsapp', label: 'WhatsApp', text: `Hi ${first}! Welcome to Physique 57 🎉 Shall I book your first class at ${center} and set you up with an instructor?` })
+    out.push({ channel: 'email', label: 'Email', text: `Welcome to Physique 57, ${first}! Your membership is active. Reply here to schedule your first session at ${center} and share referrals.` })
+    return out
+  }
+  if (lead.status === 'lost') {
+    out.push({ channel: 'whatsapp', label: 'WhatsApp', text: `Hi ${first}, thanks for your time. If anything changes, we'd love to host you at ${center} — we run specials every few months.` })
+    return out
+  }
+
+  if (missed.length) {
+    out.push({ channel: 'whatsapp', label: 'WhatsApp', text: `Hi ${first}, I missed connecting with you earlier — still keen on a trial at ${center}? I can hold a slot for you this week.` })
+    out.push({ channel: 'call', label: 'Call', text: `Call ${first} — missed follow-up by ${daysBetween(missed[0].date, new Date().toISOString().slice(0, 10))} days. Best time ${bestContactTime(lead)}.` })
+  }
+
+  const byStage = {
+    'New Lead': [
+      { channel: 'call', label: 'Call', text: `Call ${first} — introduce the ${center} studio and lock a trial slot.` },
+      { channel: 'whatsapp', label: 'WhatsApp', text: `Hi ${first}! 👋 Welcome to Physique 57. We'd love to host you for a free trial at ${center} — does this week work?` }
+    ],
+    Contacted: [
+      { channel: 'whatsapp', label: 'WhatsApp', text: `Hi ${first}, as promised here are the trial class slots at ${center}. Which one suits you best? I'll reserve your spot.` },
+      { channel: 'sms', label: 'SMS', text: `Trial slots at ${center}: Tue 10:30a, Thu 7p, Sat 11a. Which works? — Physique 57` }
+    ],
+    'Trial Booked': [
+      { channel: 'whatsapp', label: 'WhatsApp', text: `Reminder ${first}! Your trial class at ${center} is coming up. Here's the waiver link — arrive 10 min early. Can't wait!` },
+      { channel: 'call', label: 'Call', text: `Call ${first} — confirm trial attendance and share waiver link 24h before.` }
+    ],
+    'Trial Completed': [
+      { channel: 'whatsapp', label: 'WhatsApp', text: `Hi ${first}, hope you loved the class! I can share membership plans for ${center} — would you like the monthly or annual options?` },
+      { channel: 'email', label: 'Email', text: `Thanks for trying us out, ${first}! Attached are membership options for ${center}. Happy to answer any questions.` }
+    ],
+    'Follow Up': [
+      { channel: 'whatsapp', label: 'WhatsApp', text: `Hi ${first}, a quick nudge — we have a limited-time offer on memberships at ${center}. Interested in details?` },
+      { channel: 'call', label: 'Call', text: `Call ${first} — value nudge on membership, address any pricing objections.` }
+    ],
+    'Proposal Sent': [
+      { channel: 'email', label: 'Email', text: `Hi ${first}, following up on the proposal shared earlier. Happy to walk you through it or adjust the plan. What works for you?` },
+      { channel: 'call', label: 'Call', text: `Call ${first} — soft-ask on the proposal, confirm pricing window.` }
+    ],
+    Negotiation: [
+      { channel: 'call', label: 'Call', text: `Call ${first} — close on the negotiated offer. Offer is valid till end of week.` },
+      { channel: 'whatsapp', label: 'WhatsApp', text: `Hi ${first}, confirming the final offer from our end. Reply "yes" and I'll start the enrollment!` }
+    ]
+  }
+
+  const suggestions = byStage[stage] || [{ channel: 'whatsapp', label: 'WhatsApp', text: `Hi ${first}, touching base about Physique 57 at ${center} — happy to help with anything!` }]
+  for (const s of suggestions) {
+    if (!out.some(o => o.channel === s.channel && o.text === s.text)) out.push(s)
+  }
+
+  if (lastDays > 7) {
+    out.push({ channel: 'sms', label: 'SMS', text: `Hi ${first} — haven't heard back in a while. Still interested in a free trial at ${center}? Reply STOP to opt out.` })
+  }
+  if (senti === 'positive' && !out.some(o => o.channel === 'email')) {
+    out.push({ channel: 'email', label: 'Email', text: `Great to hear you're keen, ${first}! Here's a quick look at membership options at ${center} — we can start you as soon as this week.` })
+  }
+  return out.slice(0, 3)
+}
+
+export function enrichLead(lead, db) {
+  const score = scoreLead(lead, db)
+  const senti = sentimentOf(lead)
+  const action = nextBestAction(lead)
+  const insights = insightsFor(lead, score)
+  const risk = lead.status === 'open' ? (score >= 70 ? 'hot' : score >= 45 ? 'warm' : 'cold') : lead.status
+  const missed = missedFollowUps(lead)
+  const outreach = channelOutreach(lead)
+  const lastOutreach = lastOutreachDays(lead)
+
+  let summary
+  if (lead.status === 'won') {
+    summary = `${lead.fullName} closed with ${lead.center}. Member record ${lead.memberId ? 'linked (' + lead.memberId + ')' : 'not yet created'}. Valuable source: ${lead.sourceName}.`
+  } else if (lead.status === 'lost') {
+    summary = `Opportunity lost at ${lead.stage} stage. Flagged for future reactivation via ${lead.sourceName}.`
+  } else {
+    summary = `${lead.fullName} is in "${lead.stage}" at ${lead.center}. ` +
+      `Sentiment reads ${senti}. ${insights[0] ? insights[0] : 'A steady follow-up cadence is recommended.'}`
+  }
+
+  return {
+    ...lead,
+    gpt: lead.aiGpt || null,
+    fu: {
+      missedCount: missed.length,
+      missedDates: missed.map(m => m.date),
+      lastOutreachDays: lastOutreach,
+      outreach
+    },
+    ai: {
+      score,
+      risk,
+      sentiment: senti,
+      nextAction: action,
+      insights,
+      bestContactTime: bestContactTime(lead),
+      summary,
+      followupSuggestions: suggestFollowups(lead),
+      generatedAt: new Date().toISOString()
+    }
+  }
+}
+
+export function enrichAll(leads, db) {
+  return leads.map(l => enrichLead(l, db))
+}
