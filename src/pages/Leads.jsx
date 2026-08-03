@@ -74,6 +74,8 @@ export default function Leads({ initialSearch = '' }) {
   const [collapsed, setCollapsed] = useState({})
   const [composeLead, setComposeLead] = useState(null)
   const [selected, setSelected] = useState(() => new Set())
+  const [selectAllMatching, setSelectAllMatching] = useState(false)
+  const [selectAllBusy, setSelectAllBusy] = useState(false)
   const [bulkBusy, setBulkBusy] = useState(false)
   const [columns, setColumnsRaw] = useState(loadColumns)
   const [density, setDensity] = useState(() => localStorage.getItem('p57_leads_density') || 'comfortable')
@@ -107,8 +109,21 @@ export default function Leads({ initialSearch = '' }) {
     n.has(id) ? n.delete(id) : n.add(id)
     return n
   })
-  const toggleSelectAll = () => setSelected(s => s.size === items.length ? new Set() : new Set(items.map(l => l.id)))
-  const clearSelection = () => setSelected(new Set())
+  const toggleSelectAll = () => {
+    setSelectAllMatching(false)
+    setSelected(s => s.size === items.length ? new Set() : new Set(items.map(l => l.id)))
+  }
+  const clearSelection = () => { setSelected(new Set()); setSelectAllMatching(false) }
+
+  const selectAllMatchingFilter = async () => {
+    setSelectAllBusy(true)
+    try {
+      const { ids } = await api.get(`/api/leads/ids?${q}`)
+      setSelected(new Set(ids))
+      setSelectAllMatching(true)
+    } catch (e) { toast(e.message, 'error') }
+    setSelectAllBusy(false)
+  }
 
   const bulkChangeStage = async (stage) => {
     if (!stage || !selected.size) return
@@ -197,7 +212,14 @@ export default function Leads({ initialSearch = '' }) {
       {/* bulk selection toolbar */}
       {selected.size > 0 && (
         <div className="card p-3 flex flex-wrap items-center gap-3 border-rose-400/25" style={{ animation: 'fadeIn .15s ease' }}>
-          <span className="chip bg-rose-500/15 border border-rose-400/30 text-rose-300 !px-2.5 !py-1 text-[12px] font-semibold">{selected.size} selected</span>
+          <span className="chip bg-rose-500/15 border border-rose-400/30 text-rose-300 !px-2.5 !py-1 text-[12px] font-semibold">
+            {selectAllMatching ? `All ${selected.size} matching leads selected` : `${selected.size} selected`}
+          </span>
+          {!selectAllMatching && selected.size === items.length && (data?.total || 0) > items.length && (
+            <button className="btn btn-ghost !py-1.5 !text-[12.5px] text-rose-300" disabled={selectAllBusy} onClick={selectAllMatchingFilter}>
+              {selectAllBusy ? 'Loading…' : `Select all ${data.total} matching leads`}
+            </button>
+          )}
           <select className="input !w-auto !py-1.5 !text-[12.5px]" disabled={bulkBusy} defaultValue="" onChange={e => { bulkChangeStage(e.target.value); e.target.value = '' }}>
             <option value="" disabled>Change stage…</option>
             {(boot?.stages || []).map(s => <option key={s} value={s}>{s}</option>)}

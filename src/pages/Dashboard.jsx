@@ -49,7 +49,7 @@ const AXIS = { fill: 'var(--axis)', fontSize: 11 }
 
 export default function Dashboard() {
   const { openLead, refreshData, boot, dataVersion } = useApp()
-  const { data: ov, loading: l1, reload: r1 } = useFetch(() => api.get('/api/analytics/overview'), [])
+  const { data: ov, loading: l1, error: e1, reload: r1 } = useFetch(() => api.get('/api/analytics/overview'), [])
   const { data: tl, loading: l2 } = useFetch(() => api.get('/api/analytics/timeline'), [])
   const { data: funnel, loading: l3 } = useFetch(() => api.get('/api/analytics/funnel'), [])
   const { data: sources, loading: l4 } = useFetch(() => api.get('/api/analytics/sources'), [])
@@ -70,6 +70,16 @@ export default function Dashboard() {
   const reload = () => { r1(); refreshData() }
 
   if (l1) return <Loading />
+  if (e1 || !ov) {
+    return (
+      <div className="p-6">
+        <div className="card p-6 text-center space-y-3">
+          <p className="text-slate-300 text-[13px]">Couldn't reach the API{e1?.message ? `: ${e1.message}` : '.'}</p>
+          <button className="btn btn-ghost !py-1.5 text-[12px]" onClick={reload}>Retry</button>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="p-6 space-y-5">

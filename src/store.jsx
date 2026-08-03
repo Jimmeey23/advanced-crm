@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { api } from './api.js'
+import { api, API_BASE } from './api.js'
 
 const Ctx = createContext(null)
 
@@ -62,7 +62,7 @@ export function AppProvider({ children }) {
   // Two-way sync: when Supabase reports a remote change (edited directly in
   // Supabase, or by another server instance), refetch instead of going stale.
   useEffect(() => {
-    const es = new EventSource('/api/events')
+    const es = new EventSource(API_BASE + '/api/events')
     es.onmessage = () => { refreshData(); refreshAlerts() }
     es.onerror = () => { /* browser auto-reconnects */ }
     return () => es.close()

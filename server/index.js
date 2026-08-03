@@ -30,6 +30,21 @@ try {
 } catch (e) { /* ignore */ }
 
 const app = express()
+
+// Frontend and API can be deployed to separate origins (e.g. frontend on
+// Vercel, this server on Railway) — allow cross-origin requests. Restrict
+// via CORS_ORIGIN (comma-separated list) once the frontend's real domain is
+// known; defaults to "*" since the API takes no cookies/credentials.
+const corsOrigins = (process.env.CORS_ORIGIN || '').split(',').map(s => s.trim()).filter(Boolean)
+app.use((req, res, next) => {
+  const origin = req.headers.origin
+  res.header('Access-Control-Allow-Origin', corsOrigins.length ? (corsOrigins.includes(origin) ? origin : corsOrigins[0]) : '*')
+  res.header('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS')
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
+  if (req.method === 'OPTIONS') return res.sendStatus(204)
+  next()
+})
+
 app.use(express.json({ limit: '200mb' }))
 app.use(express.urlencoded({ extended: true, limit: '200mb' }))
 
@@ -324,6 +339,15 @@ app.get('/api/leads', (req, res) => {
   })
 })
 
+// All ids matching the current filters (no pagination) — backs "select all
+// N leads matching this filter" across pages without shipping full lead
+// objects for potentially thousands of rows.
+app.get('/api/leads/ids', (req, res) => {
+  let list = [...db.leads]
+  list = applyFilters(list, req.query)
+  res.json({ ids: list.map(l => l.id), total: list.length })
+})
+
 app.get('/api/leads/:id', (req, res) => {
   const lead = leadById(req.params.id)
   if (!lead) return res.status(404).json({ error: 'Lead not found' })
@@ -375,17 +399,9 @@ app.post('/api/leads', (req, res) => {
   res.status(201).json(enrichLead(lead, db))
 })
 
-app.patch('/api/leads/:id', (req, res) => {
-  const lead = leadById(req.params.id)
-  if (!lead) return res.status(404).json({ error: 'Lead not found' })
-  const before = lead.stage
-  safePatch(lead, req.body)
-  markDirty(lead.id)
-  if (req.body.associateId) log('assign', `Assigned ${lead.fullName}`, lead.id)
-  if (req.body.stage && req.body.stage !== before) log('stage', `${lead.fullName} moved ${before} → ${req.body.stage}`, lead.id)
-  res.json(enrichLead(lead, db))
-})
-
+// Registered before /api/leads/:id — otherwise "bulk" would be matched as
+// an :id param and these would always 404 (Express matches route patterns
+// in registration order, not by specificity).
 app.patch('/api/leads/bulk', (req, res) => {
   const ids = Array.isArray(req.body?.ids) ? req.body.ids : []
   const patch = req.body?.patch || {}
@@ -399,6 +415,7 @@ app.patch('/api/leads/bulk', (req, res) => {
     if (patch.stage && patch.stage !== before) log('stage', `${lead.fullName} moved ${before} → ${patch.stage}`)
     updated++
   }
+  save()
   log('lead', `Bulk updated ${updated} lead${updated === 1 ? '' : 's'}`)
   res.json({ ok: true, updated })
 })
@@ -412,6 +429,17 @@ app.delete('/api/leads/bulk', (req, res) => {
   save()
   log('lead', `Bulk deleted ${deleted} lead${deleted === 1 ? '' : 's'}`)
   res.json({ ok: true, deleted })
+})
+
+app.patch('/api/leads/:id', (req, res) => {
+  const lead = leadById(req.params.id)
+  if (!lead) return res.status(404).json({ error: 'Lead not found' })
+  const before = lead.stage
+  safePatch(lead, req.body)
+  markDirty(lead.id)
+  if (req.body.associateId) log('assign', `Assigned ${lead.fullName}`, lead.id)
+  if (req.body.stage && req.body.stage !== before) log('stage', `${lead.fullName} moved ${before} → ${req.body.stage}`, lead.id)
+  res.json(enrichLead(lead, db))
 })
 
 app.post('/api/leads/:id/followups', (req, res) => {
