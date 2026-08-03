@@ -6,20 +6,31 @@ import { api } from '../api.js'
 import { Spinner } from '../ui.jsx'
 
 const FIELDS = [
+  { key: 'id', label: 'ID', required: false },
   { key: 'fullName', label: 'Full name', required: true },
   { key: 'phone', label: 'Phone number', required: false },
   { key: 'email', label: 'Email', required: false },
   { key: 'createdAt', label: 'Created at', required: false },
+  { key: 'sourceId', label: 'Source ID', required: false },
   { key: 'sourceName', label: 'Lead source', required: false },
   { key: 'memberId', label: 'Momence member ID', required: false },
+  { key: 'convertedAt', label: 'Converted to customer at', required: false },
   { key: 'stage', label: 'Stage', required: false },
   { key: 'associate', label: 'Associate / owner', required: false },
   { key: 'remarks', label: 'Remarks / notes', required: false },
+  { key: 'followUps', label: 'Follow-ups', required: false },
   { key: 'center', label: 'Center / location', required: false },
   { key: 'classType', label: 'Class type', required: false },
+  { key: 'hostId', label: 'Host ID', required: false },
   { key: 'channel', label: 'Channel', required: false },
   { key: 'status', label: 'Status', required: false },
-  { key: 'valueEstimate', label: 'Lead value', required: false }
+  { key: 'period', label: 'Period', required: false },
+  { key: 'purchasesMade', label: 'Purchases made', required: false },
+  { key: 'valueEstimate', label: 'LTV', required: false },
+  { key: 'visits', label: 'Visits', required: false },
+  { key: 'trialStatus', label: 'Trial status', required: false },
+  { key: 'conversionStatus', label: 'Conversion status', required: false },
+  { key: 'retentionStatus', label: 'Retention status', required: false }
 ]
 
 export default function Import() {
@@ -116,7 +127,7 @@ export default function Import() {
           <div className="card p-4 mt-4">
             <h4 className="font-display font-semibold text-white text-[13px] mb-2 flex items-center gap-2"><Download size={14} className="text-slate-400" /> Expected format</h4>
             <p className="text-[11.5px] text-slate-500 mb-2">Recommended columns (tab or comma separated):</p>
-            <pre className="text-[10.5px] leading-relaxed text-slate-400 bg-black/30 rounded-lg p-3 overflow-x-auto scrollbar-thin">ID, Full Name, Phone Number, Email, Created At, Source ID, Source Name, Member ID, Converted To Customer At, Stage Name, Associate, Remarks, Follow Up 1 Date, Follow Up Comments (1), Follow Up 2 Date, Follow Up Comments (2), …, Center, Class Type, Host ID, Status, Channel, Period</pre>
+            <pre className="text-[10.5px] leading-relaxed text-slate-400 bg-black/30 rounded-lg p-3 overflow-x-auto scrollbar-thin">ID, Full Name, Phone Number, Email, Created At, Source ID, Source Name, Member ID, Converted To Customer At, Stage Name, Associate, Remarks, Follow Up 1 Date, Follow Up Comments (1), Follow Up 2 Date, Follow Up Comments (2), Follow Up 3 Date, Follow Up Comments (3), Follow Up 4 Date, Follow Up Comments (4), Center, Class Type, Host ID, Status, Channel, Period, Purchases Made, LTV, Visits, Trial Status, Conversion Status, Retention Status</pre>
           </div>
         </div>
       )}

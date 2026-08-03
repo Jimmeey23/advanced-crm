@@ -18,12 +18,13 @@ export function autoMap(columns) {
   const norm = (s) => (s || '').toLowerCase().replace(/[^a-z0-9]/g, '')
   const map = {}
   const table = {
+    id: ['id', 'leadid', 'recordid'],
     fullName: ['fullname', 'name', 'leadname', 'customername'],
     phone: ['phonenumber', 'phone', 'mobile', 'contact', 'mobile number', 'contactnumber'],
     email: ['email', 'emailaddress', 'emailid'],
     createdAt: ['createdat', 'created', 'createddate', 'date', 'leadcreatedat'],
-    sourceName: ['sourcename', 'source', 'leadsource'],
     sourceId: ['sourceid'],
+    sourceName: ['sourcename', 'source', 'leadsource'],
     memberId: ['memberid', 'member', 'momenceid', 'customerid'],
     convertedAt: ['convertedtocustomerat', 'convertedat', 'conversiondate', 'wonat'],
     stage: ['stagename', 'stage', 'pipeline'],
@@ -35,7 +36,12 @@ export function autoMap(columns) {
     status: ['status'],
     channel: ['channel', 'sourcechannel', 'leadchannel'],
     period: ['period'],
-    valueEstimate: ['value', 'leadvalue', 'estimatedvalue', 'amount', 'price']
+    purchasesMade: ['purchasesmade', 'purchases', 'purchasecount', 'classespurchased'],
+    valueEstimate: ['value', 'leadvalue', 'estimatedvalue', 'amount', 'price', 'ltv'],
+    visits: ['visits', 'visitcount', 'attendance', 'attendancecount'],
+    trialStatus: ['trialstatus'],
+    conversionStatus: ['conversionstatus'],
+    retentionStatus: ['retentionstatus']
   }
   for (const [field, aliases] of Object.entries(table)) {
     for (const c of columns) {
