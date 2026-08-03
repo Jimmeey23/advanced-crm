@@ -27,7 +27,7 @@ export default function Import() {
   const [step, setStep] = useState(1)
   const [parsed, setParsed] = useState(null)
   const [mapping, setMapping] = useState({})
-  const [options, setOptions] = useState({ locationId: boot?.locations?.[0]?.id || '', autoAssign: true, defaultStage: 'New Lead' })
+  const [options, setOptions] = useState({ locationId: boot?.locations?.[0]?.id || '', autoAssign: true, defaultStage: boot?.settings?.business?.defaultStage || boot?.stages?.[0] || 'New Enquiry' })
   const [uploading, setUploading] = useState(false)
   const [applying, setApplying] = useState(false)
   const [result, setResult] = useState(null)

@@ -1,7 +1,8 @@
 import React, { useState } from 'react'
 import {
   LayoutDashboard, KanbanSquare, Users, UploadCloud, Settings, Search,
-  Bell, Plus, Zap, Link2, ShieldCheck, Sun, Moon, BarChart3, ChevronsLeft, ChevronsRight
+  Bell, Plus, Zap, Link2, ShieldCheck, Sun, Moon, BarChart3, ChevronsLeft, ChevronsRight,
+  CalendarDays, CalendarRange
 } from 'lucide-react'
 import { AppProvider, Toasts, useApp } from './store.jsx'
 import Dashboard from './pages/Dashboard.jsx'
@@ -10,6 +11,8 @@ import Pipeline from './pages/Pipeline.jsx'
 import Leads from './pages/Leads.jsx'
 import Import from './pages/Import.jsx'
 import Team from './pages/Team.jsx'
+import StudioWeekly from './pages/StudioWeekly.jsx'
+import StudioMonthly from './pages/StudioMonthly.jsx'
 import SettingsPage from './pages/Settings.jsx'
 import LeadDrawer from './components/LeadDrawer.jsx'
 import AddLeadModal from './components/AddLeadModal.jsx'
@@ -19,6 +22,8 @@ import Logo from './components/Logo.jsx'
 const NAV = [
   { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { id: 'performance', label: 'Performance', icon: BarChart3 },
+  { id: 'studio-weekly', label: 'Weekly studio report', icon: CalendarDays },
+  { id: 'studio-monthly', label: 'Monthly studio report', icon: CalendarRange },
   { id: 'pipeline', label: 'Pipeline', icon: KanbanSquare },
   { id: 'leads', label: 'Leads', icon: Users },
   { id: 'import', label: 'Import CSV', icon: UploadCloud },
@@ -174,6 +179,8 @@ function Shell() {
   switch (view) {
     case 'dashboard': return <Dashboard />
     case 'performance': return <Performance />
+    case 'studio-weekly': return <StudioWeekly />
+    case 'studio-monthly': return <StudioMonthly />
     case 'pipeline': return <Pipeline />
     case 'leads': return <Leads initialSearch={viewParams.search} />
     case 'import': return <Import />

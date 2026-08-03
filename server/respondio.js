@@ -44,13 +44,25 @@ function digits(v) {
   return String(v || '').replace(/\D/g, '')
 }
 
+// Normalize a raw phone number to include a country code. Numbers already
+// long enough to plausibly carry a country code are left untouched; short
+// (likely local-format) numbers get the org's default country code prefixed
+// so Respond.io's E.164-ish "phone:+<digits>" identifier resolves correctly.
+function normalizedPhone(db, raw) {
+  const d = digits(raw)
+  if (!d) return ''
+  if (d.length > 10) return d
+  const cc = digits(db?.settings?.respondio?.defaultCountryCode) || '91'
+  return cc + d
+}
+
 // Build the v2 contact identifier for a lead. The official SDK passes the raw
 // identifier (no URL encoding), so we do the same.
 export function leadIdentifier(db, lead) {
   if (!lead) return null
   if (lead.respondId) return `id:${lead.respondId}`
   const email = String(lead.email || '').trim().toLowerCase()
-  const phone = digits(lead.phone)
+  const phone = normalizedPhone(db, lead.phone)
   if (email && email !== '-' && email.includes('@')) return `email:${email}`
   if (phone) return `phone:+${phone}`
   return null
@@ -58,7 +70,11 @@ export function leadIdentifier(db, lead) {
 
 function pickContact(data) {
   const c = data?.contact || data?.data?.contact || data?.data || data
-  return c && typeof c === 'object' ? c : null
+  if (!c || typeof c !== 'object') return null
+  // Some failure responses are still 200s shaped like { success: false, message }
+  // with no actual contact fields — don't mistake that for a resolved contact.
+  if (c.success === false || (!c.id && !c.contactId)) return null
+  return { ...c, id: c.id || c.contactId }
 }
 
 function asList(data) {
@@ -111,7 +127,7 @@ export async function getOrCreateContact(db, lead) {
   const { firstName, lastName } = splitName(lead.fullName || lead.name)
   const payload = { firstName, lastName }
   const mail = String(lead.email || '').trim().toLowerCase()
-  const ph = digits(lead.phone)
+  const ph = normalizedPhone(db, lead.phone)
   if (mail && mail !== '-' && mail.includes('@')) payload.email = mail
   if (ph) payload.phone = `+${ph}`
   const data = await api(db, `/contact/create_or_update/${identifier}`, {
@@ -119,7 +135,7 @@ export async function getOrCreateContact(db, lead) {
     body: payload
   })
   const contact = pickContact(data)
-  if (!contact) throw new Error('Respond.io did not return a contact.')
+  if (!contact) throw new Error(`Respond.io did not return a usable contact for identifier "${identifier}". Response: ${JSON.stringify(data).slice(0, 300)}`)
   return contact
 }
 

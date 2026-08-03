@@ -19,8 +19,7 @@ export const DEFAULT_COLUMNS = [
   { id: 'score', kind: 'base', field: 'score', label: 'Score', type: 'number', decimals: 0, unit: '', hidden: false },
   { id: 'valueEstimate', kind: 'base', field: 'valueEstimate', label: 'Value', type: 'currency', decimals: 0, hidden: true },
   { id: 'classType', kind: 'base', field: 'classType', label: 'Class type', type: 'text', hidden: true },
-  { id: 'missedCount', kind: 'base', field: 'missedCount', label: 'Missed follow-ups', type: 'number', decimals: 0, unit: '', hidden: true },
-  { id: 'created', kind: 'base', field: 'created', label: 'Created', type: 'date', hidden: false }
+  { id: 'missedCount', kind: 'base', field: 'missedCount', label: 'Missed follow-ups', type: 'number', decimals: 0, unit: '', hidden: true }
 ]
 
 const TYPES = [

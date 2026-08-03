@@ -39,7 +39,7 @@ export default function Team() {
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
         {(boot?.locations || []).map(loc => {
           const locLeads = leads.filter(l => l.locationId === loc.id)
-          const locTeam = (boot?.associates || []).filter(a => a.locationId === loc.id)
+          const locTeam = (boot?.associates || []).filter(a => a.locationId === loc.id && a.active !== false)
           const won = locLeads.filter(l => l.status === 'won').length
           return (
             <div key={loc.id} className="card card-hover p-5">

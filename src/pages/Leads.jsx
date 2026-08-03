@@ -204,7 +204,7 @@ export default function Leads({ initialSearch = '' }) {
           </select>
           <select className="input !w-auto !py-1.5 !text-[12.5px]" disabled={bulkBusy} defaultValue="" onChange={e => { bulkAssign(e.target.value); e.target.value = '' }}>
             <option value="" disabled>Reassign owner…</option>
-            {(boot?.associates || []).map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+            {(boot?.associates || []).filter(a => a.active !== false).map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
           </select>
           <button className="btn btn-ghost !py-1.5 !text-[12.5px] text-rose-300 hover:!bg-rose-500/10" disabled={bulkBusy} onClick={bulkDelete}>
             <Trash2 size={13} /> Delete
@@ -282,7 +282,7 @@ export default function Leads({ initialSearch = '' }) {
           </Filter>
           <Filter label="Associate" value={filters.associateId} onChange={setF('associateId')}>
             <option value="">All associates</option>
-            {(boot?.associates || []).map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+            {(boot?.associates || []).filter(a => a.active !== false).map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
           </Filter>
           <Filter label="Source" value={filters.sourceName} onChange={setF('sourceName')}>
             <option value="">All sources</option>
@@ -413,7 +413,7 @@ const FU_LABELS = ['1', '2', '3', '4']
 function TableGrid({ items, boot, lookup, openLead, changeStage, onMessage, selected, toggleSelect, toggleSelectAll, columns, density }) {
   const cadenceDays = boot?.settings?.cadence?.outreachDays || 7
   const allChecked = items.length > 0 && items.every(l => selected?.has(l.id))
-  const visibleCols = (columns || []).filter(c => !c.hidden)
+  const visibleCols = (columns || []).filter(c => !c.hidden && c.field !== 'created')
   const py = density === 'compact' ? 'py-1.5' : ''
   return (
     <div className="overflow-x-auto scrollbar-thin">
@@ -426,14 +426,15 @@ function TableGrid({ items, boot, lookup, openLead, changeStage, onMessage, sele
               </button>
             </th>
             <th className="px-4 py-3 font-semibold">Lead</th>
-            <th className="px-4 py-3 font-semibold">Stage</th>
+            <th className="px-4 py-3 font-semibold w-[110px]">Stage</th>
+            <th className="px-4 py-3 font-semibold w-[150px]">Created</th>
             {visibleCols.map(c => <th key={c.id} className="px-4 py-3 font-semibold">{c.label}</th>)}
             <th className="px-4 py-3 font-semibold">Next</th>
             <th className="px-4 py-3 font-semibold text-center" colSpan={4}>Follow-ups</th>
             <th className="px-4 py-3 font-semibold text-right">Message</th>
           </tr>
           <tr className="text-[9.5px] uppercase tracking-wider text-slate-600 border-b border-white/5">
-            <th colSpan={4 + visibleCols.length} />
+            <th colSpan={5 + visibleCols.length} />
             <th className="px-1 py-1.5 text-center font-semibold text-slate-500 mono">{FU_LABELS[0]}</th>
             <th className="px-1 py-1.5 text-center font-semibold text-slate-500 mono">{FU_LABELS[1]}</th>
             <th className="px-1 py-1.5 text-center font-semibold text-slate-500 mono">{FU_LABELS[2]}</th>
@@ -457,7 +458,12 @@ function TableGrid({ items, boot, lookup, openLead, changeStage, onMessage, sele
                   <div className="flex items-center gap-2.5">
                     <Avatar name={l.fullName} color={owner?.color} size={density === 'compact' ? 24 : 34} />
                     <div className="min-w-0">
-                      <div className="text-[13px] font-semibold text-white truncate max-w-[160px]">{l.fullName}</div>
+                      <div className="text-[13px] font-semibold text-white truncate max-w-[160px] flex items-center gap-1.5">
+                        {l.fullName}
+                        {(l.flags || []).map(f => (
+                          <span key={f.id} title={f.name} className="chip !px-1.5 !py-0 text-[9px]" style={{ background: `${f.color}22`, color: f.color, border: `1px solid ${f.color}44` }}>{f.label}</span>
+                        ))}
+                      </div>
                       {density !== 'compact' && <div className="text-[11px] text-slate-500 truncate max-w-[160px]">{l.email}</div>}
                     </div>
                   </div>
@@ -467,6 +473,7 @@ function TableGrid({ items, boot, lookup, openLead, changeStage, onMessage, sele
                     {(boot?.stages || []).map(s => <option key={s}>{s}</option>)}
                   </select>
                 </td>
+                <td className={`px-4 ${py} text-[12px] text-slate-400 mono`}>{fmtDate(l.createdAt)}</td>
                 {visibleCols.map(c => {
                   const val = getColumnValue(c, l, lookup)
                   return (
@@ -586,7 +593,10 @@ function CardsView({ items, lookup, openLead, grouped, collapsed, toggleGroup, b
             <div className="flex items-center gap-2.5 mb-2">
               <Avatar name={l.fullName} color={owner?.color} size={34} />
               <div className="flex-1 min-w-0">
-                <div className="text-[13px] font-semibold text-white truncate">{l.fullName}</div>
+                <div className="text-[13px] font-semibold text-white truncate flex items-center gap-1.5">
+                  {l.fullName}
+                  {(l.flags || []).map(f => <span key={f.id} title={f.name} className="chip !px-1.5 !py-0 text-[9px]" style={{ background: `${f.color}22`, color: f.color, border: `1px solid ${f.color}44` }}>{f.label}</span>)}
+                </div>
                 <div className="text-[11px] text-slate-500 truncate">{lookup.locById[l.locationId]?.name?.split(',')[0] || '—'}</div>
               </div>
               <ScorePill score={l.ai.score} />
@@ -798,7 +808,10 @@ function KanbanView({ items, boot, lookup, openLead, changeStage }) {
                   <div className="flex items-center gap-2 mb-1.5">
                     <Avatar name={l.fullName} color={owner?.color} size={26} />
                     <div className="flex-1 min-w-0">
-                      <div className="text-[12.5px] font-semibold text-white truncate">{l.fullName}</div>
+                      <div className="text-[12.5px] font-semibold text-white truncate flex items-center gap-1">
+                        {l.fullName}
+                        {(l.flags || []).map(f => <span key={f.id} title={f.name} className="chip !px-1 !py-0 text-[8.5px]" style={{ background: `${f.color}22`, color: f.color, border: `1px solid ${f.color}44` }}>{f.label}</span>)}
+                      </div>
                       <div className="text-[10.5px] text-slate-500 truncate">{owner?.name || 'Unassigned'}</div>
                     </div>
                     <ScorePill score={l.ai.score} />

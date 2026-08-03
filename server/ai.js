@@ -168,6 +168,64 @@ function lastOutreachDays(lead) {
   return Math.max(0, Math.round((Date.now() - new Date(last).getTime()) / 86400000))
 }
 
+// Per-followup cadence: how many days a lead may sit idle before the Nth
+// follow-up is considered overdue, based on how many real touches already
+// happened. `steps` is db.settings.cadence.steps, one entry per followup 1-4.
+function cadenceState(lead, steps) {
+  if (lead.status !== 'open') return { stepIndex: null, dueInDays: null, overdueDays: 0 }
+  const touchCount = (lead.followUps || []).filter(f => f.comments && f.comments !== '-').length
+  const list = Array.isArray(steps) && steps.length ? steps : [{ days: 7 }]
+  const step = list[Math.min(touchCount, list.length - 1)] || { days: 7 }
+  const idle = lastOutreachDays(lead)
+  const overdueDays = Math.max(0, idle - (step.days || 7))
+  return { stepIndex: touchCount + 1, dueInDays: (step.days || 7) - idle, overdueDays }
+}
+
+const RULE_OPERATORS = {
+  eq: (a, b) => String(a) === String(b),
+  neq: (a, b) => String(a) !== String(b),
+  gt: (a, b) => Number(a) > Number(b),
+  gte: (a, b) => Number(a) >= Number(b),
+  lt: (a, b) => Number(a) < Number(b),
+  lte: (a, b) => Number(a) <= Number(b),
+  contains: (a, b) => String(a || '').toLowerCase().includes(String(b || '').toLowerCase())
+}
+
+function ruleFieldValue(field, lead, score) {
+  switch (field) {
+    case 'stage': return lead.stage || ''
+    case 'status': return lead.status || ''
+    case 'sourceName': return lead.sourceName || ''
+    case 'locationId': return lead.locationId || ''
+    case 'associateId': return lead.associateId || ''
+    case 'score': return score
+    case 'valueEstimate': return lead.valueEstimate || 0
+    case 'followUpCount': return (lead.followUps || []).length
+    case 'daysSinceCreated': return lead.createdAt ? daysBetween(lead.createdAt, new Date()) : 0
+    case 'daysSinceLastContact': return lastOutreachDays(lead)
+    default: return undefined
+  }
+}
+
+// Evaluate db.settings.cadence.rules against a lead. Each rule's conditions
+// are AND-joined. Returns the flags for every rule that matched.
+function evaluateRules(lead, db, score) {
+  const rules = db?.settings?.cadence?.rules || []
+  const flags = []
+  for (const rule of rules) {
+    if (!rule || rule.active === false || !Array.isArray(rule.conditions) || !rule.conditions.length) continue
+    const matched = rule.conditions.every(c => {
+      const op = RULE_OPERATORS[c.operator]
+      if (!op) return false
+      const value = ruleFieldValue(c.field, lead, score)
+      if (value === undefined) return false
+      return op(value, c.value)
+    })
+    if (matched) flags.push({ id: rule.id, name: rule.name || 'Rule', label: rule.flagLabel || rule.name || 'Flagged', color: rule.flagColor || '#f59e0b' })
+  }
+  return flags
+}
+
 // AI: generate ready-to-send follow-up message drafts per channel.
 export function suggestFollowups(lead) {
   const senti = sentimentOf(lead)
@@ -247,6 +305,8 @@ export function enrichLead(lead, db) {
   const missed = missedFollowUps(lead)
   const outreach = channelOutreach(lead)
   const lastOutreach = lastOutreachDays(lead)
+  const cadence = cadenceState(lead, db?.settings?.cadence?.steps)
+  const flags = evaluateRules(lead, db, score)
 
   let summary
   if (lead.status === 'won') {
@@ -265,8 +325,10 @@ export function enrichLead(lead, db) {
       missedCount: missed.length,
       missedDates: missed.map(m => m.date),
       lastOutreachDays: lastOutreach,
-      outreach
+      outreach,
+      cadence
     },
+    flags,
     ai: {
       score,
       risk,

@@ -86,6 +86,22 @@ function syncSupabase() {
   }, 300)
 }
 
+// Save + await the Supabase write immediately (no debounce), so callers that
+// need to confirm persistence before responding to the client — e.g. the
+// settings save route — can surface a real error instead of reporting
+// success while the write is still silently pending or has failed.
+export async function saveNow() {
+  if (!state) return
+  clearTimeout(saveTimer)
+  clearTimeout(syncTimer)
+  writeFile()
+  if (!supabase.isEnabled()) { dirty.clear(); deleted.clear(); return }
+  await supabase.persistState(state, getDirty(), getDeleted())
+  dirty.clear()
+  deleted.clear()
+  lastLocalWriteAt = Date.now()
+}
+
 // Fired when Supabase Realtime reports a change we didn't just make ourselves
 // (e.g. a row edited directly in the Supabase dashboard, or by another server
 // instance). Patches just the affected row/meta fields — a full reload would

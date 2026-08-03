@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react'
-import { Bell, AlertTriangle, CalendarClock, UserPlus, Flame, Snowflake, RadioTower, ChevronRight } from 'lucide-react'
+import { Bell, AlertTriangle, CalendarClock, UserPlus, Flame, Snowflake, RadioTower, Flag, ChevronRight } from 'lucide-react'
 import { useApp } from '../store.jsx'
 
 const KIND_META = {
@@ -9,7 +9,8 @@ const KIND_META = {
   unassigned: { icon: UserPlus, color: '#fb7185', label: 'Unassigned' },
   high_value: { icon: Flame, color: '#f97316', label: 'High value' },
   stale: { icon: Snowflake, color: '#94a3b8', label: 'Cold lead' },
-  overdue: { icon: AlertTriangle, color: '#f87171', label: 'Overdue' }
+  overdue: { icon: AlertTriangle, color: '#f87171', label: 'Overdue' },
+  custom_rule: { icon: Flag, color: '#f59e0b', label: 'Custom rule' }
 }
 
 export default function AlertsDropdown() {
@@ -45,16 +46,17 @@ export default function AlertsDropdown() {
             )}
             {alerts.slice(0, 30).map(a => {
               const meta = KIND_META[a.kind] || KIND_META.overdue
+              const color = a.color || meta.color
               const Icon = meta.icon
               return (
                 <button key={a.id} className="w-full flex items-start gap-3 px-4 py-3 border-b border-white/5 hover:bg-white/4 text-left" onClick={() => { openLead(a.leadId); setOpen(false) }}>
-                  <span className="mt-0.5 w-7 h-7 rounded-lg flex items-center justify-center shrink-0" style={{ background: `${meta.color}1e`, color: meta.color }}>
+                  <span className="mt-0.5 w-7 h-7 rounded-lg flex items-center justify-center shrink-0" style={{ background: `${color}1e`, color }}>
                     <Icon size={14} />
                   </span>
                   <span className="flex-1 min-w-0">
                     <span className="flex items-center gap-2">
                       <span className="text-[13px] font-semibold text-white truncate">{a.leadName}</span>
-                      <span className="chip !px-2 !py-0.5 text-[9.5px] uppercase tracking-wide" style={{ background: `${meta.color}1e`, color: meta.color }}>{meta.label}</span>
+                      <span className="chip !px-2 !py-0.5 text-[9.5px] uppercase tracking-wide" style={{ background: `${color}1e`, color }}>{meta.label}</span>
                     </span>
                     <span className="block text-[12px] text-slate-400 mt-0.5">{a.title}</span>
                     <span className="block text-[11.5px] text-slate-500 mt-0.5 truncate">{a.detail}</span>

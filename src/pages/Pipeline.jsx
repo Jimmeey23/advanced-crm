@@ -51,7 +51,7 @@ export default function Pipeline() {
         </select>
         <select className="input !w-auto" value={associateId} onChange={e => setAssociateId(e.target.value)}>
           <option value="">All associates</option>
-          {(boot?.associates || []).map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+          {(boot?.associates || []).filter(a => a.active !== false).map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
         </select>
         <label className="flex items-center gap-2 text-[12px] text-slate-400 cursor-pointer select-none ml-auto">
           <input type="checkbox" checked={hideEmpty} onChange={e => setHideEmpty(e.target.checked)} className="accent-rose-500" />

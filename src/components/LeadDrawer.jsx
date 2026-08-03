@@ -55,7 +55,7 @@ export default function LeadDrawer() {
   const loc = lead ? lookup.locById[lead.locationId] : null
   const owner = lead ? lookup.asnById[lead.associateId] : null
   const ownerOptions = useMemo(() =>
-    (boot?.associates || []).filter(a => !lead || a.locationId === lead.locationId || a.active),
+    (boot?.associates || []).filter(a => (!lead || a.locationId === lead.locationId) && a.active !== false),
     [boot, lead]
   )
 

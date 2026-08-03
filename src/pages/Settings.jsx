@@ -388,6 +388,12 @@ export default function SettingsPage() {
                 <ToggleMini label="Daily digest" value={notif.dailyDigest === true} onChange={v => setNotif({ ...notif, dailyDigest: v })} />
               </div>
             </Section>
+            <Section icon={<Bell size={15} className="text-amber-400" />} title="Follow-up cadence" desc="Set the interval (and channel) for each of the 4 follow-up steps. A lead idle past its step's day count is flagged as cadence-overdue.">
+              <CadenceSteps steps={cadence.steps || []} onChange={steps => setCadence({ ...cadence, steps })} />
+            </Section>
+            <Section icon={<Zap size={15} className="text-rose-400" />} title="Custom flag rules" desc="Define conditions that, when met, highlight the lead and raise an alert.">
+              <CadenceRules rules={cadence.rules || []} onChange={rules => setCadence({ ...cadence, rules })} stages={stages} />
+            </Section>
             <Section icon={<Bot size={15} className="text-fuchsia-400" />} title="AI intelligence" desc="Heuristic AI features that run locally on your data.">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <ToggleMini label="Auto lead scoring (0–100)" value={aiSet.autoScore !== false} onChange={v => setAiSet({ ...aiSet, autoScore: v })} />
@@ -633,6 +639,96 @@ function TagEditor({ items, onChange, placeholder }) {
         <input className="input !py-1.5 flex-1" placeholder={placeholder} value={draft} onChange={e => setDraft(e.target.value)} onKeyDown={e => e.key === 'Enter' && add()} />
         <button className="btn btn-ghost !py-1.5" onClick={add}><Plus size={14} /> Add</button>
       </div>
+    </div>
+  )
+}
+
+const CADENCE_CHANNELS = ['call', 'whatsapp', 'email', 'sms']
+
+function CadenceSteps({ steps, onChange }) {
+  const rows = [0, 1, 2, 3].map(i => steps[i] || { days: 3, channel: 'call', label: `Follow-up ${i + 1}` })
+  const update = (i, patch) => {
+    const next = rows.map((r, idx) => idx === i ? { ...r, ...patch } : r)
+    onChange(next)
+  }
+  return (
+    <div className="space-y-2">
+      {rows.map((r, i) => (
+        <div key={i} className="flex items-center gap-2.5 rounded-xl bg-white/[0.03] border border-white/6 px-3 py-2.5">
+          <span className="chip bg-white/5 border border-white/10 text-slate-300 !px-2 !py-1 text-[11px] shrink-0">Follow-up {i + 1}</span>
+          <input className="input !w-16 !py-1.5" type="number" min={1} value={r.days} onChange={e => update(i, { days: Number(e.target.value) || 1 })} />
+          <span className="text-[11.5px] text-slate-500 shrink-0">days after previous contact</span>
+          <select className="input !w-auto !py-1.5 ml-auto" value={r.channel} onChange={e => update(i, { channel: e.target.value })}>
+            {CADENCE_CHANNELS.map(c => <option key={c} value={c}>{c}</option>)}
+          </select>
+          <input className="input !w-40 !py-1.5" value={r.label} onChange={e => update(i, { label: e.target.value })} placeholder="Label" />
+        </div>
+      ))}
+    </div>
+  )
+}
+
+const RULE_FIELDS = [
+  { id: 'stage', label: 'Stage', kind: 'stage' },
+  { id: 'status', label: 'Status', kind: 'text' },
+  { id: 'sourceName', label: 'Source', kind: 'text' },
+  { id: 'score', label: 'AI score', kind: 'number' },
+  { id: 'valueEstimate', label: 'Value estimate', kind: 'number' },
+  { id: 'followUpCount', label: 'Follow-up count', kind: 'number' },
+  { id: 'daysSinceCreated', label: 'Days since created', kind: 'number' },
+  { id: 'daysSinceLastContact', label: 'Days since last contact', kind: 'number' }
+]
+const RULE_OPERATORS = [
+  { id: 'eq', label: '=' }, { id: 'neq', label: '≠' },
+  { id: 'gt', label: '>' }, { id: 'gte', label: '≥' },
+  { id: 'lt', label: '<' }, { id: 'lte', label: '≤' },
+  { id: 'contains', label: 'contains' }
+]
+
+function CadenceRules({ rules, onChange, stages }) {
+  const addRule = () => onChange([...rules, {
+    id: `rule_${Date.now()}`, name: 'New rule', flagLabel: 'Flagged', flagColor: '#f59e0b', active: true,
+    conditions: [{ field: 'daysSinceLastContact', operator: 'gt', value: '5' }]
+  }])
+  const updateRule = (i, patch) => onChange(rules.map((r, idx) => idx === i ? { ...r, ...patch } : r))
+  const removeRule = (i) => onChange(rules.filter((_, idx) => idx !== i))
+  const updateCondition = (ri, ci, patch) => {
+    const conditions = rules[ri].conditions.map((c, idx) => idx === ci ? { ...c, ...patch } : c)
+    updateRule(ri, { conditions })
+  }
+
+  return (
+    <div className="space-y-3">
+      {rules.map((rule, ri) => (
+        <div key={rule.id} className="rounded-xl border border-white/8 p-3.5 space-y-2.5">
+          <div className="flex items-center gap-2.5">
+            <input className="input !py-1.5 flex-1" value={rule.name} onChange={e => updateRule(ri, { name: e.target.value })} placeholder="Rule name" />
+            <input className="input !w-36 !py-1.5" value={rule.flagLabel} onChange={e => updateRule(ri, { flagLabel: e.target.value })} placeholder="Flag label" />
+            <input className="!w-9 !h-9 rounded-lg border border-white/10 bg-transparent" type="color" value={rule.flagColor} onChange={e => updateRule(ri, { flagColor: e.target.value })} />
+            <ToggleMini label="Active" value={rule.active !== false} onChange={v => updateRule(ri, { active: v })} />
+            <button className="btn btn-ghost !py-1.5 text-rose-400" onClick={() => removeRule(ri)}><X size={13} /></button>
+          </div>
+          {(rule.conditions || []).map((c, ci) => (
+            <div key={ci} className="flex items-center gap-2 pl-3 border-l border-white/10">
+              <select className="input !w-auto !py-1.5" value={c.field} onChange={e => updateCondition(ri, ci, { field: e.target.value })}>
+                {RULE_FIELDS.map(f => <option key={f.id} value={f.id}>{f.label}</option>)}
+              </select>
+              <select className="input !w-auto !py-1.5" value={c.operator} onChange={e => updateCondition(ri, ci, { operator: e.target.value })}>
+                {RULE_OPERATORS.map(o => <option key={o.id} value={o.id}>{o.label}</option>)}
+              </select>
+              {RULE_FIELDS.find(f => f.id === c.field)?.kind === 'stage' ? (
+                <select className="input !w-auto !py-1.5" value={c.value} onChange={e => updateCondition(ri, ci, { value: e.target.value })}>
+                  {stages.map(s => <option key={s} value={s}>{s}</option>)}
+                </select>
+              ) : (
+                <input className="input !w-32 !py-1.5" value={c.value} onChange={e => updateCondition(ri, ci, { value: e.target.value })} />
+              )}
+            </div>
+          ))}
+        </div>
+      ))}
+      <button className="btn btn-ghost !py-1.5" onClick={addRule}><Plus size={14} /> Add rule</button>
+      {!rules.length && <p className="text-[11.5px] text-slate-600">No custom rules yet — leads won't be flagged beyond the built-in alerts.</p>}
     </div>
   )
 }

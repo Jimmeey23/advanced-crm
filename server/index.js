@@ -3,7 +3,7 @@ import fs from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import express from 'express'
 import multer from 'multer'
-import { init, load, save, uid, nowIso, reset, markDirty, markDeleted, onRemoteChange } from './db.js'
+import { init, load, save, saveNow, uid, nowIso, reset, markDirty, markDeleted, onRemoteChange } from './db.js'
 import { enrichAll, enrichLead } from './ai.js'
 import { assignLead } from './roundRobin.js'
 import * as momence from './momence.js'
@@ -110,16 +110,31 @@ function buildAlerts() {
 
     if (notif.missedOutreachAlerts !== false) {
       const idleDays = e.fu.lastOutreachDays
-      const threshold = cad.outreachDays || 7
-      if (idleDays > threshold && idleDays <= 60 && lead.createdAt) {
+      const hasSteps = Array.isArray(cad.steps) && cad.steps.length
+      const threshold = hasSteps ? null : (cad.outreachDays || 7)
+      const overdueDays = hasSteps ? e.fu.cadence.overdueDays : (idleDays > threshold ? idleDays : 0)
+      if (overdueDays > 0 && idleDays <= 60 && lead.createdAt) {
         const age = Math.round((Date.now() - new Date(lead.createdAt).getTime()) / 86400000)
-        if (age > threshold) {
+        if (!hasSteps && age <= threshold) { /* skip: age gate for the flat-threshold path only */ }
+        else {
           alerts.push({
             id: uid('alt'), leadId: lead.id, leadName: lead.fullName, level: 'medium',
-            kind: 'missed_outreach', title: `Missed outreach — ${idleDays}d silent`, detail: `No contact logged in ${idleDays} days. AI has a ready WhatsApp draft.`,
+            kind: 'missed_outreach',
+            title: hasSteps ? `Follow-up #${e.fu.cadence.stepIndex} cadence overdue` : `Missed outreach — ${idleDays}d silent`,
+            detail: `No contact logged in ${idleDays} days. AI has a ready WhatsApp draft.`,
             score: e.ai.score
           })
         }
+      }
+    }
+
+    if (notif.customRuleAlerts !== false) {
+      for (const flag of e.flags || []) {
+        alerts.push({
+          id: uid('alt'), leadId: lead.id, leadName: lead.fullName, level: 'medium',
+          kind: 'custom_rule', title: flag.label, detail: `Custom rule "${flag.name}" matched.`,
+          color: flag.color, score: e.ai.score
+        })
       }
     }
 
@@ -480,12 +495,20 @@ app.post('/api/leads/import/apply', (req, res) => {
       const get = (field) => mapping[field] ? row[mapping[field]] : null
       const fullName = get('fullName') || get('name')
       if (!fullName || String(fullName).trim() === '-' || String(fullName).trim() === '') { skipped++; return }
+      const fuChannels = db.settings.followUpChannels?.length ? db.settings.followUpChannels : ['call', 'whatsapp', 'email', 'sms']
+      const todayKey = new Date().toISOString().slice(0, 10)
       const followUps = (mapping.followUps || [])
         .filter(p => p.date || p.comments)
-        .map(p => ({
-          date: p.date && row[p.date] && row[p.date] !== '-' ? String(row[p.date]).slice(0, 10) : null,
-          comments: p.comments && row[p.comments] && row[p.comments] !== '-' ? String(row[p.comments]) : ''
-        }))
+        .map((p, idx) => {
+          const date = p.date && row[p.date] && row[p.date] !== '-' ? String(row[p.date]).slice(0, 10) : null
+          return {
+            id: uid('fu'),
+            date,
+            comments: p.comments && row[p.comments] && row[p.comments] !== '-' ? String(row[p.comments]) : '',
+            channel: fuChannels[idx % fuChannels.length],
+            done: date ? date <= todayKey : true
+          }
+        })
         .filter(p => p.date || p.comments)
 
       const stageVal = get('stage') || ''
@@ -626,7 +649,7 @@ app.get('/api/analytics/sources', (req, res) => {
 })
 
 app.get('/api/analytics/team', (req, res) => {
-  const rows = db.associates.map(a => {
+  const rows = db.associates.filter(a => a.active !== false).map(a => {
     const owned = db.leads.filter(l => l.associateId === a.id)
     const won = owned.filter(l => l.status === 'won')
     const revenue = won.reduce((s, l) => s + (l.valueEstimate || 0), 0)
@@ -707,14 +730,19 @@ app.post('/api/momence/sync/:leadId', async (req, res) => {
 const SETTINGS_SECTIONS = ['org', 'ui', 'business', 'cadence', 'notifications', 'ai', 'roundRobin', 'reminders', 'momence', 'gpt', 'respondio', 'mailtrap']
 
 app.get('/api/settings', (req, res) => res.json(db.settings))
-app.put('/api/settings', (req, res) => {
+app.put('/api/settings', async (req, res) => {
   const body = req.body || {}
   for (const section of SETTINGS_SECTIONS) {
-    if (body[section] && typeof body[section] === 'object') {
+    if (body[section] && typeof body[section] === 'object' && !Array.isArray(body[section])) {
       db.settings[section] = { ...(db.settings[section] || {}), ...body[section] }
     }
   }
-  save()
+  if (Array.isArray(body.followUpChannels)) db.settings.followUpChannels = body.followUpChannels.filter(Boolean)
+  try {
+    await saveNow()
+  } catch (e) {
+    return res.status(502).json({ error: `Settings saved locally but failed to sync to Supabase: ${e.message}` })
+  }
   log('settings', 'Settings updated')
   res.json(db.settings)
 })
@@ -801,11 +829,81 @@ app.get('/api/analytics/performance', (req, res) => {
   res.json({ range, buckets: row, totals })
 })
 
+// Per-studio breakdown for a single week/month period. `offset` counts periods
+// back from the current one (week: 0 = this week, 1 = last week; month: 0 =
+// this month). Used by the dedicated weekly/monthly studio performance pages.
+app.get('/api/analytics/performance/by-location', (req, res) => {
+  const range = req.query.range === 'month' ? 'month' : 'week'
+  const offset = Math.max(0, Number(req.query.offset) || 0)
+  const now = new Date()
+
+  let start, end, label
+  if (range === 'week') {
+    const thisWeekStart = weekStart(now)
+    start = new Date(thisWeekStart.getTime() - offset * 7 * 86400000)
+    end = new Date(start.getTime() + 7 * 86400000)
+    label = `Week of ${start.toISOString().slice(0, 10)}`
+  } else {
+    const y = now.getFullYear(), m = now.getMonth() - offset
+    start = new Date(y, m, 1)
+    end = new Date(y, m + 1, 1)
+    label = start.toLocaleString('en-US', { month: 'long', year: 'numeric' })
+  }
+
+  const inRange = (v) => {
+    if (!v || v === '-') return false
+    const d = new Date(v)
+    return !isNaN(d.getTime()) && d >= start && d < end
+  }
+  const isTrialStage = (s) => /trial/i.test(s || '')
+
+  const rows = db.locations.map(loc => {
+    const leads = db.leads.filter(l => l.locationId === loc.id)
+    const newLeads = leads.filter(l => inRange(l.createdAt))
+    const won = leads.filter(l => l.status === 'won' && inRange(l.convertedAt))
+    const trials = leads.filter(l => isTrialStage(l.stage) && inRange(l.createdAt || l.updatedAt))
+    const revenue = won.reduce((s, l) => s + (l.valueEstimate || 0), 0)
+    let followUps = 0, missed = 0
+    for (const l of leads) {
+      for (const f of l.followUps || []) {
+        if (!inRange(f.date)) continue
+        followUps++
+        if (f.done === false) missed++
+      }
+    }
+    const byAssociate = {}
+    for (const l of won) {
+      if (!l.associateId) continue
+      byAssociate[l.associateId] = (byAssociate[l.associateId] || 0) + (l.valueEstimate || 0)
+    }
+    const ranked = Object.entries(byAssociate)
+      .map(([associateId, rev]) => ({ associateId, name: db.associates.find(a => a.id === associateId)?.name || 'Unknown', revenue: rev }))
+      .sort((a, b) => b.revenue - a.revenue)
+
+    return {
+      locationId: loc.id, locationName: loc.name,
+      newLeads: newLeads.length, trials: trials.length, won: won.length, revenue,
+      followUps, missed,
+      followUpRate: followUps ? Math.round(((followUps - missed) / followUps) * 100) : 0,
+      topAssociate: ranked[0] || null,
+      bottomAssociate: ranked.length > 1 ? ranked[ranked.length - 1] : null,
+      newLeadDetails: newLeads.map(l => ({ id: l.id, fullName: l.fullName, stage: l.stage, associateId: l.associateId })),
+      wonDetails: won.map(l => ({ id: l.id, fullName: l.fullName, revenue: l.valueEstimate || 0, associateId: l.associateId }))
+    }
+  }).sort((a, b) => b.revenue - a.revenue)
+
+  res.json({
+    range, offset, label,
+    start: start.toISOString().slice(0, 10), end: new Date(end.getTime() - 86400000).toISOString().slice(0, 10),
+    rows
+  })
+})
+
 app.get('/api/analytics/associate-compare', (req, res) => {
   const now = new Date()
   const thisMonth = now.toISOString().slice(0, 7)
   const lastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1).toISOString().slice(0, 7)
-  const rows = db.associates.map(a => {
+  const rows = db.associates.filter(a => a.active !== false).map(a => {
     const owned = db.leads.filter(l => l.associateId === a.id)
     const open = owned.filter(l => l.status === 'open')
     const won = owned.filter(l => l.status === 'won')
@@ -1045,9 +1143,36 @@ if (fs.existsSync(dist)) {
 
 const PORT = process.env.PORT || 3001
 
+// One-time backfill: older CSV imports created follow-ups without an id,
+// channel or done flag, which silently breaks the per-channel outreach
+// columns (they only match followUps with a recognized `channel`) and the
+// timeline's done/overdue badges (`!f.done` treats undefined as pending).
+function backfillFollowUps(db) {
+  const fuChannels = db.settings.followUpChannels?.length ? db.settings.followUpChannels : ['call', 'whatsapp', 'email', 'sms']
+  const todayKey = new Date().toISOString().slice(0, 10)
+  let touched = 0
+  for (const lead of db.leads) {
+    let changed = false
+    lead.followUps = (lead.followUps || []).map((f, idx) => {
+      const patch = {}
+      if (!f.id) patch.id = uid('fu')
+      if (!f.channel) patch.channel = fuChannels[idx % fuChannels.length]
+      if (f.done === undefined) patch.done = f.date && f.date !== '-' ? f.date <= todayKey : true
+      if (Object.keys(patch).length) { changed = true; return { ...f, ...patch } }
+      return f
+    })
+    if (changed) { markDirty(lead.id); touched++ }
+  }
+  if (touched) {
+    console.log(`[physique57-leads] backfilled follow-up channel/done on ${touched} lead(s)`)
+    save()
+  }
+}
+
 async function start() {
   await init()
   db = load()
+  backfillFollowUps(db)
   startReminderScheduler(db)
   app.listen(PORT, () => {
     console.log(`[physique57-leads] server listening on http://localhost:${PORT}`)

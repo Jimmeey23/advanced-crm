@@ -75,10 +75,30 @@ export function seed() {
   const classTypes = ['Barre 57', 'Cardio 57', 'Sculpt 57', 'Body Blast', 'Total Body 57', 'Reform 57', 'Stretch 57']
 
   const stages = [
-    'New Lead', 'Contacted', 'Trial Booked', 'Trial Completed', 'Follow Up',
-    'Proposal Sent', 'Negotiation', 'Won', 'Lost'
+    'Membership Sold', 'Trial Completed', 'Shared Pricing & Schedule Details',
+    'Not Interested - Other', 'Client Unresponsive', 'New Enquiry',
+    'Sent Introductory message', 'Shared Class Descriptions and Benefits',
+    'Post Trial Follow Up', 'Not Interested - Proximity Issues',
+    'Will get back to us at a later date', 'Trial Scheduled',
+    'Called - Did Not Answer', 'Called - Asked to Call back later',
+    "Language Barrier - Couldn't comprehend or speak the language",
+    'Called - Invalid Contact No', 'Not Interested - Timings not suitable',
+    'Not Interested - Pricing Issues', 'Trial Rescheduled',
+    'Not Interested - Health Issues', 'Lead Dropped or Lost',
+    'Initial Contact', 'No Response after Trial',
+    'Will come back once I exhaust my current gym membership',
+    'Trial Completed - Proximity Issues', 'Trial Completed - Other Issues',
+    'Trial Completed - Unresponsive', 'Trial Completed - Pricing Issues',
+    'Trial Completed - Currently Travelling',
+    'Called - Client out of town/traveling',
+    'Shared Pricing & Schedule details on WhatsApp',
+    'Called - Did not answer', 'Sent Introductory Message',
+    'Looking for Virtual Classes', 'Followed up with Trial Participants',
+    'Shared Membership Packages And Exclusive Deals',
+    "Trial Completed - Didn't like the class", 'Looking For Virtual Classes',
+    'Positive Trial Feedback - Interested in Membership'
   ]
-  const openStages = stages.slice(0, 7)
+  const openStages = stages.filter(s => !/^Membership Sold$|^Not Interested|^Lead Dropped or Lost$/.test(s))
   const fuChannels = ['call', 'whatsapp', 'email', 'sms']
 
   const sourceChannel = {
@@ -245,8 +265,17 @@ export function seed() {
     settings: {
       org: { name: 'Physique 57', brand: 'Studio 57', currency: 'INR', dateFormat: 'd MMM yyyy', timezone: 'Asia/Kolkata' },
       ui: { theme: 'dark', accent: 'rose', density: 'comfortable', glossy: true, showFollowUpColumns: true },
-      business: { defaultStage: 'New Lead', defaultSource: 'Website Form', businessHoursStart: '10:00', businessHoursEnd: '20:00', supportEmail: 'studio@physique57.in' },
-      cadence: { followUpDays: 3, outreachDays: 7, trialReminderDays: 1 },
+      business: { defaultStage: 'New Enquiry', defaultSource: 'Website Form', businessHoursStart: '10:00', businessHoursEnd: '20:00', supportEmail: 'studio@physique57.in' },
+      cadence: {
+        followUpDays: 3, outreachDays: 7, trialReminderDays: 1,
+        steps: [
+          { days: 1, channel: 'call', label: 'Follow-up 1' },
+          { days: 3, channel: 'whatsapp', label: 'Follow-up 2' },
+          { days: 7, channel: 'email', label: 'Follow-up 3' },
+          { days: 14, channel: 'call', label: 'Follow-up 4' }
+        ],
+        rules: []
+      },
       notifications: { followUpAlerts: true, missedOutreachAlerts: true, leadAgeAlerts: true, highValueAlerts: true, weeklyReport: false, dailyDigest: false },
       ai: { autoScore: true, sentiment: true, suggestions: true, riskDetection: true },
       followUpChannels: fuChannels,
