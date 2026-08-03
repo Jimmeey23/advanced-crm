@@ -1051,7 +1051,9 @@ app.post('/api/respondio/send', async (req, res) => {
   if (!lead) return res.status(404).json({ error: 'Lead not found' })
   const channel = ['call', 'whatsapp', 'email', 'sms'].includes(req.body.channel) ? req.body.channel : 'whatsapp'
   const text = String(req.body.message || '').trim()
-  if (!text) return res.status(400).json({ error: 'Message is required' })
+  const template = req.body.template || null
+  const useTemplate = req.body.useTemplate === true || !!template || (channel === 'whatsapp' && !(lead.respondio?.lastOutboundAt || (lead.followUps || []).some(f => f.via === 'respondio')))
+  if (!useTemplate && !text) return res.status(400).json({ error: 'Message is required' })
   if (!respondio.isConfigured(db)) return res.status(400).json({ error: 'Respond.io is not configured. Add your API key in Settings > Integrations.' })
   try {
     const contact = await respondio.getOrCreateContact(db, lead)
@@ -1062,18 +1064,24 @@ app.post('/api/respondio/send', async (req, res) => {
     } catch (e) {
       return res.status(502).json({ error: `Could not open a ${channel} conversation: ${e.message}` })
     }
-    const msg = await respondio.sendMessage(db, lead, text, channel)
+    const shouldUseTemplate = useTemplate
+    const msg = shouldUseTemplate
+      ? await respondio.sendTemplateMessage(db, lead, template || { name: '', language: 'en', parameters: [] })
+      : await respondio.sendMessage(db, lead, text, channel)
     if (req.body.logFollowUp !== false) {
       lead.followUps.push({
         id: uid('fu'),
         date: new Date().toISOString().slice(0, 10),
-        comments: `[${channel}] ${text}`,
+        comments: shouldUseTemplate
+          ? `[whatsapp template] ${template?.name || 'template'}${Array.isArray(template?.parameters) && template.parameters.length ? ` — ${template.parameters.join(' | ')}` : ''}`
+          : `[${channel}] ${text}`,
         channel,
         done: true,
         via: 'respondio',
         conversationId: lead.respondId
       })
     }
+    lead.respondio = { ...(lead.respondio || {}), lastOutboundAt: nowIso(), lastOutboundType: shouldUseTemplate ? 'template' : 'text' }
     lead.lastActivityAt = nowIso()
     markDirty(lead.id)
     save()

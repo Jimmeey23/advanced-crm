@@ -11,6 +11,7 @@ import { Avatar, ScorePill, Empty } from '../ui.jsx'
 import { fmtDate, stageClass, riskClass, daysFromNow, downloadText, money, baseColumnValue, buildFormulaContext, evalFormula, lookupColumnValue, formatColumnValue } from '../lib.js'
 import Tip from '../components/Tip.jsx'
 import ComposeModal from '../components/ComposeModal.jsx'
+import RespondioTemplateModal from '../components/RespondioTemplateModal.jsx'
 import ColumnManager, { DEFAULT_COLUMNS } from '../components/ColumnManager.jsx'
 
 const COLUMNS_KEY = 'p57_leads_columns_v1'
@@ -73,6 +74,7 @@ export default function Leads({ initialSearch = '' }) {
   const [groupBy, setGroupBy] = useState('')
   const [collapsed, setCollapsed] = useState({})
   const [composeLead, setComposeLead] = useState(null)
+  const [templateLead, setTemplateLead] = useState(null)
   const [selected, setSelected] = useState(() => new Set())
   const [selectAllMatching, setSelectAllMatching] = useState(false)
   const [selectAllBusy, setSelectAllBusy] = useState(false)
@@ -354,13 +356,14 @@ export default function Leads({ initialSearch = '' }) {
             <TableView
               items={items} boot={boot} lookup={lookup} openLead={openLead}
               changeStage={changeStage} grouped={grouped} collapsed={collapsed} toggleGroup={toggleGroup}
-              onMessage={setComposeLead}
+                  onMessage={setComposeLead}
+                  onTemplateMessage={setTemplateLead}
               selected={selected} toggleSelect={toggleSelect} toggleSelectAll={toggleSelectAll}
               columns={columns} density={density}
             />
           )}
-          {view === 'cards' && <CardsView items={items} lookup={lookup} openLead={openLead} grouped={grouped} collapsed={collapsed} toggleGroup={toggleGroup} boot={boot} onMessage={setComposeLead} />}
-          {view === 'compact' && <CompactView items={items} lookup={lookup} openLead={openLead} boot={boot} onMessage={setComposeLead} />}
+              {view === 'cards' && <CardsView items={items} lookup={lookup} openLead={openLead} grouped={grouped} collapsed={collapsed} toggleGroup={toggleGroup} boot={boot} onMessage={setComposeLead} onTemplateMessage={setTemplateLead} />}
+              {view === 'compact' && <CompactView items={items} lookup={lookup} openLead={openLead} boot={boot} onMessage={setComposeLead} onTemplateMessage={setTemplateLead} />}
           {!loading && !items.length && <Empty icon={<Search size={20} />} title="No leads match your filters" subtitle="Try adjusting the filters, or import a CSV of leads." />}
         </div>
       )}
@@ -376,6 +379,7 @@ export default function Leads({ initialSearch = '' }) {
       </div>
 
       <ComposeModal open={!!composeLead} onClose={() => setComposeLead(null)} lead={composeLead} />
+      <RespondioTemplateModal open={!!templateLead} onClose={() => setTemplateLead(null)} lead={templateLead} />
     </div>
   )
 }
@@ -407,7 +411,7 @@ function GroupSummary({ list, lookup }) {
   )
 }
 
-function TableView({ items, boot, lookup, openLead, changeStage, grouped, collapsed, toggleGroup, onMessage, selected, toggleSelect, toggleSelectAll, columns, density }) {
+function TableView({ items, boot, lookup, openLead, changeStage, grouped, collapsed, toggleGroup, onMessage, onTemplateMessage, selected, toggleSelect, toggleSelectAll, columns, density }) {
   if (grouped) {
     return (
       <div className="divide-y divide-white/5">
@@ -420,19 +424,19 @@ function TableView({ items, boot, lookup, openLead, changeStage, grouped, collap
                 <span className="font-display text-[13.5px] font-semibold text-white">{g.key}</span>
                 <GroupSummary list={g.list} lookup={lookup} />
               </button>
-              {isOpen && <TableGrid items={g.list} boot={boot} lookup={lookup} openLead={openLead} changeStage={changeStage} onMessage={onMessage} selected={selected} toggleSelect={toggleSelect} toggleSelectAll={toggleSelectAll} columns={columns} density={density} />}
+              {isOpen && <TableGrid items={g.list} boot={boot} lookup={lookup} openLead={openLead} changeStage={changeStage} onMessage={onMessage} onTemplateMessage={onTemplateMessage} selected={selected} toggleSelect={toggleSelect} toggleSelectAll={toggleSelectAll} columns={columns} density={density} />}
             </div>
           )
         })}
       </div>
     )
   }
-  return <TableGrid items={items} boot={boot} lookup={lookup} openLead={openLead} changeStage={changeStage} onMessage={onMessage} selected={selected} toggleSelect={toggleSelect} toggleSelectAll={toggleSelectAll} columns={columns} density={density} />
+  return <TableGrid items={items} boot={boot} lookup={lookup} openLead={openLead} changeStage={changeStage} onMessage={onMessage} onTemplateMessage={onTemplateMessage} selected={selected} toggleSelect={toggleSelect} toggleSelectAll={toggleSelectAll} columns={columns} density={density} />
 }
 
 const FU_LABELS = ['1', '2', '3', '4']
 
-function TableGrid({ items, boot, lookup, openLead, changeStage, onMessage, selected, toggleSelect, toggleSelectAll, columns, density }) {
+function TableGrid({ items, boot, lookup, openLead, changeStage, onMessage, onTemplateMessage, selected, toggleSelect, toggleSelectAll, columns, density }) {
   const cadenceDays = boot?.settings?.cadence?.outreachDays || 7
   const allChecked = items.length > 0 && items.every(l => selected?.has(l.id))
   const visibleCols = (columns || []).filter(c => !c.hidden && c.field !== 'created')
@@ -544,8 +548,11 @@ function TableGrid({ items, boot, lookup, openLead, changeStage, onMessage, sele
                   </td>
                 ))}
                 <td className="px-4 text-right" onClick={e => e.stopPropagation()}>
-                  <button className="btn btn-ghost !p-1.5 !text-[11px]" onClick={() => onMessage(l)} title="Send a message via Respond.io">
+                  <button className="btn btn-ghost !p-1.5 !text-[11px] mr-1" onClick={() => onMessage(l)} title="Send a message via Respond.io">
                     <MessageCircle size={13} className="text-emerald-400" />
+                  </button>
+                  <button className="btn btn-ghost !p-1.5 !text-[11px]" onClick={() => onTemplateMessage(l)} title="Send an approved WhatsApp template via Respond.io">
+                    <Sparkles size={13} className="text-fuchsia-400" />
                   </button>
                 </td>
               </tr>
@@ -604,7 +611,7 @@ function FuTip({ lead, ch, o, suggestion, isMissed }) {
   )
 }
 
-function CardsView({ items, lookup, openLead, grouped, collapsed, toggleGroup, boot, onMessage }) {
+function CardsView({ items, lookup, openLead, grouped, collapsed, toggleGroup, boot, onMessage, onTemplateMessage }) {
   const inner = (list) => (
     <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-3 p-4">
       {list.map(l => {
@@ -644,6 +651,9 @@ function CardsView({ items, lookup, openLead, grouped, collapsed, toggleGroup, b
               <span role="button" tabIndex={0} className="inline-flex w-6 h-6 rounded-md items-center justify-center border border-emerald-400/40 bg-emerald-400/10 text-emerald-400 hover:bg-emerald-400/20" title="Message via Respond.io" onClick={e => { e.stopPropagation(); onMessage(l) }}>
                 <MessageCircle size={11} />
               </span>
+              <span role="button" tabIndex={0} className="inline-flex w-6 h-6 rounded-md items-center justify-center border border-fuchsia-400/40 bg-fuchsia-400/10 text-fuchsia-300 hover:bg-fuchsia-400/20" title="Send approved WhatsApp template" onClick={e => { e.stopPropagation(); onTemplateMessage(l) }}>
+                <Sparkles size={11} />
+              </span>
             </div>
           </button>
         )
@@ -673,7 +683,7 @@ function CardsView({ items, lookup, openLead, grouped, collapsed, toggleGroup, b
   return inner(items)
 }
 
-function CompactView({ items, lookup, openLead, boot, onMessage }) {
+function CompactView({ items, lookup, openLead, boot, onMessage, onTemplateMessage }) {
   return (
     <div className="divide-y divide-white/5">
       {items.map(l => {
@@ -703,6 +713,9 @@ function CompactView({ items, lookup, openLead, boot, onMessage }) {
               <ScorePill score={l.ai.score} />
               <span role="button" tabIndex={0} className="inline-flex w-6 h-6 rounded-md items-center justify-center border border-emerald-400/40 bg-emerald-400/10 text-emerald-400 hover:bg-emerald-400/20" title="Message via Respond.io" onClick={e => { e.stopPropagation(); onMessage(l) }}>
                 <MessageCircle size={11} />
+              </span>
+              <span role="button" tabIndex={0} className="inline-flex w-6 h-6 rounded-md items-center justify-center border border-fuchsia-400/40 bg-fuchsia-400/10 text-fuchsia-300 hover:bg-fuchsia-400/20" title="Send approved WhatsApp template" onClick={e => { e.stopPropagation(); onTemplateMessage(l) }}>
+                <Sparkles size={11} />
               </span>
             </div>
           </button>

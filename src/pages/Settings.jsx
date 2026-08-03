@@ -62,6 +62,10 @@ export default function SettingsPage() {
   const [respStatus, setRespStatus] = useState(null)
   const [testResp, setTestResp] = useState(false)
   const [testRespResult, setTestRespResult] = useState(null)
+  const [wabaTemplates, setWabaTemplates] = useState([
+    { id: 'welcome', label: 'Welcome / First Reply', name: 'welcome_message', language: 'en', category: 'marketing', namespace: '', parameters: ['First name', 'Studio name'] },
+    { id: 'trial', label: 'Trial Booking Follow-up', name: 'trial_booking_followup', language: 'en', category: 'utility', namespace: '', parameters: ['First name', 'Trial date', 'Studio name'] }
+  ])
 
   const [mailSet, setMailSet] = useState({ host: '', port: 2525, user: '', pass: '', fromEmail: '', fromName: '', enabled: false })
   const [mailStatus, setMailStatus] = useState(null)
@@ -82,6 +86,10 @@ export default function SettingsPage() {
       setRr(boot.settings.roundRobin || {})
       setRem(boot.settings.reminders || {})
       setFuChannels(boot.settings.followUpChannels || ['call', 'whatsapp', 'email', 'sms'])
+      setWabaTemplates(boot.settings.respondio?.wabaTemplates || [
+        { id: 'welcome', label: 'Welcome / First Reply', name: 'welcome_message', language: 'en', category: 'marketing', namespace: '', parameters: ['First name', 'Studio name'] },
+        { id: 'trial', label: 'Trial Booking Follow-up', name: 'trial_booking_followup', language: 'en', category: 'utility', namespace: '', parameters: ['First name', 'Trial date', 'Studio name'] }
+      ])
     }
     setStages(boot?.stages || [])
     setSources(boot?.sources || [])
@@ -169,7 +177,7 @@ export default function SettingsPage() {
 
   const saveResp = async () => {
     try {
-      await api.put('/api/settings', { respondio: respSet })
+      await api.put('/api/settings', { respondio: { ...respSet, wabaTemplates } })
       refreshData(); toast('Respond.io settings saved')
       api.get('/api/respondio/status').then(setRespStatus).catch(() => {})
     } catch (e) { toast(e.message, 'error') }
@@ -482,6 +490,44 @@ export default function SettingsPage() {
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
                 <div className="sm:col-span-2"><label className="label">API key</label><input className="input" type="password" value={respSet.apiKey} onChange={e => setRespSet({ ...respSet, apiKey: e.target.value })} placeholder={respStatus?.configured ? '•••••••• (stored)' : 'pk_… from app.respond.io'} /></div>
                 <div><label className="label">Workspace ID (optional)</label><input className="input" value={respSet.workspaceId} onChange={e => setRespSet({ ...respSet, workspaceId: e.target.value })} placeholder="e.g. 5f2b…" /></div>
+              </div>
+              <div className="mt-4 card p-4 bg-white/[0.02] border-white/6">
+                <div className="flex items-center justify-between gap-3 mb-3">
+                  <div>
+                    <div className="font-semibold text-white text-[13px]">Approved WABA templates</div>
+                    <div className="text-[11.5px] text-slate-500">Linked WABA templates used automatically for first WhatsApp messages and available from the leads table.</div>
+                  </div>
+                  <button className="btn btn-ghost !py-1.5 !text-[12px]" onClick={() => setRespTemplates(t => [...t, { id: `tpl_${Date.now().toString(36)}`, label: 'New template', name: '', language: 'en', namespace: '', parameters: [''] }])}>
+                    <Plus size={13} /> Add template
+                  </button>
+                </div>
+                <div className="space-y-3">
+                  {wabaTemplates.map((t, idx) => (
+                    <div key={t.id || idx} className="rounded-xl border border-white/8 bg-white/[0.02] p-3 space-y-2">
+                      <div className="grid grid-cols-2 gap-2">
+                        <input className="input !py-1.5 !text-[12px]" placeholder="Display label" value={t.label || ''} onChange={e => setWabaTemplates(arr => arr.map((x, i) => i === idx ? { ...x, label: e.target.value } : x))} />
+                        <input className="input !py-1.5 !text-[12px]" placeholder="Template name" value={t.name || ''} onChange={e => setWabaTemplates(arr => arr.map((x, i) => i === idx ? { ...x, name: e.target.value } : x))} />
+                      </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <input className="input !py-1.5 !text-[12px]" placeholder="Language code (en, en_US)" value={t.language || 'en'} onChange={e => setWabaTemplates(arr => arr.map((x, i) => i === idx ? { ...x, language: e.target.value } : x))} />
+                        <select className="input !py-1.5 !text-[12px]" value={t.category || 'marketing'} onChange={e => setWabaTemplates(arr => arr.map((x, i) => i === idx ? { ...x, category: e.target.value } : x))}>
+                          <option value="marketing">marketing</option>
+                          <option value="utility">utility</option>
+                          <option value="authentication">authentication</option>
+                        </select>
+                      </div>
+                      <div>
+                        <div className="text-[10.5px] uppercase tracking-wider text-slate-500 font-semibold mb-1">Parameters</div>
+                        <input className="input !py-1.5 !text-[12px]" placeholder="Comma-separated parameter labels" value={(t.parameters || []).join(', ')} onChange={e => setWabaTemplates(arr => arr.map((x, i) => i === idx ? { ...x, parameters: e.target.value.split(',').map(s => s.trim()).filter(Boolean) } : x))} />
+                      </div>
+                      <div className="flex justify-end">
+                        <button className="btn btn-ghost !py-1.5 !text-[12px] text-rose-300" onClick={() => setWabaTemplates(arr => arr.filter((_, i) => i !== idx))}>
+                          <X size={13} /> Remove
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </div>
               <div className="flex items-center gap-3 mt-4">
                 <button className="btn btn-primary" onClick={saveResp}>Save Respond.io settings</button>

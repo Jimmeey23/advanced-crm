@@ -161,6 +161,37 @@ export async function sendMessage(db, lead, text, channel) {
   return pickContact(data) || data
 }
 
+export async function sendTemplateMessage(db, lead, template) {
+  const identifier = leadIdentifier(db, lead)
+  if (!identifier) throw new Error('Lead has no email or phone to use as a Respond.io identifier.')
+  if (!template?.name) throw new Error('A WhatsApp template name is required.')
+
+  const parameters = Array.isArray(template.parameters) ? template.parameters : []
+  const body = {
+    message: {
+      type: 'template',
+      template: {
+        name: String(template.name).trim(),
+        language: String(template.language || 'en').trim(),
+        parameters: parameters.map((p, index) => ({
+          type: 'text',
+          text: String(p ?? '').trim(),
+          index: index + 1
+        }))
+      }
+    }
+  }
+  if (template.category) body.message.template.category = String(template.category).trim()
+  if (template.channel) body.message.channel = template.channel
+  if (template.namespace) body.message.template.namespace = String(template.namespace).trim()
+
+  const data = await api(db, `/contact/${identifier}/message`, {
+    method: 'POST',
+    body
+  })
+  return pickContact(data) || data
+}
+
 export async function listContactMessages(db, lead, limit = 100) {
   const identifier = leadIdentifier(db, lead)
   if (!identifier) return []
