@@ -1189,11 +1189,37 @@ app.get('/api/respondio/conversations/:leadId', async (req, res) => {
 app.get('/api/respondio/templates', async (req, res) => {
   if (!respondio.isConfigured(db)) return res.json({ configured: false, templates: [] })
   try {
-    const channelId = await respondio.resolveChannelId(db, 'whatsapp')
-    if (!channelId) return res.json({ configured: true, templates: [], error: 'No WhatsApp channel found in your Respond.io workspace.' })
-    const all = await respondio.listTemplates(db, channelId)
-    const templates = all.filter(t => !t.status || String(t.status).toLowerCase() === 'approved')
-    res.json({ configured: true, channelId, templates })
+    // Fetch templates across every WhatsApp channel in the workspace, not
+    // just the first one resolveChannelId happens to find — workspaces with
+    // more than one connected WABA channel otherwise only ever see the first
+    // channel's approved templates.
+    const channelIds = await respondio.resolveWhatsAppChannelIds(db)
+    if (!channelIds.length) return res.json({ configured: true, templates: [], error: 'No WhatsApp channel found in your Respond.io workspace.' })
+
+    const perChannel = await Promise.all(channelIds.map(async id => {
+      const list = await respondio.listTemplates(db, id)
+      return list.map(t => ({ ...t, channelId: t.channelId || id }))
+    }))
+
+    const seen = new Set()
+    const all = []
+    for (const list of perChannel) {
+      for (const t of list) {
+        const key = `${t.channelId}:${t.id || t.name}`
+        if (seen.has(key)) continue
+        seen.add(key)
+        all.push(t)
+      }
+    }
+
+    // Respond.io/WhatsApp report status under varying field shapes/casing
+    // ("approved", "APPROVED", or a nested { name: 'APPROVED' } object) —
+    // normalize before comparing so approved templates aren't dropped.
+    const templates = all.filter(t => {
+      const raw = t.status?.name ?? t.status?.value ?? t.status
+      return !raw || String(raw).toLowerCase() === 'approved'
+    })
+    res.json({ configured: true, channelId: channelIds[0], templates })
   } catch (e) {
     res.status(502).json({ configured: true, templates: [], error: e.message })
   }
@@ -1208,6 +1234,15 @@ app.post('/api/respondio/send', async (req, res) => {
   const useTemplate = req.body.useTemplate === true || !!template || (channel === 'whatsapp' && !(lead.respondio?.lastOutboundAt || (lead.followUps || []).some(f => f.via === 'respondio')))
   if (!useTemplate && !text) return res.status(400).json({ error: 'Message is required' })
   if (!respondio.isConfigured(db)) return res.status(400).json({ error: 'Respond.io is not configured. Add your API key in Settings > Integrations.' })
+  // useTemplate can be forced true for a lead's first WhatsApp message even
+  // when the caller only meant to send free text (see the `useTemplate`
+  // computation above). Previously a missing `template` silently fell back
+  // to `{ name: '', ... }`, which produced a message with no template name
+  // and no components — delivered, but rendered as a blank chat bubble.
+  // Fail fast with a clear error instead.
+  if (useTemplate && (!template || !String(template.name || '').trim())) {
+    return res.status(400).json({ error: 'Select a WhatsApp template before sending the first message on this channel.' })
+  }
   try {
     const contact = await respondio.getOrCreateContact(db, lead)
     if (!contact?.id) return res.status(502).json({ error: 'Could not resolve a Respond.io contact for this lead.' })
@@ -1219,7 +1254,7 @@ app.post('/api/respondio/send', async (req, res) => {
     }
     const shouldUseTemplate = useTemplate
     const msg = shouldUseTemplate
-      ? await respondio.sendTemplateMessage(db, lead, template || { name: '', language: 'en', parameters: [] })
+      ? await respondio.sendTemplateMessage(db, lead, template)
       : await respondio.sendMessage(db, lead, text, channel)
     if (req.body.logFollowUp !== false) {
       lead.followUps.push({

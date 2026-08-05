@@ -1,8 +1,10 @@
-import React, { useMemo, useState } from 'react'
+import React, { useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import {
   Search, SlidersHorizontal, ChevronDown, ChevronRight, X, Download,
   Table as TableIcon, LayoutGrid, Rows3, PieChart, KanbanSquare, CalendarDays,
-  Phone, MessageCircle, Mail, MessageSquareText, Sparkles, Trash2, CheckSquare, Square
+  Phone, MessageCircle, Mail, MessageSquareText, Sparkles, Trash2, CheckSquare, Square,
+  Users, TrendingUp, XCircle, Wallet, Clock, AlertTriangle
 } from 'lucide-react'
 import { useApp } from '../store.jsx'
 import { useFetch } from '../hooks.js'
@@ -397,16 +399,48 @@ function groupKey(l, by, lookup) {
   }
 }
 
-function GroupSummary({ list, lookup }) {
-  const won = list.filter(l => l.status === 'won').length
-  const totalValue = list.reduce((s, l) => s + (l.valueEstimate || 0), 0)
-  const avgScore = list.length ? Math.round(list.reduce((s, l) => s + (l.ai?.score || 0), 0) / list.length) : 0
+function Metric({ icon: Icon, children, tone = 'neutral', title }) {
+  const tones = {
+    neutral: 'bg-white/5 border-white/10 text-slate-300',
+    emerald: 'bg-emerald-500/10 border-emerald-400/25 text-emerald-300',
+    amber: 'bg-amber-500/10 border-amber-400/25 text-amber-300',
+    rose: 'bg-rose-500/10 border-rose-400/25 text-rose-300',
+    fuchsia: 'bg-fuchsia-500/10 border-fuchsia-400/25 text-fuchsia-300',
+    slate: 'bg-white/[0.03] border-white/8 text-slate-400'
+  }
   return (
-    <span className="flex items-center gap-2.5 text-[11.5px] text-slate-400">
-      <span className="chip bg-white/5 border border-white/10 text-slate-300 !px-2 !py-0.5">{list.length} leads</span>
-      <span className="text-emerald-400 font-semibold">{won} won</span>
-      <span className="mono">{money(totalValue)}</span>
-      <span className="flex items-center gap-1"><Sparkles size={11} className="text-fuchsia-400" /> {avgScore} avg</span>
+    <span title={title} className={`inline-flex items-center gap-1.5 rounded-lg border px-2 py-1 text-[11px] font-medium mono ${tones[tone]}`}>
+      {Icon && <Icon size={11} className="shrink-0" />}
+      {children}
+    </span>
+  )
+}
+
+function GroupSummary({ list }) {
+  const total = list.length
+  const won = list.filter(l => l.status === 'won').length
+  const lost = list.filter(l => l.status === 'lost').length
+  const conversion = total ? Math.round((won / total) * 100) : 0
+  const openValue = list.reduce((s, l) => s + (l.status === 'open' ? (l.valueEstimate || 0) : 0), 0)
+  const wonValue = list.reduce((s, l) => s + (l.status === 'won' ? (l.valueEstimate || 0) : 0), 0)
+  const avgScore = total ? Math.round(list.reduce((s, l) => s + (l.ai?.score || 0), 0) / total) : 0
+  const ages = list.map(l => l.createdAt ? -daysFromNow(l.createdAt) : null).filter(n => n !== null && n >= 0)
+  const avgAge = ages.length ? Math.round(ages.reduce((a, b) => a + b, 0) / ages.length) : null
+  const missedFu = list.reduce((s, l) => s + (l.fu?.missedCount || 0), 0)
+  const activity = list.map(l => l.fu?.lastOutreachDays).filter(n => n !== null && n !== undefined)
+  const lastActivity = activity.length ? Math.min(...activity) : null
+
+  return (
+    <span className="flex flex-wrap items-center gap-1.5">
+      <Metric icon={Users} tone="neutral" title="Leads in this group">{total} lead{total === 1 ? '' : 's'}</Metric>
+      <Metric icon={TrendingUp} tone="emerald" title="Won leads and conversion rate">{won} won · {conversion}%</Metric>
+      {lost > 0 && <Metric icon={XCircle} tone="rose" title="Lost leads">{lost} lost</Metric>}
+      <Metric icon={Wallet} tone="amber" title="Open pipeline value (open leads only)">{money(openValue)} open</Metric>
+      {wonValue > 0 && <Metric icon={Wallet} tone="emerald" title="Closed-won value">{money(wonValue)} won</Metric>}
+      <Metric icon={Sparkles} tone="fuchsia" title="Average AI score">{avgScore} avg score</Metric>
+      {avgAge !== null && <Metric icon={Clock} tone="slate" title="Average lead age since creation">{avgAge}d avg age</Metric>}
+      {missedFu > 0 && <Metric icon={AlertTriangle} tone="rose" title="Total missed follow-ups in this group">{missedFu} missed FU</Metric>}
+      {lastActivity !== null && <Metric icon={Clock} tone="slate" title="Most recent outreach across the group">last activity {lastActivity}d ago</Metric>}
     </span>
   )
 }
@@ -419,10 +453,10 @@ function TableView({ items, boot, lookup, openLead, changeStage, grouped, collap
           const isOpen = !collapsed[g.key]
           return (
             <div key={g.key}>
-              <button className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-white/[0.03] transition-colors text-left" onClick={() => toggleGroup(g.key)}>
-                <ChevronRight size={14} className={`text-slate-500 transition-transform ${isOpen ? 'rotate-90' : ''}`} />
-                <span className="font-display text-[13.5px] font-semibold text-white">{g.key}</span>
-                <GroupSummary list={g.list} lookup={lookup} />
+              <button className="w-full flex flex-wrap items-center gap-3 px-4 py-3 bg-white/[0.025] hover:bg-white/[0.045] border-b border-white/8 transition-colors text-left" onClick={() => toggleGroup(g.key)}>
+                <ChevronRight size={14} className={`text-slate-500 transition-transform shrink-0 ${isOpen ? 'rotate-90' : ''}`} />
+                <span className="font-display text-[13.5px] font-semibold text-white shrink-0">{g.key}</span>
+                <GroupSummary list={g.list} />
               </button>
               {isOpen && <TableGrid items={g.list} boot={boot} lookup={lookup} openLead={openLead} changeStage={changeStage} onMessage={onMessage} onTemplateMessage={onTemplateMessage} selected={selected} toggleSelect={toggleSelect} toggleSelectAll={toggleSelectAll} columns={columns} density={density} />}
             </div>
@@ -452,8 +486,8 @@ function TableGrid({ items, boot, lookup, openLead, changeStage, onMessage, onTe
               </button>
             </th>
             <th className="px-4 py-3 font-semibold">Lead</th>
-            <th className="px-4 py-3 font-semibold w-[110px]">Stage</th>
-            <th className="px-4 py-3 font-semibold w-[150px]">Created</th>
+            <th className="px-4 py-3 font-semibold w-[100px]">Stage</th>
+            <th className="px-4 py-3 font-semibold w-[190px]">Created</th>
             {visibleCols.map(c => <th key={c.id} className="px-4 py-3 font-semibold">{c.label}</th>)}
             <th className="px-4 py-3 font-semibold">Next</th>
             <th className="px-4 py-3 font-semibold text-center" colSpan={4}>Follow-ups</th>
@@ -494,12 +528,12 @@ function TableGrid({ items, boot, lookup, openLead, changeStage, onMessage, onTe
                     </div>
                   </div>
                 </td>
-                <td className={`px-4 ${py}`}>
-                  <select className="input !py-1 !text-[11.5px] !w-auto" value={l.stage} onClick={e => e.stopPropagation()} onChange={e => changeStage(l, e.target.value)}>
+                <td className={`px-4 ${py} w-[100px]`}>
+                  <select className="input !py-1 !text-[11.5px] !w-[88px] truncate" title={l.stage} value={l.stage} onClick={e => e.stopPropagation()} onChange={e => changeStage(l, e.target.value)}>
                     {(boot?.stages || []).map(s => <option key={s}>{s}</option>)}
                   </select>
                 </td>
-                <td className={`px-4 ${py} text-[12px] text-slate-400 mono`}>{fmtDate(l.createdAt)}</td>
+                <td className={`px-4 ${py} w-[190px] text-[12px] text-slate-400 mono`}>{fmtDate(l.createdAt)}</td>
                 {visibleCols.map(c => {
                   const val = getColumnValue(c, l, lookup)
                   return (
@@ -572,18 +606,127 @@ function FuCell({ lead, ch }) {
   const isMissed = missed && missed < today
   const suggestion = lead.ai?.followupSuggestions?.find(s => s.channel === ch)?.text
   const Icon = CHANNELS[ch].icon
-  const color = CHANNELS[ch].color
+  const anchorRef = useRef(null)
+  const [popOpen, setPopOpen] = useState(false)
+  const [pos, setPos] = useState(null)
+
+  const openPopover = (e) => {
+    e.stopPropagation()
+    const r = anchorRef.current.getBoundingClientRect()
+    setPos({ x: Math.round(r.left + r.width / 2), y: Math.round(r.bottom + 6) })
+    setPopOpen(true)
+  }
+
   return (
-    <Tip content={<FuTip lead={lead} ch={ch} o={o} suggestion={suggestion} isMissed={isMissed} />}>
-      <span
-        className={`inline-flex w-6 h-6 rounded-lg items-center justify-center border transition-colors ${filled ? 'border-emerald-400/50 bg-emerald-400/15' : 'border-white/8 bg-white/[0.03]'}`}
-        title={filled ? `Last ${CHANNELS[ch].label}: ${o.date}` : `No ${CHANNELS[ch].label} logged`}
+    <>
+      <Tip content={<FuTip lead={lead} ch={ch} o={o} suggestion={suggestion} isMissed={isMissed} />}>
+        <span
+          ref={anchorRef}
+          onClick={openPopover}
+          className={`inline-flex w-6 h-6 rounded-lg items-center justify-center border transition-colors cursor-pointer hover:brightness-125 ${filled ? 'border-emerald-400/50 bg-emerald-400/15' : 'border-white/8 bg-white/[0.03]'}`}
+          title={filled ? `Last ${CHANNELS[ch].label}: ${o.date} — click to log another` : `No ${CHANNELS[ch].label} logged — click to log`}
+        >
+          {filled
+            ? <Icon size={12} style={{ color: isMissed ? '#fb7185' : '#34d399' }} />
+            : <span className="text-slate-600">—</span>}
+        </span>
+      </Tip>
+      {popOpen && pos && createPortal(
+        <QuickFollowUpPopover lead={lead} ch={ch} pos={pos} onClose={() => setPopOpen(false)} />,
+        document.body
+      )}
+    </>
+  )
+}
+
+// Lightweight click-triggered popover for logging a single follow-up without
+// opening the full LeadDrawer. Posts to the same endpoint/payload shape as
+// LeadDrawer's addFollowUp (see src/components/LeadDrawer.jsx ~line 87).
+function QuickFollowUpPopover({ lead, ch, pos, onClose }) {
+  const { toast, refreshData } = useApp()
+  const [channel, setChannel] = useState(ch)
+  const [comments, setComments] = useState('')
+  const [saving, setSaving] = useState(false)
+  const boxRef = useRef(null)
+
+  React.useEffect(() => {
+    const handleClick = (e) => { if (boxRef.current && !boxRef.current.contains(e.target)) onClose() }
+    const handleKey = (e) => { if (e.key === 'Escape') onClose() }
+    document.addEventListener('mousedown', handleClick, true)
+    document.addEventListener('keydown', handleKey)
+    return () => {
+      document.removeEventListener('mousedown', handleClick, true)
+      document.removeEventListener('keydown', handleKey)
+    }
+  }, [onClose])
+
+  const submit = async (e) => {
+    e.preventDefault()
+    if (!comments.trim()) return
+    setSaving(true)
+    try {
+      await api.post(`/api/leads/${lead.id}/followups`, {
+        date: new Date().toISOString().slice(0, 10),
+        comments: comments.trim(),
+        channel
+      })
+      toast('Follow-up logged')
+      refreshData()
+      onClose()
+    } catch (err) { toast(err.message, 'error') }
+    finally { setSaving(false) }
+  }
+
+  const vw = window.innerWidth
+  const half = 145
+  const x = Math.max(half + 12, Math.min(pos.x, vw - half - 12))
+
+  return (
+    <div
+      className="fixed pointer-events-none"
+      style={{ left: 0, top: 0, zIndex: 2147483000, transform: `translate(${x}px, ${pos.y}px) translate(-50%, 0)` }}
+    >
+      <form
+        ref={boxRef}
+        onSubmit={submit}
+        onClick={e => e.stopPropagation()}
+        className="pointer-events-auto card !rounded-xl p-3 shadow-2xl space-y-2"
+        style={{ width: 290, background: 'var(--tt-bg)', animation: 'fadeIn .12s ease' }}
       >
-        {filled
-          ? <Icon size={12} style={{ color: isMissed ? '#fb7185' : '#34d399' }} />
-          : <span className="text-slate-600">—</span>}
-      </span>
-    </Tip>
+        <div className="flex items-center gap-2">
+          <span className="text-[11.5px] font-semibold text-white flex-1">Log follow-up</span>
+          <button type="button" className="text-slate-500 hover:text-white" onClick={onClose}><X size={13} /></button>
+        </div>
+        <div className="flex gap-1.5">
+          {Object.entries(CHANNELS).map(([key, meta]) => {
+            const ChanIcon = meta.icon
+            const active = channel === key
+            return (
+              <button
+                key={key}
+                type="button"
+                onClick={() => setChannel(key)}
+                title={meta.label}
+                className={`flex-1 flex items-center justify-center h-7 rounded-lg border transition-colors ${active ? 'border-white/30' : 'border-white/8 hover:border-white/20'}`}
+                style={active ? { background: `${meta.color}22`, color: meta.color, borderColor: `${meta.color}55` } : { color: '#64748b' }}
+              >
+                <ChanIcon size={13} />
+              </button>
+            )
+          })}
+        </div>
+        <input
+          autoFocus
+          className="input !py-1.5 !text-[12px]"
+          placeholder="Note / outcome…"
+          value={comments}
+          onChange={e => setComments(e.target.value)}
+        />
+        <button className="btn btn-primary !py-1.5 !text-[12px] w-full" type="submit" disabled={saving || !comments.trim()}>
+          {saving ? 'Saving…' : 'Log follow-up'}
+        </button>
+      </form>
+    </div>
   )
 }
 
@@ -668,10 +811,10 @@ function CardsView({ items, lookup, openLead, grouped, collapsed, toggleGroup, b
           const isOpen = !collapsed[g.key]
           return (
             <div key={g.key}>
-              <button className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-white/[0.03] text-left" onClick={() => toggleGroup(g.key)}>
-                <ChevronRight size={14} className={`text-slate-500 transition-transform ${isOpen ? 'rotate-90' : ''}`} />
-                <span className="font-display text-[13.5px] font-semibold text-white">{g.key}</span>
-                <GroupSummary list={g.list} lookup={lookup} />
+              <button className="w-full flex flex-wrap items-center gap-3 px-4 py-3 bg-white/[0.025] hover:bg-white/[0.045] border-b border-white/8 text-left transition-colors" onClick={() => toggleGroup(g.key)}>
+                <ChevronRight size={14} className={`text-slate-500 transition-transform shrink-0 ${isOpen ? 'rotate-90' : ''}`} />
+                <span className="font-display text-[13.5px] font-semibold text-white shrink-0">{g.key}</span>
+                <GroupSummary list={g.list} />
               </button>
               {isOpen && inner(g.list)}
             </div>

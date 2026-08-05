@@ -12,12 +12,31 @@ function getLibrary(settingsTemplates) {
   return Array.isArray(settingsTemplates) && settingsTemplates.length ? settingsTemplates : defaults
 }
 
+function countPlaceholders(text) {
+  return (String(text || '').match(/\{\{\d+\}\}/g) || []).length
+}
+
 // Convert a Respond.io WhatsApp template (from /api/respondio/templates) into
-// the shape this modal renders: one parameter slot per {{n}} placeholder in
-// the template's body component.
+// the shape this modal renders: one parameter slot per {{n}} placeholder
+// across the template's header, body and button components (in that order).
+// Previously only the body was scanned, so templates with a header or
+// button variable were sent with those components entirely missing — a
+// mismatch against the approved template that makes WhatsApp deliver the
+// message as an empty bubble. `rawComponents` is forwarded to the backend
+// unchanged so it can rebuild the exact component types/positions expected.
 function fromApiTemplate(t) {
-  const body = (t.components || []).find(c => c.type === 'body')
-  const count = (body?.text?.match(/\{\{\d+\}\}/g) || []).length
+  const components = Array.isArray(t.components) ? t.components : []
+  const header = components.find(c => String(c.type).toUpperCase() === 'HEADER')
+  const body = components.find(c => String(c.type).toUpperCase() === 'BODY')
+  const buttons = components.filter(c => String(c.type).toUpperCase() === 'BUTTONS').flatMap(c => c.buttons || [])
+
+  const parameters = []
+  for (let i = 0; i < countPlaceholders(header?.text); i++) parameters.push(`Header variable ${i + 1}`)
+  for (let i = 0; i < countPlaceholders(body?.text); i++) parameters.push(`Variable ${i + 1}`)
+  buttons.forEach((btn, bi) => {
+    for (let i = 0; i < countPlaceholders(btn.url || btn.text); i++) parameters.push(`Button ${bi + 1} variable ${i + 1}`)
+  })
+
   return {
     id: String(t.id),
     name: t.name,
@@ -26,7 +45,8 @@ function fromApiTemplate(t) {
     category: t.category,
     namespace: t.namespace || '',
     channelId: t.channelId,
-    parameters: Array.from({ length: count }, (_, i) => `Variable ${i + 1}`)
+    rawComponents: components,
+    parameters
   }
 }
 
@@ -75,6 +95,10 @@ export default function RespondioTemplateModal({ open, onClose, lead }) {
   const setValue = (idx, v) => setValues(curr => curr.map((x, i) => (i === idx ? v : x)))
 
   const send = async () => {
+    if (!selected || !String(selected.name || '').trim()) {
+      setError('Select a WhatsApp template before sending.')
+      return
+    }
     setSending(true); setError('')
     try {
       const payload = {
@@ -89,6 +113,7 @@ export default function RespondioTemplateModal({ open, onClose, lead }) {
           category: selected?.category || '',
           channel: 'whatsapp',
           channelId: selected?.channelId,
+          rawComponents: selected?.rawComponents || [],
           parameters: values
         },
         logFollowUp: true

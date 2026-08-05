@@ -141,11 +141,47 @@ export async function resolveChannelId(db, channel) {
   }
 }
 
+// Same as resolveChannelId, but returns *every* WhatsApp channel in the
+// workspace instead of just the first match. A workspace can have more than
+// one connected WABA channel (e.g. multiple studio numbers); templates only
+// show up under the channel they were submitted/approved on, so listing
+// templates against a single hard-coded channel silently hides the others.
+export async function resolveWhatsAppChannelIds(db) {
+  const configured = db?.settings?.respondio?.channelIds?.whatsapp
+  if (configured) return [Number(configured)]
+  try {
+    const channels = await listChannels(db)
+    return channels.filter(c => isWhatsAppSource(c.source)).map(c => c.id).filter(Boolean)
+  } catch (e) {
+    return []
+  }
+}
+
 // List approved WhatsApp templates for a channel (GET /space/channel/{id}/template).
+// The endpoint paginates like respond.io's other v2 list endpoints (a
+// `pagination.next` cursor/URL alongside the page's `items`) — fetching only
+// the first page silently drops every template past the first page size.
 export async function listTemplates(db, channelId) {
   if (!channelId) return []
-  const data = await api(db, `/space/channel/${channelId}/template`)
-  return asList(data)
+  const out = []
+  let path = `/space/channel/${channelId}/template`
+  let guard = 0
+  while (path && guard < 25) {
+    guard++
+    const data = await api(db, path)
+    out.push(...asList(data))
+    const next = data?.pagination?.next || data?.pagination?.nextCursor || data?.nextPage || data?.next || null
+    if (!next) break
+    if (/^https?:\/\//i.test(next)) {
+      path = next.replace(BASE, '')
+    } else if (String(next).startsWith('/')) {
+      path = next
+    } else {
+      const base = `/space/channel/${channelId}/template`
+      path = `${base}?cursor=${encodeURIComponent(next)}`
+    }
+  }
+  return out
 }
 
 // Look up the lead's contact in Respond.io by identifier. Returns the contact
@@ -204,15 +240,66 @@ export async function sendMessage(db, lead, text, channel) {
   return pickContact(data) || data
 }
 
+function countPlaceholders(text) {
+  return (String(text || '').match(/\{\{\d+\}\}/g) || []).length
+}
+
+// Build the `components` array Respond.io/WhatsApp expects for a template
+// send. WhatsApp renders the message as an empty bubble (delivered, but
+// blank) whenever the outgoing components don't exactly mirror the approved
+// template's own header/body/button placeholders — e.g. sending only a
+// `body` component when the template also has a variable in its header. This
+// walks the template's own component schema (as returned by the templates
+// list endpoint) and slots the flat, ordered list of user-entered values
+// (header vars first, then body, then button vars) into the matching
+// component types.
+function buildTemplateComponents(rawComponents, values) {
+  const comps = Array.isArray(rawComponents) ? rawComponents : []
+  const vals = Array.isArray(values) ? values.slice() : []
+  const out = []
+  let cursor = 0
+  const take = n => {
+    const slice = vals.slice(cursor, cursor + n).map(v => String(v ?? '').trim())
+    cursor += n
+    return slice
+  }
+
+  const header = comps.find(c => String(c.type).toUpperCase() === 'HEADER')
+  const headerCount = countPlaceholders(header?.text)
+  if (headerCount > 0) out.push({ type: 'header', parameters: take(headerCount).map(text => ({ type: 'text', text })) })
+
+  const body = comps.find(c => String(c.type).toUpperCase() === 'BODY')
+  // Fall back to treating every remaining value as a body param when the raw
+  // component schema wasn't supplied (e.g. manually configured templates).
+  const bodyCount = body ? countPlaceholders(body.text) : Math.max(vals.length - cursor, 0)
+  if (bodyCount > 0) out.push({ type: 'body', parameters: take(bodyCount).map(text => ({ type: 'text', text })) })
+
+  const buttons = comps.filter(c => String(c.type).toUpperCase() === 'BUTTONS').flatMap(c => c.buttons || [])
+  buttons.forEach((btn, index) => {
+    const n = countPlaceholders(btn.url || btn.text)
+    if (n > 0) out.push({ type: 'button', sub_type: 'url', index: String(index), parameters: take(n).map(text => ({ type: 'text', text })) })
+  })
+
+  return out
+}
+
 export async function sendTemplateMessage(db, lead, template) {
   const identifier = leadIdentifier(db, lead)
   if (!identifier) throw new Error('Lead has no email or phone to use as a Respond.io identifier.')
-  if (!template?.name) throw new Error('A WhatsApp template name is required.')
+  // Never silently substitute a blank template — a missing name/selection
+  // used to fall back to `{ name: '', ... }` upstream, which sent a message
+  // with no template name and no components and showed up as an empty chat
+  // bubble. Fail loudly instead so the caller surfaces a real error.
+  if (!template || typeof template !== 'object' || !String(template.name || '').trim()) {
+    throw new Error('No WhatsApp template was selected — pick an approved template before sending.')
+  }
 
-  const parameters = Array.isArray(template.parameters) ? template.parameters : []
-  const components = parameters.length
-    ? [{ type: 'body', parameters: parameters.map(p => ({ type: 'text', text: String(p ?? '').trim() })) }]
-    : []
+  // Callers may pass a fully pre-built `components` array (already shaped for
+  // the Respond.io API); otherwise build it from the template's raw
+  // component schema plus the flat list of entered parameter values.
+  const components = Array.isArray(template.components) && template.components.length
+    ? template.components
+    : buildTemplateComponents(template.rawComponents, template.parameters)
   const channelId = template.channelId || await resolveChannelId(db, template.channel || 'whatsapp')
   const body = {
     channelId,
