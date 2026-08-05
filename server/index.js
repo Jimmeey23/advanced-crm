@@ -878,11 +878,8 @@ app.get('/api/analytics/performance', (req, res) => {
 // Per-studio breakdown for a single week/month period. `offset` counts periods
 // back from the current one (week: 0 = this week, 1 = last week; month: 0 =
 // this month). Used by the dedicated weekly/monthly studio performance pages.
-app.get('/api/analytics/performance/by-location', (req, res) => {
-  const range = req.query.range === 'month' ? 'month' : 'week'
-  const offset = Math.max(0, Number(req.query.offset) || 0)
-  const now = new Date()
 
+function periodBounds(range, offset, now) {
   let start, end, label
   if (range === 'week') {
     const thisWeekStart = weekStart(now)
@@ -895,15 +892,23 @@ app.get('/api/analytics/performance/by-location', (req, res) => {
     end = new Date(y, m + 1, 1)
     label = start.toLocaleString('en-US', { month: 'long', year: 'numeric' })
   }
+  return { start, end, label }
+}
 
-  const inRange = (v) => {
+function periodInRangeFn(start, end) {
+  return (v) => {
     if (!v || v === '-') return false
     const d = new Date(v)
     return !isNaN(d.getTime()) && d >= start && d < end
   }
-  const isTrialStage = (s) => /trial/i.test(s || '')
+}
 
-  const rows = db.locations.map(loc => {
+const isTrialStage = (s) => /trial/i.test(s || '')
+
+// Per-location rows (unchanged shape) for a given [start, end) period.
+function periodLocationRows(start, end, locations) {
+  const inRange = periodInRangeFn(start, end)
+  return locations.map(loc => {
     const leads = db.leads.filter(l => l.locationId === loc.id)
     const newLeads = leads.filter(l => inRange(l.createdAt))
     const won = leads.filter(l => l.status === 'won' && inRange(l.convertedAt))
@@ -937,11 +942,146 @@ app.get('/api/analytics/performance/by-location', (req, res) => {
       wonDetails: won.map(l => ({ id: l.id, fullName: l.fullName, revenue: l.valueEstimate || 0, associateId: l.associateId }))
     }
   }).sort((a, b) => b.revenue - a.revenue)
+}
+
+// Aggregate summary (overall, or scoped to one location) for a [start, end) period.
+function periodSummary(start, end, locationId) {
+  const inRange = periodInRangeFn(start, end)
+  const leads = locationId ? db.leads.filter(l => l.locationId === locationId) : db.leads
+  const newLeads = leads.filter(l => inRange(l.createdAt))
+  const won = leads.filter(l => l.status === 'won' && inRange(l.convertedAt))
+  const trials = leads.filter(l => isTrialStage(l.stage) && inRange(l.createdAt || l.updatedAt))
+  const revenue = won.reduce((s, l) => s + (l.valueEstimate || 0), 0)
+  let followUps = 0, missed = 0
+  for (const l of leads) {
+    for (const f of l.followUps || []) {
+      if (!inRange(f.date)) continue
+      followUps++
+      if (f.done === false) missed++
+    }
+  }
+  return {
+    newLeads: newLeads.length, trials: trials.length, won: won.length, revenue,
+    followUps, missed,
+    followUpRate: followUps ? Math.round(((followUps - missed) / followUps) * 100) : 0
+  }
+}
+
+// Mutually-exclusive funnel stage counts (new/trial/won/lost) for leads created in the period.
+function periodFunnel(start, end, locationId) {
+  const inRange = periodInRangeFn(start, end)
+  const leads = (locationId ? db.leads.filter(l => l.locationId === locationId) : db.leads)
+    .filter(l => inRange(l.createdAt))
+  const counts = { new: 0, trial: 0, won: 0, lost: 0 }
+  for (const l of leads) {
+    if (l.status === 'won') counts.won++
+    else if (l.status === 'lost') counts.lost++
+    else if (isTrialStage(l.stage)) counts.trial++
+    else counts.new++
+  }
+  return counts
+}
+
+// Full (not just top/bottom) associate leaderboard for a period, optionally scoped to one location.
+function periodLeaderboard(start, end, locationId) {
+  const inRange = periodInRangeFn(start, end)
+  const associates = locationId ? db.associates.filter(a => a.locationId === locationId) : db.associates
+  return associates.map(a => {
+    const owned = db.leads.filter(l => l.associateId === a.id)
+    const newLeads = owned.filter(l => inRange(l.createdAt))
+    const won = owned.filter(l => l.status === 'won' && inRange(l.convertedAt))
+    const trials = owned.filter(l => isTrialStage(l.stage) && inRange(l.createdAt || l.updatedAt))
+    const revenue = won.reduce((s, l) => s + (l.valueEstimate || 0), 0)
+    let followUps = 0, missed = 0
+    for (const l of owned) {
+      for (const f of l.followUps || []) {
+        if (!inRange(f.date)) continue
+        followUps++
+        if (f.done === false) missed++
+      }
+    }
+    return {
+      associateId: a.id, name: a.name, locationId: a.locationId,
+      newLeads: newLeads.length, trials: trials.length, won: won.length, revenue,
+      followUpRate: followUps ? Math.round(((followUps - missed) / followUps) * 100) : 0
+    }
+  }).sort((a, b) => b.revenue - a.revenue)
+}
+
+// Leads grouped by source with won-rate, for a period optionally scoped to one location.
+function periodSourceBreakdown(start, end, locationId) {
+  const inRange = periodInRangeFn(start, end)
+  const leads = (locationId ? db.leads.filter(l => l.locationId === locationId) : db.leads)
+    .filter(l => inRange(l.createdAt))
+  const map = {}
+  for (const l of leads) {
+    const key = l.sourceName || 'Unknown'
+    map[key] = map[key] || { source: key, count: 0, wonCount: 0 }
+    map[key].count++
+    if (l.status === 'won') map[key].wonCount++
+  }
+  return Object.values(map)
+    .map(s => ({ ...s, wonRate: s.count ? Math.round((s.wonCount / s.count) * 100) : 0 }))
+    .sort((a, b) => b.count - a.count)
+}
+
+function periodLabelFor(range, start) {
+  return range === 'week'
+    ? start.toLocaleString('en-US', { month: 'short', day: 'numeric' })
+    : start.toLocaleString('en-US', { month: 'short', year: '2-digit' })
+}
+
+app.get('/api/analytics/performance/by-location', (req, res) => {
+  const range = req.query.range === 'month' ? 'month' : 'week'
+  const offset = Math.max(0, Number(req.query.offset) || 0)
+  const now = new Date()
+  const locationId = req.query.location || null
+
+  // Lightweight per-location history mode: used by expandable studio rows to
+  // lazily fetch just that location's sparkline data, avoiding the heavier
+  // full-payload computation (rows/leaderboard/funnel/sourceBreakdown) on
+  // every keystroke of the offset paginator.
+  if (locationId) {
+    const n = Math.min(24, Math.max(1, Number(req.query.history) || 12))
+    const history = []
+    for (let i = n - 1; i >= 0; i--) {
+      const { start, end } = periodBounds(range, offset + i, now)
+      history.push({ periodLabel: periodLabelFor(range, start), ...periodSummary(start, end, locationId) })
+    }
+    return res.json({ locationId, range, offset, history })
+  }
+
+  const { start, end, label } = periodBounds(range, offset, now)
+  const rows = periodLocationRows(start, end, db.locations)
+
+  const { start: pStart, end: pEnd } = periodBounds(range, offset + 1, now)
+  const previous = periodSummary(pStart, pEnd)
+
+  let history = []
+  const historyLen = Math.min(24, Math.max(0, Number(req.query.history) || 0))
+  if (historyLen > 0) {
+    for (let i = historyLen - 1; i >= 0; i--) {
+      const { start: s, end: e } = periodBounds(range, offset + i, now)
+      history.push({ periodLabel: periodLabelFor(range, s), ...periodSummary(s, e) })
+    }
+  }
+
+  const funnel = {
+    ...periodFunnel(start, end),
+    byLocation: db.locations.map(loc => ({ locationId: loc.id, locationName: loc.name, ...periodFunnel(start, end, loc.id) }))
+  }
+  const leaderboard = periodLeaderboard(start, end)
+  const sourceBreakdown = periodSourceBreakdown(start, end)
 
   res.json({
     range, offset, label,
     start: start.toISOString().slice(0, 10), end: new Date(end.getTime() - 86400000).toISOString().slice(0, 10),
-    rows
+    rows,
+    previous,
+    history,
+    funnel,
+    leaderboard,
+    sourceBreakdown
   })
 })
 
