@@ -136,7 +136,7 @@ function applyRemoteLeadChange({ eventType, id, data }) {
   if (remoteChangeCb) remoteChangeCb()
 }
 
-const META_FIELDS = ['settings', 'locations', 'associates', 'stages', 'sources', 'channels', 'classTypes', 'activity', 'importHistory']
+const META_FIELDS = ['settings', 'locations', 'associates', 'stages', 'sources', 'channels', 'classTypes', 'activity', 'importHistory', 'webhookIntegrations', 'webhookLogs']
 function applyRemoteMetaChange({ data }) {
   if (Date.now() - lastLocalWriteAt < 2000 || !state || !data) return
   for (const field of META_FIELDS) if (field in data) state[field] = data[field]

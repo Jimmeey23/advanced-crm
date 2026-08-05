@@ -1,5 +1,6 @@
 import path from 'node:path'
 import fs from 'node:fs'
+import crypto from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 import express from 'express'
 import multer from 'multer'
@@ -47,6 +48,17 @@ app.use((req, res, next) => {
 
 app.use(express.json({ limit: '200mb' }))
 app.use(express.urlencoded({ extended: true, limit: '200mb' }))
+
+// express.json() throws a raw SyntaxError (which the default Express handler
+// would render as an HTML error page) when the body isn't valid JSON — most
+// relevant for external callers of the inbound webhook endpoint below, who
+// need a JSON error body back to know what went wrong.
+app.use((err, req, res, next) => {
+  if (err?.type === 'entity.parse.failed' || err instanceof SyntaxError) {
+    return res.status(400).json({ error: 'Malformed JSON body' })
+  }
+  next(err)
+})
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 200 * 1024 * 1024 } })
 
@@ -205,7 +217,8 @@ app.get('/api/bootstrap', (req, res) => {
       respondio: respondio.isConfigured(db),
       mailtrap: mailer.isConfigured(db),
       momence: momence.isConfigured(db)
-    }
+    },
+    webhookIntegrations: db.webhookIntegrations
   })
 })
 
@@ -509,6 +522,190 @@ app.post('/api/leads/bulk', (req, res) => {
   save()
   log('import', `Bulk import created ${created.length} leads (${skipped} skipped)`)
   res.status(201).json({ created: created.length, skipped, items: enrichAll(created, db) })
+})
+
+// ---------- webhook integrations ----------
+
+function genWebhookKey() {
+  return crypto.randomBytes(24).toString('hex') // 48 chars, unguessable
+}
+
+function webhookUrlForReq(req, key) {
+  return `${req.protocol}://${req.get('host')}/api/webhooks/leads/${key}`
+}
+
+function serializeWebhook(w, req) {
+  return { ...w, url: webhookUrlForReq(req, w.key) }
+}
+
+// Applies an integration's field_mapping (incoming payload key -> lead field)
+// to a received JSON body. If no mapping is configured yet, fall back to
+// treating the body's own keys as if they already matched our field names,
+// so a webhook works out of the box before anyone visits the mapping editor.
+function applyFieldMapping(body, mapping) {
+  const map = mapping && Object.keys(mapping).length
+    ? mapping
+    : { name: 'name', fullName: 'name', email: 'email', phone: 'phone', source: 'source', notes: 'notes' }
+  const out = {}
+  for (const [incomingKey, targetField] of Object.entries(map)) {
+    const val = body[incomingKey]
+    if (val !== undefined && val !== null && String(val).trim() !== '') out[targetField] = val
+  }
+  return out
+}
+
+function findDuplicateLead(email, phone) {
+  const emailNorm = email ? String(email).trim().toLowerCase() : ''
+  const phoneNorm = phone ? String(phone).replace(/\D/g, '') : ''
+  if (!emailNorm && !phoneNorm) return null
+  return db.leads.find(l => {
+    if (emailNorm && l.email && l.email !== '-' && String(l.email).trim().toLowerCase() === emailNorm) return true
+    if (phoneNorm && l.phone && String(l.phone).replace(/\D/g, '') === phoneNorm) return true
+    return false
+  })
+}
+
+function logWebhookCall(integrationId, outcome, detail) {
+  db.webhookLogs.unshift({ id: uid('whlog'), integrationId, ts: nowIso(), outcome, detail: detail || null })
+  if (db.webhookLogs.length > 300) db.webhookLogs.length = 300
+  save()
+}
+
+// Basic in-memory per-key rate limit (sliding window) to stop a misbehaving
+// or abused form integration from flooding lead creation.
+const rateBuckets = new Map()
+function checkRateLimit(key, limit = 30, windowMs = 60000) {
+  const now = Date.now()
+  const arr = (rateBuckets.get(key) || []).filter(t => now - t < windowMs)
+  if (arr.length >= limit) { rateBuckets.set(key, arr); return false }
+  arr.push(now)
+  rateBuckets.set(key, arr)
+  return true
+}
+
+app.get('/api/webhooks', (req, res) => {
+  res.json(db.webhookIntegrations.map(w => serializeWebhook(w, req)))
+})
+
+app.post('/api/webhooks', (req, res) => {
+  const name = String(req.body?.name || '').trim()
+  if (!name) return res.status(400).json({ error: 'Name is required' })
+  const w = {
+    id: uid('wh'),
+    name,
+    key: genWebhookKey(),
+    fieldMapping: req.body?.fieldMapping && typeof req.body.fieldMapping === 'object' ? req.body.fieldMapping : {},
+    createdAt: nowIso(),
+    lastUsedAt: null
+  }
+  db.webhookIntegrations.push(w)
+  save()
+  log('webhook', `Created webhook integration "${w.name}"`)
+  res.status(201).json(serializeWebhook(w, req))
+})
+
+app.patch('/api/webhooks/:id', (req, res) => {
+  const w = db.webhookIntegrations.find(x => x.id === req.params.id)
+  if (!w) return res.status(404).json({ error: 'Webhook integration not found' })
+  if ('name' in req.body) w.name = String(req.body.name || w.name).trim()
+  if ('fieldMapping' in req.body && req.body.fieldMapping && typeof req.body.fieldMapping === 'object') {
+    w.fieldMapping = req.body.fieldMapping
+  }
+  save()
+  res.json(serializeWebhook(w, req))
+})
+
+app.post('/api/webhooks/:id/regenerate', (req, res) => {
+  const w = db.webhookIntegrations.find(x => x.id === req.params.id)
+  if (!w) return res.status(404).json({ error: 'Webhook integration not found' })
+  w.key = genWebhookKey() // old URL 404s immediately since lookups match on key
+  save()
+  log('webhook', `Regenerated key for webhook "${w.name}"`)
+  res.json(serializeWebhook(w, req))
+})
+
+app.delete('/api/webhooks/:id', (req, res) => {
+  const before = db.webhookIntegrations.length
+  const w = db.webhookIntegrations.find(x => x.id === req.params.id)
+  db.webhookIntegrations = db.webhookIntegrations.filter(x => x.id !== req.params.id)
+  db.webhookLogs = db.webhookLogs.filter(l => l.integrationId !== req.params.id)
+  save()
+  if (w) log('webhook', `Deleted webhook integration "${w.name}"`)
+  res.json({ ok: true, deleted: before - db.webhookIntegrations.length })
+})
+
+app.get('/api/webhooks/:id/logs', (req, res) => {
+  const logs = db.webhookLogs.filter(l => l.integrationId === req.params.id).slice(0, 50)
+  res.json(logs)
+})
+
+// Public inbound endpoint external forms/tools POST leads to. The key in the
+// URL is the sole auth factor (long + random) — see design spec for why no
+// HMAC signing is required.
+app.post('/api/webhooks/leads/:key', (req, res) => {
+  const integ = db.webhookIntegrations.find(w => w.key === req.params.key)
+  if (!integ) return res.status(404).json({ error: 'Unknown webhook' })
+
+  if (!checkRateLimit(integ.key)) {
+    logWebhookCall(integ.id, 'rate_limited')
+    return res.status(429).json({ error: 'Rate limit exceeded, try again shortly' })
+  }
+
+  const body = req.body
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    logWebhookCall(integ.id, 'invalid_body', 'Body was not a JSON object')
+    return res.status(400).json({ error: 'Request body must be a JSON object' })
+  }
+
+  const mapped = applyFieldMapping(body, integ.fieldMapping)
+  const name = mapped.name ? String(mapped.name).trim() : ''
+  const email = mapped.email ? String(mapped.email).trim() : ''
+  const phone = mapped.phone ? String(mapped.phone).trim() : ''
+
+  const missing = []
+  if (!name) missing.push('name')
+  if (!email && !phone) missing.push('email or phone')
+  if (missing.length) {
+    logWebhookCall(integ.id, 'validation_failed', `Missing: ${missing.join(', ')}`)
+    return res.status(400).json({ error: `Missing required field(s): ${missing.join(', ')}` })
+  }
+
+  integ.lastUsedAt = nowIso()
+
+  const dup = findDuplicateLead(email, phone)
+  if (dup) {
+    dup.followUps = dup.followUps || []
+    dup.followUps.push({
+      id: uid('fu'),
+      date: new Date().toISOString().slice(0, 10),
+      comments: `Duplicate signup received via ${integ.name}`,
+      channel: null,
+      done: true
+    })
+    dup.lastActivityAt = nowIso()
+    markDirty(dup.id)
+    save()
+    log('lead', `Duplicate signup via ${integ.name} matched existing lead ${dup.fullName}`, dup.id)
+    logWebhookCall(integ.id, 'duplicate', `Matched lead ${dup.id}`)
+    return res.json({ status: 'duplicate', leadId: dup.id })
+  }
+
+  const lead = createLeadFrom({
+    fullName: name,
+    email: email || '-',
+    phone: phone || '',
+    sourceName: mapped.source ? String(mapped.source).trim() : integ.name,
+    remarks: mapped.notes ? String(mapped.notes) : '',
+    classType: mapped.classType ? String(mapped.classType).trim() : undefined,
+    channel: mapped.channel ? String(mapped.channel).trim() : undefined
+  })
+  if (!lead.associateId && db.settings.roundRobin.enabled) assignLead(db, lead)
+  db.leads.push(lead)
+  markDirty(lead.id)
+  save()
+  log('lead', `Created lead ${lead.fullName} via webhook (${integ.name})`, lead.id)
+  logWebhookCall(integ.id, 'created', `Lead ${lead.id}`)
+  res.status(201).json({ status: 'created', leadId: lead.id })
 })
 
 // ---------- CSV import ----------
@@ -1414,6 +1611,8 @@ function backfillFollowUps(db) {
 async function start() {
   await init()
   db = load()
+  if (!Array.isArray(db.webhookIntegrations)) db.webhookIntegrations = []
+  if (!Array.isArray(db.webhookLogs)) db.webhookLogs = []
   backfillFollowUps(db)
   startReminderScheduler(db)
   app.listen(PORT, () => {

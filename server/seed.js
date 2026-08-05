@@ -303,6 +303,8 @@ export function seed() {
     classTypes,
     leads,
     activity: [],
-    importHistory: []
+    importHistory: [],
+    webhookIntegrations: [],
+    webhookLogs: []
   }
 }

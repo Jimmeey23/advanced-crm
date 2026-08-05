@@ -2,7 +2,8 @@ import React, { useEffect, useState } from 'react'
 import {
   Building2, Link2, Zap, Bell, ShieldCheck, TestTube2, ExternalLink,
   Palette, ListChecks, Users, Bot, Database, Save, Plus, X,
-  Sparkles, RotateCcw, Pencil, Check, KeyRound, MessageCircle, Mail, Cloud, Send
+  Sparkles, RotateCcw, Pencil, Check, KeyRound, MessageCircle, Mail, Cloud, Send,
+  Webhook, Copy, RefreshCcw, Trash2, ScrollText
 } from 'lucide-react'
 import { useApp } from '../store.jsx'
 import { api } from '../api.js'
@@ -75,6 +76,14 @@ export default function SettingsPage() {
   const [mailDigest, setMailDigest] = useState(false)
   const [mailDigestResult, setMailDigestResult] = useState(null)
 
+  const [webhooks, setWebhooks] = useState([])
+  const [newWebhookName, setNewWebhookName] = useState('')
+  const [creatingWebhook, setCreatingWebhook] = useState(false)
+  const [webhookLogs, setWebhookLogs] = useState({})
+  const [openWebhookLogs, setOpenWebhookLogs] = useState(null)
+
+  const loadWebhooks = () => api.get('/api/webhooks').then(setWebhooks).catch(() => {})
+
   useEffect(() => {
     if (boot?.settings) {
       setOrg(boot.settings.org || {})
@@ -109,6 +118,7 @@ export default function SettingsPage() {
       setMailStatus(s)
       setMailSet(m => ({ ...m, host: s.host || '', fromEmail: s.fromEmail || '', enabled: s.enabled === true }))
     }).catch(() => {})
+    loadWebhooks()
   }, [boot])
 
   const saveSettings = async (extra = {}) => {
@@ -217,6 +227,63 @@ export default function SettingsPage() {
       setMailDigestResult({ ok: true, text: `Digest sent to ${r.sent || 0} recipient(s)` })
     } catch (e) { setMailDigestResult({ ok: false, text: e.message }) }
     finally { setMailDigest(false) }
+  }
+
+  const createWebhook = async () => {
+    const name = newWebhookName.trim()
+    if (!name) { toast('Give the webhook a name first', 'error'); return }
+    setCreatingWebhook(true)
+    try {
+      await api.post('/api/webhooks', { name })
+      setNewWebhookName('')
+      loadWebhooks()
+      toast('Webhook created')
+    } catch (e) { toast(e.message, 'error') }
+    finally { setCreatingWebhook(false) }
+  }
+
+  const updateWebhookMapping = async (id, fieldMapping) => {
+    try {
+      await api.patch(`/api/webhooks/${id}`, { fieldMapping })
+      loadWebhooks()
+      toast('Field mapping saved')
+    } catch (e) { toast(e.message, 'error') }
+  }
+
+  const renameWebhook = async (id, name) => {
+    try { await api.patch(`/api/webhooks/${id}`, { name }); loadWebhooks() }
+    catch (e) { toast(e.message, 'error') }
+  }
+
+  const regenerateWebhook = async (id) => {
+    if (!window.confirm('Regenerate this key? The current URL will stop working immediately.')) return
+    try {
+      await api.post(`/api/webhooks/${id}/regenerate`, {})
+      loadWebhooks()
+      toast('Key regenerated — update the URL wherever it was configured')
+    } catch (e) { toast(e.message, 'error') }
+  }
+
+  const deleteWebhook = async (id) => {
+    if (!window.confirm('Delete this webhook integration? Its URL will stop working immediately.')) return
+    try {
+      await api.delete(`/api/webhooks/${id}`)
+      loadWebhooks()
+      toast('Webhook deleted')
+    } catch (e) { toast(e.message, 'error') }
+  }
+
+  const toggleWebhookLogs = async (id) => {
+    if (openWebhookLogs === id) { setOpenWebhookLogs(null); return }
+    setOpenWebhookLogs(id)
+    try {
+      const logs = await api.get(`/api/webhooks/${id}/logs`)
+      setWebhookLogs(l => ({ ...l, [id]: logs }))
+    } catch (e) { toast(e.message, 'error') }
+  }
+
+  const copyWebhookUrl = (url) => {
+    navigator.clipboard?.writeText(url).then(() => toast('URL copied')).catch(() => toast('Could not copy — copy manually', 'error'))
   }
 
   const resetData = async () => {
@@ -588,6 +655,29 @@ export default function SettingsPage() {
                 <p className="mt-3 text-[11.5px] text-slate-500">Keys can also be set via the USER_MAILTRAP_HOST / USER_MAILTRAP_USER / USER_MAILTRAP_PASS environment variables, which always win over these settings.</p>
               )}
             </Section>
+
+            <Section icon={<Webhook size={15} className="text-emerald-400" />} title="Lead webhooks" desc="Let signup forms, landing pages or no-code tools (Zapier, Typeform, etc.) create leads automatically via a POST URL.">
+              <div className="flex items-center gap-2 mb-4">
+                <input className="input flex-1" placeholder="Integration name, e.g. Landing Page Signup Form" value={newWebhookName} onChange={e => setNewWebhookName(e.target.value)} onKeyDown={e => e.key === 'Enter' && createWebhook()} />
+                <button className="btn btn-primary" onClick={createWebhook} disabled={creatingWebhook}>{creatingWebhook ? <Spinner size={14} /> : <Plus size={14} />} Create webhook</button>
+              </div>
+              <div className="space-y-3">
+                {webhooks.map(w => (
+                  <WebhookRow key={w.id}
+                    webhook={w}
+                    logs={webhookLogs[w.id]}
+                    logsOpen={openWebhookLogs === w.id}
+                    onToggleLogs={() => toggleWebhookLogs(w.id)}
+                    onRename={(name) => renameWebhook(w.id, name)}
+                    onSaveMapping={(m) => updateWebhookMapping(w.id, m)}
+                    onRegenerate={() => regenerateWebhook(w.id)}
+                    onDelete={() => deleteWebhook(w.id)}
+                    onCopy={() => copyWebhookUrl(w.url)}
+                  />
+                ))}
+                {!webhooks.length && <p className="text-[11.5px] text-slate-500">No webhook integrations yet — create one above to get a URL you can paste into any form tool.</p>}
+              </div>
+            </Section>
           </>
         )}
 
@@ -809,6 +899,96 @@ function ThemeCard({ active, onClick, title, sub, swatch }) {
       </div>
     </button>
   )
+}
+
+const LEAD_FIELD_OPTIONS = [
+  { id: 'name', label: 'Name' },
+  { id: 'email', label: 'Email' },
+  { id: 'phone', label: 'Phone' },
+  { id: 'source', label: 'Source' },
+  { id: 'notes', label: 'Notes' },
+  { id: 'classType', label: 'Class type' },
+  { id: 'channel', label: 'Channel' }
+]
+
+function WebhookRow({ webhook, logs, logsOpen, onToggleLogs, onRename, onSaveMapping, onRegenerate, onDelete, onCopy }) {
+  const [nameDraft, setNameDraft] = useState(webhook.name)
+  const [mapping, setMapping] = useState(() => Object.entries(webhook.fieldMapping || {}).map(([k, v]) => ({ key: k, field: v })))
+  const [mappingDirty, setMappingDirty] = useState(false)
+
+  const addRow = () => { setMapping(m => [...m, { key: '', field: 'name' }]); setMappingDirty(true) }
+  const updateRow = (i, patch) => { setMapping(m => m.map((r, idx) => idx === i ? { ...r, ...patch } : r)); setMappingDirty(true) }
+  const removeRow = (i) => { setMapping(m => m.filter((_, idx) => idx !== i)); setMappingDirty(true) }
+  const saveMapping = () => {
+    const obj = {}
+    for (const r of mapping) if (r.key.trim()) obj[r.key.trim()] = r.field
+    onSaveMapping(obj)
+    setMappingDirty(false)
+  }
+
+  return (
+    <div className="rounded-xl border border-white/8 bg-white/[0.02] p-3.5 space-y-3">
+      <div className="flex items-center gap-2 flex-wrap">
+        <input className="input !py-1.5 flex-1 min-w-[160px] font-semibold" value={nameDraft} onChange={e => setNameDraft(e.target.value)}
+          onBlur={() => nameDraft.trim() && nameDraft !== webhook.name && onRename(nameDraft.trim())} />
+        <span className="text-[11px] text-slate-500">Created {new Date(webhook.createdAt).toLocaleDateString()}</span>
+        <span className="text-[11px] text-slate-500">· Last used {webhook.lastUsedAt ? new Date(webhook.lastUsedAt).toLocaleString() : 'never'}</span>
+        <button className="btn btn-ghost !p-2" onClick={onToggleLogs} title="View call log"><ScrollText size={14} /></button>
+        <button className="btn btn-ghost !p-2" onClick={onRegenerate} title="Regenerate key"><RefreshCcw size={14} /></button>
+        <button className="btn btn-ghost !p-2 text-rose-400" onClick={onDelete} title="Delete"><Trash2 size={14} /></button>
+      </div>
+      <div className="flex items-center gap-2">
+        <code className="input !py-1.5 flex-1 !text-[11.5px] overflow-x-auto whitespace-nowrap">{webhook.url}</code>
+        <button className="btn btn-ghost !py-1.5" onClick={onCopy}><Copy size={13} /> Copy</button>
+      </div>
+
+      <div>
+        <div className="text-[10.5px] uppercase tracking-wider text-slate-500 font-semibold mb-1.5">Field mapping — incoming payload key → lead field</div>
+        <div className="space-y-1.5">
+          {mapping.map((r, i) => (
+            <div key={i} className="flex items-center gap-2">
+              <input className="input !py-1.5 !text-[12px] flex-1" placeholder="incoming JSON key, e.g. full_name" value={r.key} onChange={e => updateRow(i, { key: e.target.value })} />
+              <span className="text-slate-600 text-[11px]">→</span>
+              <select className="input !py-1.5 !text-[12px] !w-auto" value={r.field} onChange={e => updateRow(i, { field: e.target.value })}>
+                {LEAD_FIELD_OPTIONS.map(f => <option key={f.id} value={f.id}>{f.label}</option>)}
+              </select>
+              <button className="btn btn-ghost !p-1.5 text-rose-400" onClick={() => removeRow(i)}><X size={12} /></button>
+            </div>
+          ))}
+          {!mapping.length && <p className="text-[11px] text-slate-600">No mapping configured — incoming keys named name/email/phone/source/notes are used as-is.</p>}
+        </div>
+        <div className="flex items-center gap-2 mt-2">
+          <button className="btn btn-ghost !py-1.5 !text-[12px]" onClick={addRow}><Plus size={12} /> Add field</button>
+          {mappingDirty && <button className="btn btn-soft !py-1.5 !text-[12px]" onClick={saveMapping}><Save size={12} /> Save mapping</button>}
+        </div>
+      </div>
+
+      {logsOpen && (
+        <div className="rounded-lg bg-black/20 border border-white/6 p-2.5 max-h-52 overflow-y-auto">
+          {!logs && <p className="text-[11px] text-slate-500">Loading…</p>}
+          {logs && !logs.length && <p className="text-[11px] text-slate-500">No calls received yet.</p>}
+          {logs && logs.map(l => (
+            <div key={l.id} className="flex items-center gap-2 text-[11px] py-1 border-b border-white/5 last:border-0">
+              <span className="mono text-slate-500">{new Date(l.ts).toLocaleString()}</span>
+              <OutcomeChip outcome={l.outcome} />
+              {l.detail && <span className="text-slate-500 truncate">{l.detail}</span>}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function OutcomeChip({ outcome }) {
+  const styles = {
+    created: 'bg-emerald-500/15 text-emerald-300',
+    duplicate: 'bg-amber-500/15 text-amber-300',
+    validation_failed: 'bg-rose-500/15 text-rose-300',
+    invalid_body: 'bg-rose-500/15 text-rose-300',
+    rate_limited: 'bg-rose-500/15 text-rose-300'
+  }
+  return <span className={`chip !px-1.5 !py-0.5 text-[10px] ${styles[outcome] || 'bg-white/10 text-slate-300'}`}>{outcome}</span>
 }
 
 function Toggle({ on, onChange, title, desc, children }) {
