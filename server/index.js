@@ -1228,6 +1228,178 @@ function periodLabelFor(range, start) {
     : start.toLocaleString('en-US', { month: 'short', year: '2-digit' })
 }
 
+const validPeriodDate = (v) => v && v !== '-' && !isNaN(new Date(v).getTime())
+
+// Per-channel outreach effectiveness for follow-ups logged within [start, end).
+// The lead schema has no explicit "response" signal, only `done` (the
+// follow-up was carried out) vs `done: false` (missed/pending) — so
+// `responded` is a proxy: follow-ups actually completed on that channel.
+function periodChannelPerformance(start, end, locationId) {
+  const inRange = periodInRangeFn(start, end)
+  const leads = locationId ? db.leads.filter(l => l.locationId === locationId) : db.leads
+  const map = {}
+  for (const l of leads) {
+    for (const f of l.followUps || []) {
+      if (!f.channel || !inRange(f.date)) continue
+      const row = map[f.channel] = map[f.channel] || { channel: f.channel, attempted: 0, responded: 0, contacted: new Set(), won: new Set() }
+      row.attempted++
+      if (f.done !== false) row.responded++
+      row.contacted.add(l.id)
+      if (l.status === 'won') row.won.add(l.id)
+    }
+  }
+  return Object.values(map)
+    .map(r => ({
+      channel: r.channel,
+      attempted: r.attempted,
+      responded: r.responded,
+      responseRate: r.attempted ? Math.round((r.responded / r.attempted) * 100) : 0,
+      won: r.won.size,
+      conversionRate: r.contacted.size ? Math.round((r.won.size / r.contacted.size) * 100) : 0
+    }))
+    .sort((a, b) => b.attempted - a.attempted)
+}
+
+// Follow-up health: `overdueCount` is a live snapshot (as of now, not the
+// selected period — matches the overdue logic in computeFollowUpState),
+// everything else is scoped to follow-ups logged within [start, end).
+// `avgResponseHours` is a proxy: the average gap between a lead's
+// consecutive logged follow-ups, since the schema only stores dates (no
+// separate "message sent" vs "reply received" timestamps).
+function periodFollowUpAnalytics(start, end, locationId) {
+  const inRange = periodInRangeFn(start, end)
+  const leads = locationId ? db.leads.filter(l => l.locationId === locationId) : db.leads
+  const today = new Date().toISOString().slice(0, 10)
+  let overdueCount = 0
+  const gapsHours = []
+  const byAssociate = {}
+  const byChannel = {}
+  for (const l of leads) {
+    const fus = (l.followUps || []).filter(f => f.date && f.date !== '-').sort((a, b) => a.date.localeCompare(b.date))
+    for (let i = 0; i < fus.length; i++) {
+      const f = fus[i]
+      if (f.done === false && f.date < today) overdueCount++
+      if (!inRange(f.date)) continue
+      if (l.associateId) {
+        const a = byAssociate[l.associateId] = byAssociate[l.associateId] || { total: 0, done: 0 }
+        a.total++
+        if (f.done !== false) a.done++
+      }
+      if (f.done === false) {
+        const ch = f.channel || 'unknown'
+        byChannel[ch] = (byChannel[ch] || 0) + 1
+      }
+      if (i > 0) {
+        const hours = (new Date(f.date).getTime() - new Date(fus[i - 1].date).getTime()) / 3600000
+        if (hours >= 0) gapsHours.push(hours)
+      }
+    }
+  }
+  const avgResponseHours = gapsHours.length ? Math.round(gapsHours.reduce((s, h) => s + h, 0) / gapsHours.length) : 0
+  const completionRateByAssociate = Object.entries(byAssociate)
+    .map(([associateId, v]) => ({
+      associateId, name: db.associates.find(a => a.id === associateId)?.name || 'Unknown',
+      rate: v.total ? Math.round((v.done / v.total) * 100) : 0
+    }))
+    .sort((a, b) => b.rate - a.rate)
+  const missedByChannel = Object.entries(byChannel)
+    .map(([channel, count]) => ({ channel, count }))
+    .sort((a, b) => b.count - a.count)
+  return { overdueCount, avgResponseHours, completionRateByAssociate, missedByChannel }
+}
+
+// Leads grouped by class/membership type (`classType` — confirmed the actual
+// field name via grep of seed data and Leads/Import/Settings pages; there is
+// no separate "membershipType" field) for leads created within [start, end).
+function periodRevenueMix(start, end, locationId) {
+  const inRange = periodInRangeFn(start, end)
+  const leads = (locationId ? db.leads.filter(l => l.locationId === locationId) : db.leads)
+    .filter(l => inRange(l.createdAt))
+  const map = {}
+  for (const l of leads) {
+    const key = l.classType || 'Unspecified'
+    map[key] = map[key] || { type: key, count: 0, wonCount: 0, revenue: 0 }
+    map[key].count++
+    if (l.status === 'won') {
+      map[key].wonCount++
+      map[key].revenue += l.valueEstimate || 0
+    }
+  }
+  return Object.values(map)
+    .map(m => ({ type: m.type, count: m.count, revenue: m.revenue, wonRate: m.count ? Math.round((m.wonCount / m.count) * 100) : 0 }))
+    .sort((a, b) => b.revenue - a.revenue)
+}
+
+// Conversion-by-age for the last 6 period-cohorts (weeks or months, matching
+// `range`), bounded to 6 to keep cost predictable per the design doc — looking
+// back further would mean re-running the full leads scan per extra cohort.
+// `offset` is the currently-viewed period; cohorts run from 5-periods-back
+// through the current period, oldest first.
+function periodCohortConversion(range, offset, now, locationId) {
+  const leads = locationId ? db.leads.filter(l => l.locationId === locationId) : db.leads
+  const cohorts = []
+  for (let k = 5; k >= 0; k--) {
+    const co = offset + k
+    const { start, end } = periodBounds(range, co, now)
+    const inCohort = periodInRangeFn(start, end)
+    const cohortLeads = leads.filter(l => inCohort(l.createdAt))
+    const size = cohortLeads.length
+    const convertedBy = (periodsLater) => {
+      const boundaryOffset = co - periodsLater
+      const boundaryEnd = boundaryOffset >= 0 ? periodBounds(range, boundaryOffset, now).end : now
+      if (!size) return 0
+      const won = cohortLeads.filter(l => l.status === 'won' && validPeriodDate(l.convertedAt) && new Date(l.convertedAt) < boundaryEnd)
+      return Math.round((won.length / size) * 100)
+    }
+    cohorts.push({
+      cohortLabel: periodLabelFor(range, start),
+      size,
+      convertedByP1: convertedBy(1),
+      convertedByP2: convertedBy(2),
+      convertedByP4: convertedBy(4)
+    })
+  }
+  return cohorts
+}
+
+// Target vs actual for the current period, using the existing `targetMonthly`
+// field on associates (server/seed.js) pro-rated to the period length: a
+// custom `&from&to` window is pro-rated by day-count against a 30-day month;
+// a `range=week` bucket is pro-rated by the average weeks-per-month; a plain
+// `range=month` bucket uses the monthly target as-is.
+function periodGoalTracking(range, start, end, customRange) {
+  const periodDays = Math.max(1, Math.round((end - start) / 86400000))
+  const WEEKS_PER_MONTH = 365 / 12 / 7
+  const inRange = periodInRangeFn(start, end)
+  const proRate = (monthly) => {
+    if (customRange) return Math.round((monthly * periodDays) / 30)
+    return range === 'week' ? Math.round(monthly / WEEKS_PER_MONTH) : monthly
+  }
+
+  const perAssociate = db.associates.filter(a => a.active !== false).map(a => {
+    const actual = db.leads.filter(l => l.associateId === a.id && l.status === 'won' && inRange(l.convertedAt)).length
+    const target = proRate(a.targetMonthly || 10)
+    return {
+      associateId: a.id, name: a.name, locationId: a.locationId,
+      target, actual,
+      attainmentPct: target ? Math.round((actual / target) * 100) : 0
+    }
+  })
+
+  const perStudio = db.locations.map(loc => {
+    const owned = perAssociate.filter(a => a.locationId === loc.id)
+    const target = owned.reduce((s, a) => s + a.target, 0)
+    const actual = owned.reduce((s, a) => s + a.actual, 0)
+    return {
+      locationId: loc.id, name: loc.name,
+      target, actual,
+      attainmentPct: target ? Math.round((actual / target) * 100) : 0
+    }
+  })
+
+  return { perAssociate, perStudio }
+}
+
 app.get('/api/analytics/performance/by-location', (req, res) => {
   const range = req.query.range === 'month' ? 'month' : 'week'
   const offset = Math.max(0, Number(req.query.offset) || 0)
@@ -1248,15 +1420,49 @@ app.get('/api/analytics/performance/by-location', (req, res) => {
     return res.json({ locationId, range, offset, history })
   }
 
-  const { start, end, label } = periodBounds(range, offset, now)
-  const rows = periodLocationRows(start, end, db.locations)
+  const compare = req.query.compare === 'yoy' ? 'yoy' : 'prev'
 
-  const { start: pStart, end: pEnd } = periodBounds(range, offset + 1, now)
+  // Custom date range (`&from=&to=`) overrides range/offset bucketing for all
+  // aggregates below — the period nav becomes informational only while a
+  // custom window is active.
+  const fromQ = req.query.from ? new Date(`${req.query.from}T00:00:00`) : null
+  const toQ = req.query.to ? new Date(`${req.query.to}T00:00:00`) : null
+  const customRange = !!(fromQ && toQ && !isNaN(fromQ.getTime()) && !isNaN(toQ.getTime()) && fromQ <= toQ)
+
+  let start, end, label
+  if (customRange) {
+    start = fromQ
+    end = new Date(toQ.getTime() + 86400000) // end date is inclusive
+    label = `${start.toISOString().slice(0, 10)} to ${toQ.toISOString().slice(0, 10)}`
+  } else {
+    ;({ start, end, label } = periodBounds(range, offset, now))
+  }
+  const periodDays = Math.max(1, Math.round((end - start) / 86400000))
+
+  // Previous-period bounds for Δ%/compare-mode: either the immediately
+  // preceding window of equal length ("prev", default) or the same window
+  // one year earlier ("yoy").
+  let pStart, pEnd
+  if (customRange) {
+    if (compare === 'yoy') {
+      pStart = new Date(start.getFullYear() - 1, start.getMonth(), start.getDate())
+      pEnd = new Date(end.getFullYear() - 1, end.getMonth(), end.getDate())
+    } else {
+      pEnd = start
+      pStart = new Date(start.getTime() - periodDays * 86400000)
+    }
+  } else if (compare === 'yoy') {
+    ;({ start: pStart, end: pEnd } = periodBounds(range, offset + (range === 'week' ? 52 : 12), now))
+  } else {
+    ;({ start: pStart, end: pEnd } = periodBounds(range, offset + 1, now))
+  }
   const previous = periodSummary(pStart, pEnd)
+
+  const rows = periodLocationRows(start, end, db.locations)
 
   let history = []
   const historyLen = Math.min(24, Math.max(0, Number(req.query.history) || 0))
-  if (historyLen > 0) {
+  if (historyLen > 0 && !customRange) {
     for (let i = historyLen - 1; i >= 0; i--) {
       const { start: s, end: e } = periodBounds(range, offset + i, now)
       history.push({ periodLabel: periodLabelFor(range, s), ...periodSummary(s, e) })
@@ -1269,16 +1475,30 @@ app.get('/api/analytics/performance/by-location', (req, res) => {
   }
   const leaderboard = periodLeaderboard(start, end)
   const sourceBreakdown = periodSourceBreakdown(start, end)
+  const channelPerformance = periodChannelPerformance(start, end)
+  const followUpAnalytics = periodFollowUpAnalytics(start, end)
+  const revenueMix = periodRevenueMix(start, end)
+  // Cohort conversion looks back across period-cohorts distinct from the
+  // selected window; a custom date range doesn't map onto week/month cohorts
+  // cleanly, so it falls back to cohorts anchored on the current bucketed
+  // period (offset 0) for that range.
+  const cohortConversion = periodCohortConversion(range, customRange ? 0 : offset, now)
+  const goalTracking = periodGoalTracking(range, start, end, customRange)
 
   res.json({
-    range, offset, label,
+    range, offset, label, compare, customRange,
     start: start.toISOString().slice(0, 10), end: new Date(end.getTime() - 86400000).toISOString().slice(0, 10),
     rows,
     previous,
     history,
     funnel,
     leaderboard,
-    sourceBreakdown
+    sourceBreakdown,
+    channelPerformance,
+    followUpAnalytics,
+    revenueMix,
+    cohortConversion,
+    goalTracking
   })
 })
 
