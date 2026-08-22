@@ -8,12 +8,22 @@ import { useApp } from '../store.jsx'
 import { api } from '../api.js'
 import { Spinner } from '../ui.jsx'
 import { money } from '../lib.js'
+import MetricCard from '../components/MetricCard.jsx'
+
+const ACCENT_HEX = { violet: '#8b5cf6', emerald: '#10b981', rose: '#f43f5e', amber: '#f59e0b' }
+function momOf(series) {
+  if (series.length < 2) return null
+  const prev = series[series.length - 2].value
+  const cur = series[series.length - 1].value
+  if (!prev) return null
+  return ((cur - prev) / prev) * 100
+}
 
 const COLORS = { newLeads: '#8b5cf6', won: '#10b981', missed: '#fbbf24' }
 
 export default function Performance() {
   const { openLead, dataVersion } = useApp()
-  const [range, setRange] = useState('week')
+  const [range, setRange] = useState('month')
   const [data, setData] = useState(null)
   const [details, setDetails] = useState(null)
   const [loading, setLoading] = useState(false)
@@ -33,6 +43,25 @@ export default function Performance() {
 
   const chartData = (data?.buckets || []).map(b => ({ ...b, missed: b.missed || 0 }))
   const t = data?.totals || {}
+
+  const nonEmpty = chartData.filter(b => (b.newLeads || 0) + (b.won || 0) + (b.revenue || 0) + (b.followUps || 0) > 0)
+  const bestBy = (fn) => nonEmpty.reduce((best, b) => (best && fn(best) >= fn(b) ? best : b), null)
+  const bestNew = bestBy(b => b.newLeads || 0)
+  const bestWon = bestBy(b => b.won || 0)
+  const bestRevenue = bestBy(b => b.revenue || 0)
+  const worstFollowUp = nonEmpty.reduce((worst, b) => {
+    if (!(b.followUps > 0)) return worst
+    const rate = ((b.followUps - (b.missed || 0)) / b.followUps)
+    return (!worst || rate < worst.rate) ? { ...b, rate } : worst
+  }, null)
+  const winRate = t.newLeads ? Math.round((t.won / t.newLeads) * 100) : 0
+  const avgDeal = t.won ? t.revenue / t.won : 0
+  const avgPerLead = t.newLeads ? t.revenue / t.newLeads : 0
+
+  const newLeadsTrend = chartData.map(b => ({ label: b.label, value: b.newLeads || 0 }))
+  const wonTrend = chartData.map(b => ({ label: b.label, value: b.won || 0 }))
+  const revenueTrend = chartData.map(b => ({ label: b.label, value: b.revenue || 0 }))
+  const followUpTrend = chartData.map(b => ({ label: b.label, value: b.followUps ? Math.round(((b.followUps - (b.missed || 0)) / b.followUps) * 100) : 0 }))
 
   return (
     <div className="p-6 space-y-5">
@@ -68,10 +97,26 @@ export default function Performance() {
       {!loading && data && (
         <div className="space-y-5">
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            <Summary icon={<Users size={14} />} label="New leads" value={t.newLeads} color="#8b5cf6" />
-            <Summary icon={<Trophy size={14} />} label="Won deals" value={t.won} color="#10b981" />
-            <Summary icon={<IndianRupee size={14} />} label="Revenue" value={money(t.revenue)} color="#f43f5e" />
-            <Summary icon={<CalendarCheck2 size={14} />} label="Follow-up completion" value={`${t.followUpRate || 0}%`} color="#fbbf24" sub={`${t.missed || 0} missed of ${t.followUps || 0}`} />
+            <MetricCard
+              icon={Users} title="New leads" value={t.newLeads} color={ACCENT_HEX.violet}
+              description={`Best: ${bestNew ? `${bestNew.label} (${bestNew.newLeads})` : '—'} · ${t.won || 0} converted (${winRate}%) · avg ${money(avgPerLead)}/lead`}
+              trend={newLeadsTrend} mom={momOf(newLeadsTrend)}
+            />
+            <MetricCard
+              icon={Trophy} title="Won deals" value={t.won} color={ACCENT_HEX.emerald}
+              description={`Win rate ${winRate}% · avg deal ${money(avgDeal)} · best ${bestWon ? `${bestWon.label} (${bestWon.won})` : '—'}`}
+              trend={wonTrend} mom={momOf(wonTrend)}
+            />
+            <MetricCard
+              icon={IndianRupee} title="Revenue" value={money(t.revenue)} color={ACCENT_HEX.rose}
+              description={`Avg deal ${money(avgDeal)} · ${money(avgPerLead)}/lead · best ${bestRevenue ? `${bestRevenue.label} (${money(bestRevenue.revenue)})` : '—'}`}
+              trend={revenueTrend} mom={momOf(revenueTrend)}
+            />
+            <MetricCard
+              icon={CalendarCheck2} title="Follow-up completion" value={`${t.followUpRate || 0}%`} color={ACCENT_HEX.amber}
+              description={`${t.missed || 0} missed of ${t.followUps || 0} · worst ${worstFollowUp ? `${worstFollowUp.label} (${Math.round(worstFollowUp.rate * 100)}%)` : '—'}`}
+              trend={followUpTrend} mom={momOf(followUpTrend)}
+            />
           </div>
 
           <div className="card p-4">
@@ -103,12 +148,14 @@ export default function Performance() {
             <div className="overflow-x-auto scrollbar-thin">
               <table className="w-full text-left">
                 <thead>
-                  <tr className="text-[10.5px] uppercase tracking-wider text-slate-500 border-b border-white/8">
+                  <tr className="text-[10.5px] uppercase tracking-wider text-slate-500 border-b border-white/8 sticky top-0 z-10 bg-[var(--tt-bg,#0d1220)]">
                     <th className="px-4 py-2.5 font-semibold">Period</th>
                     <th className="px-3 py-2.5 font-semibold text-center">New</th>
                     <th className="px-3 py-2.5 font-semibold text-center">Won</th>
                     <th className="px-3 py-2.5 font-semibold text-center">Missed</th>
+                    <th className="px-3 py-2.5 font-semibold text-center">Win rate</th>
                     <th className="px-3 py-2.5 font-semibold text-center">Revenue</th>
+                    <th className="px-3 py-2.5 font-semibold text-center">Avg deal</th>
                     <th className="px-3 py-2.5 font-semibold text-center">Detail</th>
                   </tr>
                 </thead>
@@ -117,23 +164,37 @@ export default function Performance() {
                     const det = details?.buckets?.find(x => x.key === b.key)
                     const isOpen = openIdx === i
                     const hasDetail = (det?.newLeads?.length || 0) + (det?.won?.length || 0) + (det?.missed?.length || 0) > 0
+                    const rowWinRate = b.newLeads ? Math.round((b.won / b.newLeads) * 100) : 0
+                    const rowAvgDeal = b.won ? b.revenue / b.won : 0
                     return (
                       <React.Fragment key={b.key}>
-                        <tr className="border-b border-white/5 hover:bg-white/[0.035] cursor-pointer" onClick={() => hasDetail && setOpenIdx(isOpen ? null : i)}>
-                          <td className="px-4 py-2.5 text-[12.5px] text-slate-300">{b.label}</td>
+                        <tr
+                          className={`border-b border-white/5 transition-colors ${hasDetail ? 'cursor-pointer hover:bg-white/[0.05]' : 'cursor-default'} ${i % 2 === 1 ? 'bg-white/[0.015]' : ''} ${isOpen ? 'bg-white/[0.05]' : ''}`}
+                          onClick={() => hasDetail && setOpenIdx(isOpen ? null : i)}
+                        >
+                          <td className="px-4 py-2.5 text-[12.5px] text-slate-300 font-medium">{b.label}</td>
                           <td className="px-3 py-2.5 text-center text-[12.5px] text-violet-400 mono">{b.newLeads || 0}</td>
                           <td className="px-3 py-2.5 text-center text-[12.5px] text-emerald-400 mono">{b.won || 0}</td>
                           <td className="px-3 py-2.5 text-center text-[12.5px] mono">{b.missed ? <span className="text-rose-400">{b.missed}</span> : <span className="text-slate-500">0</span>}</td>
-                          <td className="px-3 py-2.5 text-center text-[12.5px] text-slate-200 mono">{money(b.revenue || 0)}</td>
                           <td className="px-3 py-2.5 text-center">
-                            <span className="inline-flex items-center justify-center w-6 h-6 rounded-lg bg-white/5 border border-white/10 text-slate-400">
+                            <div className="flex items-center gap-1.5 justify-center">
+                              <div className="w-10 h-1.5 rounded-full bg-white/8 overflow-hidden">
+                                <div className="h-full rounded-full bg-emerald-400" style={{ width: `${Math.min(100, rowWinRate)}%` }} />
+                              </div>
+                              <span className="text-[11px] text-slate-400 mono w-7 text-right">{rowWinRate}%</span>
+                            </div>
+                          </td>
+                          <td className="px-3 py-2.5 text-center text-[12.5px] text-slate-200 mono">{money(b.revenue || 0)}</td>
+                          <td className="px-3 py-2.5 text-center text-[12px] text-slate-400 mono">{b.won ? money(rowAvgDeal) : '—'}</td>
+                          <td className="px-3 py-2.5 text-center">
+                            <span className={`inline-flex items-center justify-center w-6 h-6 rounded-lg border transition-all ${hasDetail ? 'bg-white/5 border-white/10 text-slate-400' : 'bg-transparent border-transparent text-slate-700'}`}>
                               <ChevronDown size={12} className={`transition-transform ${isOpen ? 'rotate-180' : ''}`} />
                             </span>
                           </td>
                         </tr>
                         {isOpen && det && (
                           <tr className="border-b border-white/5 bg-white/[0.02]">
-                            <td colSpan={6} className="px-4 py-3">
+                            <td colSpan={8} className="px-4 py-3">
                               <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                                 <DetailList title="New leads" color="#a78bfa" items={det.newLeads || []} openLead={openLead} />
                                 <DetailList title="Won" color="#34d399" items={det.won || []} openLead={openLead} moneyValue />
@@ -146,6 +207,18 @@ export default function Performance() {
                     )
                   })}
                 </tbody>
+                <tfoot>
+                  <tr className="border-t border-white/10 bg-white/[0.03] text-[12.5px] font-semibold">
+                    <td className="px-4 py-2.5 text-slate-300">Total</td>
+                    <td className="px-3 py-2.5 text-center text-violet-400 mono">{t.newLeads || 0}</td>
+                    <td className="px-3 py-2.5 text-center text-emerald-400 mono">{t.won || 0}</td>
+                    <td className="px-3 py-2.5 text-center text-rose-400 mono">{t.missed || 0}</td>
+                    <td className="px-3 py-2.5 text-center text-slate-300 mono">{winRate}%</td>
+                    <td className="px-3 py-2.5 text-center text-slate-200 mono">{money(t.revenue || 0)}</td>
+                    <td className="px-3 py-2.5 text-center text-slate-400 mono">{t.won ? money(avgDeal) : '—'}</td>
+                    <td className="px-3 py-2.5" />
+                  </tr>
+                </tfoot>
               </table>
             </div>
           </div>
@@ -164,25 +237,13 @@ function DetailList({ title, color, items, openLead, moneyValue }) {
   return (
     <div>
       <div className="text-[10.5px] uppercase tracking-wider font-bold mb-1.5" style={{ color }}>{title} ({items.length})</div>
-      <div className="space-y-1 max-h-[180px] overflow-y-auto scrollbar-thin">
+      <div className="space-y-1">
         {items.map(it => (
           <button key={it.id} className="w-full text-left flex items-center justify-between gap-2 text-[12px] text-slate-300 bg-white/[0.03] border border-white/8 rounded-lg px-2.5 py-1.5 hover:bg-white/[0.06] transition-colors" onClick={() => openLead(it.id)}>
             <span className="truncate">{it.fullName}</span>
             {moneyValue && it.value ? <span className="mono text-emerald-400 shrink-0">{money(it.value)}</span> : it.comments ? <span className="text-slate-500 truncate max-w-[120px]">{it.comments}</span> : <span className="chip !px-1.5 !py-0.5 text-[9px] bg-white/5 border border-white/10 text-slate-400">{it.stage}</span>}
           </button>
         ))}
-      </div>
-    </div>
-  )
-}
-
-function Summary({ icon, label, value, color, sub }) {
-  return (
-    <div className="card !rounded-xl px-3.5 py-3 flex items-center justify-between">
-      <div>
-        <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-slate-500 mb-1" style={{ color }}>{icon}{label}</div>
-        <div className="font-display text-[18px] font-bold mono" style={{ color }}>{value}</div>
-        {sub && <div className="text-[10.5px] text-slate-500 mt-0.5">{sub}</div>}
       </div>
     </div>
   )

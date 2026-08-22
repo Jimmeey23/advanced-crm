@@ -5,6 +5,15 @@ import { useApp } from '../store.jsx'
 import { api } from '../api.js'
 import { Modal, ModalHeader, Spinner } from '../ui.jsx'
 import { money } from '../lib.js'
+import MetricCard from './MetricCard.jsx'
+
+function momOf(series) {
+  if (series.length < 2) return null
+  const prev = series[series.length - 2].value
+  const cur = series[series.length - 1].value
+  if (!prev) return null
+  return ((cur - prev) / prev) * 100
+}
 
 const COLORS = { newLeads: '#2563eb', won: '#10b981', missed: '#f43f5e' }
 
@@ -30,6 +39,10 @@ export default function PerformanceModal({ open, onClose, range = 'week' }) {
 
   const chartData = (data?.buckets || []).map(b => ({ ...b, missed: b.missed || 0 }))
   const t = data?.totals || {}
+  const newLeadsTrend = chartData.map(b => ({ label: b.label, value: b.newLeads || 0 }))
+  const wonTrend = chartData.map(b => ({ label: b.label, value: b.won || 0 }))
+  const revenueTrend = chartData.map(b => ({ label: b.label, value: b.revenue || 0 }))
+  const followUpTrend = chartData.map(b => ({ label: b.label, value: b.followUps ? Math.round(((b.followUps - (b.missed || 0)) / b.followUps) * 100) : 0 }))
 
   return (
     <Modal open={open} onClose={onClose} width={980}>
@@ -44,10 +57,11 @@ export default function PerformanceModal({ open, onClose, range = 'week' }) {
       {!loading && data && (
         <div className="space-y-4">
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            <Summary icon={<Users size={14} />} label="New leads" value={t.newLeads} color="#8b5cf6" />
-            <Summary icon={<Trophy size={14} />} label="Won deals" value={t.won} color="#10b981" />
-            <Summary icon={<IndianRupee size={14} />} label="Revenue" value={money(t.revenue)} color="#f43f5e" />
-            <Summary icon={<CalendarCheck2 size={14} />} label="Follow-up completion" value={`${t.followUpRate || 0}%`} color="#fbbf24" sub={`${t.missed || 0} missed of ${t.followUps || 0}`} />
+            <MetricCard icon={Users} title="New leads" value={t.newLeads} color="#8b5cf6" trend={newLeadsTrend} mom={momOf(newLeadsTrend)} />
+            <MetricCard icon={Trophy} title="Won deals" value={t.won} color="#10b981" trend={wonTrend} mom={momOf(wonTrend)} />
+            <MetricCard icon={IndianRupee} title="Revenue" value={money(t.revenue)} color="#f43f5e" trend={revenueTrend} mom={momOf(revenueTrend)} />
+            <MetricCard icon={CalendarCheck2} title="Follow-up completion" value={`${t.followUpRate || 0}%`} color="#fbbf24"
+              description={`${t.missed || 0} missed of ${t.followUps || 0}`} trend={followUpTrend} mom={momOf(followUpTrend)} />
           </div>
 
           <div className="card p-4">
@@ -142,18 +156,6 @@ function DetailList({ title, color, items, openLead, moneyValue }) {
             {moneyValue && it.value ? <span className="mono text-emerald-500 shrink-0">{money(it.value)}</span> : it.comments ? <span className="text-slate-500 truncate max-w-[120px]">{it.comments}</span> : <span className="chip !px-1.5 !py-0.5 text-[9px] bg-slate-50 border border-slate-200 text-slate-500">{it.stage}</span>}
           </button>
         ))}
-      </div>
-    </div>
-  )
-}
-
-function Summary({ icon, label, value, color, sub }) {
-  return (
-    <div className="card !rounded-2xl px-3.5 py-3 flex items-center justify-between">
-      <div>
-        <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-slate-500 mb-1" style={{ color }}>{icon}{label}</div>
-        <div className="font-display text-[18px] font-bold mono text-slate-900" style={{ color: color }}>{value}</div>
-        {sub && <div className="text-[10.5px] text-slate-500 mt-0.5">{sub}</div>}
       </div>
     </div>
   )

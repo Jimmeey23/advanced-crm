@@ -44,6 +44,7 @@ async function req(method, path, body, isForm) {
       const error = new Error(data.error || data.message || `${res.status} ${res.statusText}`)
       error.status = res.status
       error.base = base || '(relative)'
+      error.data = data
       lastError = error
 
       // Retry a likely backend origin when we hit a 404 from the current one.

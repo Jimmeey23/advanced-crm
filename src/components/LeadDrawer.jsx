@@ -15,9 +15,11 @@ const R_CHANNELS = { whatsapp: '#34d399', sms: '#fbbf24', email: '#a78bfa', call
 
 export default function LeadDrawer() {
   const { boot, lookup, drawerLeadId, closeLead, refreshData, toast, dataVersion } = useApp()
-  const [memberIdInput, setMemberIdInput] = useState('')
   const [syncing, setSyncing] = useState(false)
   const [syncError, setSyncError] = useState('')
+  const [candidates, setCandidates] = useState(null)
+  const [manualLink, setManualLink] = useState(false)
+  const [manualMemberId, setManualMemberId] = useState('')
   const [remarkDraft, setRemarkDraft] = useState('')
   const [composeOpen, setComposeOpen] = useState(false)
   const [enriching, setEnriching] = useState(false)
@@ -40,7 +42,7 @@ export default function LeadDrawer() {
   )
 
   useEffect(() => { if (lead) setRemarkDraft(lead.remarks || '') }, [lead?.id])
-  useEffect(() => { setSyncError('') }, [drawerLeadId])
+  useEffect(() => { setSyncError(''); setCandidates(null); setManualLink(false); setManualMemberId('') }, [drawerLeadId])
 
   const doEnrich = async () => {
     setEnriching(true)
@@ -65,7 +67,7 @@ export default function LeadDrawer() {
     return (
       <div className="fixed inset-0 z-[80] flex justify-end">
         <div className="absolute inset-0 bg-black/55 backdrop-blur-[2px]" onClick={closeLead} />
-        <aside className="lead-drawer relative w-full max-w-[580px] h-full bg-[#0b0e1a] border-l border-white/10 flex items-center justify-center">
+        <aside className="lead-drawer relative w-full max-w-[680px] h-full bg-[linear-gradient(180deg,rgba(15,18,32,0.98),rgba(9,12,22,0.98))] border-l border-white/10 flex items-center justify-center">
           <div className="flex flex-col items-center gap-3">
             <Spinner size={26} />
             <span className="text-[12px] text-slate-500">Loading lead…</span>
@@ -97,17 +99,31 @@ export default function LeadDrawer() {
     } catch (err) { toast(err.message, 'error') }
   }
 
+  // Auto-lookup by the lead's email/phone — no manual member ID required.
+  // The server searches Momence's member directory itself; this only
+  // surfaces a pick-list when more than one member matches.
   const doSync = async () => {
-    let memberId = lead.memberId
-    if (!memberId && memberIdInput.trim()) {
-      await patch({ memberId: memberIdInput.trim() }, 'Member ID saved')
-      memberId = memberIdInput.trim()
-    }
-    if (!memberId) { setSyncError('Enter a Momence member ID first.'); return }
-    setSyncing(true); setSyncError('')
+    setSyncing(true); setSyncError(''); setCandidates(null)
     try {
       await api.post(`/api/momence/sync/${lead.id}`)
       toast('Momence profile synced')
+      refreshData(); reload()
+    } catch (e) {
+      if (e.status === 300 && e.data?.candidates) {
+        setCandidates(e.data.candidates)
+      } else {
+        setSyncError(e.message); toast(e.message, 'error')
+      }
+    }
+    finally { setSyncing(false) }
+  }
+
+  const doLink = async (memberId) => {
+    setSyncing(true); setSyncError('')
+    try {
+      await api.post(`/api/momence/link/${lead.id}`, { memberId })
+      toast('Momence profile linked and synced')
+      setCandidates(null); setManualLink(false); setManualMemberId('')
       refreshData(); reload()
     } catch (e) { setSyncError(e.message); toast(e.message, 'error') }
     finally { setSyncing(false) }
@@ -131,9 +147,9 @@ export default function LeadDrawer() {
     <>
       <div className="fixed inset-0 z-[80] flex justify-end">
       <div className="absolute inset-0 bg-black/55 backdrop-blur-[2px]" onClick={closeLead} />
-      <aside className="lead-drawer relative w-full max-w-[580px] h-full bg-[#0b0e1a] border-l border-white/10 flex flex-col shadow-2xl" style={{ animation: 'slideIn .2s ease' }}>
+      <aside className="lead-drawer lead-detail-panel relative w-full max-w-[700px] h-full bg-[linear-gradient(180deg,rgba(15,18,32,0.98),rgba(9,12,22,0.98))] border-l border-white/10 flex flex-col shadow-2xl" style={{ animation: 'slideIn .2s ease' }}>
         {/* header */}
-        <div className="px-6 pt-5 pb-4 border-b border-white/8">
+        <div className="lead-detail-header px-6 pt-5 pb-4 border-b border-white/8 bg-white/[0.02] backdrop-blur-xl">
           <div className="flex items-start gap-3">
             <Avatar name={lead.fullName} color={owner?.color} size={46} />
             <div className="flex-1 min-w-0">
@@ -143,7 +159,7 @@ export default function LeadDrawer() {
                 <span className="flex items-center gap-1 truncate"><Mail size={11} />{lead.email}</span>
               </div>
             </div>
-            <button className="btn btn-ghost !p-2" onClick={closeLead}><X size={16} /></button>
+            <button className="btn btn-ghost !p-2 modal-close" onClick={closeLead}><X size={16} /></button>
           </div>
 
           <div className="flex flex-wrap items-center gap-2 mt-3">
@@ -166,7 +182,7 @@ export default function LeadDrawer() {
           </div>
 
           <button
-            className="btn btn-primary !py-1.5 !text-[12px] w-full mt-3"
+            className="btn btn-primary !py-2 !text-[12px] w-full mt-4"
             onClick={() => setComposeOpen(true)}
           >
             <MessageCircle size={13} /> Send message via Respond.io
@@ -186,9 +202,9 @@ export default function LeadDrawer() {
         )}
 
         {/* body */}
-        <div className="flex-1 overflow-y-auto scrollbar-thin px-6 py-5 space-y-5">
+        <div className="lead-detail-body flex-1 overflow-y-auto scrollbar-thin px-6 py-5 space-y-5">
           {/* AI panel */}
-          <section className="card ai-panel !rounded-2xl p-4 border-fuchsia-400/15" style={{ background: 'linear-gradient(135deg, var(--accent-soft), rgba(255,255,255,0.02))' }}>
+          <section className="modern-card ai-panel !rounded-2xl p-5 border-fuchsia-400/15" style={{ background: 'linear-gradient(135deg, rgba(139,92,246,0.14), rgba(255,255,255,0.03))' }}>
             <div className="flex items-center gap-2 mb-3">
               <Sparkles size={14} className="text-fuchsia-400" />
               <h3 className="font-display font-semibold text-white text-[13px]">AI lead intelligence</h3>
@@ -205,7 +221,7 @@ export default function LeadDrawer() {
                 <div className="flex items-center gap-2"><Send size={12} className="text-cyan-400" /> Next move: <b className="text-slate-200">{lead.ai.nextAction.label}</b></div>
               </div>
             </div>
-            <div className="rounded-xl bg-black/20 border border-white/8 p-3">
+            <div className="rounded-xl bg-white/[0.04] border border-white/10 p-3">
               <div className="text-[11px] font-semibold text-fuchsia-300 mb-1 flex items-center gap-1.5"><Lightbulb size={12} /> Suggested action</div>
               <p className="text-[12.5px] text-slate-200 leading-relaxed">{lead.ai.nextAction.text}</p>
             </div>
@@ -217,13 +233,13 @@ export default function LeadDrawer() {
           </section>
 
           {/* summary */}
-          <section className="card !rounded-2xl p-4">
+          <section className="modern-card !rounded-2xl p-5">
             <h3 className="font-display font-semibold text-white text-[13px] mb-2">AI summary</h3>
             <p className="text-[12.5px] text-slate-300 leading-relaxed">{lead.ai.summary}</p>
           </section>
 
           {/* GPT enrichment */}
-          <section className="card gpt-panel !rounded-2xl p-4 border-cyan-400/15">
+          <section className="modern-card gpt-panel !rounded-2xl p-5 border-cyan-400/15">
             <div className="flex items-center gap-2 mb-3">
               <Bot size={14} className="text-cyan-400" />
               <h3 className="font-display font-semibold text-white text-[13px]">GPT deep-dive</h3>
@@ -232,7 +248,7 @@ export default function LeadDrawer() {
 
             {lead.gpt ? (
               <div className="space-y-2.5">
-                <div className="rounded-xl bg-black/20 border border-white/8 p-3">
+                <div className="rounded-xl bg-white/[0.04] border border-white/10 p-3">
                   <div className="text-[11px] font-semibold text-cyan-300 mb-1 flex items-center gap-1.5"><Lightbulb size={12} /> GPT summary</div>
                   <p className="text-[12.5px] text-slate-200 leading-relaxed">{lead.gpt.summary}</p>
                 </div>
@@ -256,7 +272,7 @@ export default function LeadDrawer() {
                     <div className="text-[10.5px] uppercase tracking-wider text-cyan-300 font-semibold mb-1.5 flex items-center gap-1"><Sparkles size={10} /> GPT suggested messages</div>
                     <div className="space-y-1.5">
                       {lead.gpt.followupSuggestions.map((s, i) => (
-                        <button key={i} className="w-full text-left card !rounded-xl px-2.5 py-2 hover:bg-white/5 transition-colors" onClick={() => { setComposeOpen(true) }}>
+                        <button key={i} className="w-full text-left modern-card !rounded-xl px-3 py-2.5 hover:scale-[1.01] transition-transform" onClick={() => { setComposeOpen(true) }}>
                           <span className="chip !px-1.5 !py-0.5 text-[9.5px] uppercase" style={{ background: `${R_CHANNELS[s.channel] || '#888'}1c`, color: R_CHANNELS[s.channel] || '#fff', border: `1px solid ${(R_CHANNELS[s.channel] || '#888')}33` }}>{s.label || s.channel}</span>
                           <span className="block text-[11.5px] text-slate-300 mt-1 leading-relaxed">“{s.text}”</span>
                         </button>
@@ -281,7 +297,7 @@ export default function LeadDrawer() {
           </section>
 
           {/* Respond.io conversations */}
-          <section className="card !rounded-2xl p-4">
+          <section className="modern-card !rounded-2xl p-5">
             <div className="flex items-center gap-2 mb-3">
               <MessageCircle size={14} className={boot?.settings?.respondio?.configured ? 'text-emerald-400' : 'text-slate-500'} />
               <h3 className="font-display font-semibold text-white text-[13px]">Respond.io conversation</h3>
@@ -297,8 +313,8 @@ export default function LeadDrawer() {
             ) : (
               <div className="space-y-3">
                 {conv.conversations.map(c => (
-                  <div key={c.id} className="rounded-xl bg-white/[0.02] border border-white/6 overflow-hidden">
-                    <div className="flex items-center gap-2 px-3 py-2 border-b border-white/6">
+                  <div key={c.id} className="rounded-xl bg-white/[0.03] border border-white/8 overflow-hidden">
+                    <div className="flex items-center gap-2 px-3 py-2 border-b border-white/6 bg-white/[0.03]">
                       <span className="chip !py-0.5 !px-2 text-[9.5px] uppercase" style={{ background: `${R_CHANNELS[c.channel] || '#888'}1c`, color: R_CHANNELS[c.channel] || '#fff', border: `1px solid ${(R_CHANNELS[c.channel] || '#888')}33` }}>{c.channel}</span>
                       <span className="text-[10.5px] text-slate-500">{c.status || ''}</span>
                       <button className="ml-auto btn btn-ghost !p-1.5 !text-[11px]" onClick={() => setComposeOpen(true)}><Send size={11} /> Reply</button>
@@ -319,7 +335,7 @@ export default function LeadDrawer() {
           </section>
 
           {/* Momence */}
-          <section className="card !rounded-2xl p-4">
+          <section className="modern-card !rounded-2xl p-5">
             <div className="flex items-center gap-2 mb-3">
               <Link2 size={14} className="text-emerald-400" />
               <h3 className="font-display font-semibold text-white text-[13px]">Momence · sales & class history</h3>
@@ -329,12 +345,43 @@ export default function LeadDrawer() {
               <div className="text-[12.5px] text-slate-400 flex items-center gap-2"><span>Connect Momence in Settings to pull sales and class history automatically.</span></div>
             ) : !m ? (
               <div>
-                <div className="flex items-center gap-2 mb-2">
-                  <input className="input !py-1.5" placeholder="Momence member ID (e.g. 15875720)" value={memberIdInput} onChange={e => setMemberIdInput(e.target.value)} />
-                  <button className="btn btn-soft !py-2" onClick={doSync} disabled={syncing}>{syncing ? <Spinner size={14} /> : <RefreshCw size={14} />} Sync</button>
-                </div>
-                {lead.memberId && <p className="text-[11.5px] text-slate-500">Linked to member #{lead.memberId} — click sync to map history.</p>}
-                {syncError && <p className="text-[11.5px] text-rose-400 mt-1">{syncError}</p>}
+                {!candidates ? (
+                  <div>
+                    <div className="flex items-center gap-2 mb-2">
+                      <button className="btn btn-soft !py-2 flex-1" onClick={doSync} disabled={syncing}>
+                        {syncing ? <Spinner size={14} /> : <RefreshCw size={14} />} Find &amp; sync from Momence
+                      </button>
+                    </div>
+                    <p className="text-[11px] text-slate-500">Looks up this member on Momence by {lead.email ? 'email' : ''}{lead.email && lead.phone ? ' or ' : ''}{lead.phone ? 'phone' : ''} — no member ID needed.</p>
+                    {lead.memberId && <p className="text-[11.5px] text-slate-500 mt-1">Already linked to member #{lead.memberId}.</p>}
+                    {syncError && <p className="text-[11.5px] text-rose-400 mt-1">{syncError}</p>}
+                    <button className="text-[11px] text-slate-500 hover:text-slate-300 underline mt-2" onClick={() => setManualLink(v => !v)}>
+                      {manualLink ? 'Cancel manual link' : "Can't find it? Link a member ID manually"}
+                    </button>
+                    {manualLink && (
+                      <div className="flex items-center gap-2 mt-2">
+                        <input className="input !py-1.5" placeholder="Momence member ID (e.g. 15875720)" value={manualMemberId} onChange={e => setManualMemberId(e.target.value)} />
+                        <button className="btn btn-ghost !py-2" onClick={() => manualMemberId.trim() && doLink(manualMemberId.trim())} disabled={syncing || !manualMemberId.trim()}>Link</button>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div>
+                    <p className="text-[12px] text-slate-300 mb-2">Multiple Momence members match — pick the right one:</p>
+                    <div className="space-y-1.5">
+                      {candidates.map(c => (
+                        <button key={c.id} className="w-full text-left card !rounded-xl px-3 py-2 hover:bg-white/5 transition-colors flex items-center justify-between gap-2" onClick={() => doLink(c.id)} disabled={syncing}>
+                          <span>
+                            <span className="block text-[12.5px] font-semibold text-slate-200">{c.firstName} {c.lastName}</span>
+                            <span className="block text-[11px] text-slate-500">{c.email}{c.phoneNumber ? ` · ${c.phoneNumber}` : ''}</span>
+                          </span>
+                          <span className="text-[10.5px] text-slate-500 mono shrink-0">#{c.id}</span>
+                        </button>
+                      ))}
+                    </div>
+                    <button className="text-[11px] text-slate-500 hover:text-slate-300 underline mt-2" onClick={() => setCandidates(null)}>Cancel</button>
+                  </div>
+                )}
               </div>
             ) : (
               <div>
@@ -356,7 +403,9 @@ export default function LeadDrawer() {
                   tabs={[
                     { key: 'sales', label: `Sales (${m.salesHistory?.length || 0})`, icon: Receipt },
                     { key: 'classes', label: `Classes (${m.classHistory?.length || 0})`, icon: Award },
-                    { key: 'plans', label: `Plans (${m.memberships?.length || 0})`, icon: CalendarPlus }
+                    { key: 'plans', label: `Plans (${m.memberships?.length || 0})`, icon: CalendarPlus },
+                    { key: 'appointments', label: `Appointments (${m.appointments?.length || 0})`, icon: Clock },
+                    { key: 'notes', label: `Notes (${m.notes?.length || 0})`, icon: MessageSquare }
                   ]}>
                   <div key="sales">
                     {(m?.salesHistory || []).slice(0, 8).map((s, i) => (
@@ -376,6 +425,18 @@ export default function LeadDrawer() {
                     ))}
                     {!m.memberships?.length && <EmptyNote text="No active memberships." />}
                   </div>
+                  <div key="appointments">
+                    {(m?.appointments || []).slice(0, 8).map((a, i) => (
+                      <Row key={i} icon={<Clock size={13} className={a.status === 'cancelled' ? 'text-slate-500' : 'text-cyan-400'} />} title={a.name} sub={a.staff} right={a.status === 'cancelled' ? 'Cancelled' : 'Booked'} meta={fmtDateTime(a.startsAt)} />
+                    ))}
+                    {!m.appointments?.length && <EmptyNote text="No appointments found for this member." />}
+                  </div>
+                  <div key="notes">
+                    {(m?.notes || []).slice(0, 8).map((n, i) => (
+                      <Row key={i} icon={<MessageSquare size={13} className="text-fuchsia-400" />} title={(n.note || 'Note').replace(/<[^>]+>/g, ' ').trim()} sub="" right="" meta={fmtDateTime(n.createdAt)} />
+                    ))}
+                    {!m.notes?.length && <EmptyNote text="No notes recorded on this member's Momence profile." />}
+                  </div>
                 </Tabbed>
                 <p className="text-[10.5px] text-slate-600 mt-2 flex items-center gap-1"><RefreshCw size={10} /> Synced {timeAgo(lead.momenceSyncedAt)}</p>
               </div>
@@ -383,7 +444,7 @@ export default function LeadDrawer() {
           </section>
 
           {/* remarks */}
-          <section className="card !rounded-2xl p-4">
+          <section className="modern-card !rounded-2xl p-5">
             <h3 className="font-display font-semibold text-white text-[13px] mb-2">Remarks</h3>
             <textarea className="input resize-none" rows={3} value={remarkDraft} onChange={e => setRemarkDraft(e.target.value)} placeholder="Notes from conversations…" />
             <button className="btn btn-ghost !py-1.5 !text-[12px] mt-2" onClick={() => remarkDraft !== lead.remarks && patch({ remarks: remarkDraft }, 'Remarks updated')}>Save remarks</button>

@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Settings2, Eye, EyeOff, ArrowUp, ArrowDown, Plus, Trash2, X, Sigma, Link2 } from 'lucide-react'
 
@@ -33,6 +33,24 @@ const newId = () => `col_${Date.now().toString(36)}_${(uidSeq++).toString(36)}`
 export default function ColumnManager({ columns, setColumns }) {
   const [open, setOpen] = useState(false)
   const [adding, setAdding] = useState(null) // 'formula' | 'lookup' | null
+  const [position, setPosition] = useState({ top: 90, left: 24, width: 380 })
+  const triggerRef = useRef(null)
+
+  const toggleOpen = () => {
+    if (open) {
+      setOpen(false)
+      return
+    }
+    const rect = triggerRef.current?.getBoundingClientRect()
+    if (rect) {
+      const width = Math.min(380, window.innerWidth - 24)
+      const panelHeight = Math.min(488, window.innerHeight - 24)
+      const top = Math.max(12, Math.min(rect.bottom + 8, window.innerHeight - panelHeight - 12))
+      const left = Math.max(12, Math.min(rect.right - width, window.innerWidth - width - 12))
+      setPosition({ top, left, width })
+    }
+    setOpen(true)
+  }
 
   const move = (idx, dir) => setColumns(cols => {
     const next = [...cols]
@@ -56,13 +74,13 @@ export default function ColumnManager({ columns, setColumns }) {
 
   return (
     <div className="relative inline-block">
-      <button className={`btn ${open ? 'btn-soft' : 'btn-ghost'} !py-2`} onClick={() => setOpen(o => !o)}>
+      <button ref={triggerRef} className={`btn ${open ? 'btn-soft' : 'btn-ghost'} !py-2`} onClick={toggleOpen} aria-expanded={open} aria-haspopup="dialog">
         <Settings2 size={14} /> Columns
       </button>
       {open && createPortal(
         <>
           <div className="fixed inset-0 z-[95]" onClick={() => setOpen(false)} />
-          <div className="fixed right-6 top-[130px] w-[380px] card z-[96] shadow-2xl overflow-hidden" style={{ background: 'var(--tt-bg)', animation: 'fadeIn .12s ease' }}>
+          <div className="fixed card z-[96] shadow-2xl overflow-hidden" role="dialog" aria-label="Manage table columns" style={{ ...position, maxHeight: 'calc(100vh - 24px)', background: 'var(--tt-bg)', animation: 'fadeIn .12s ease' }}>
             <div className="flex items-center justify-between px-4 py-3 border-b border-white/8">
               <div className="font-display font-semibold text-white text-[13.5px]">Manage columns</div>
               <button className="btn btn-ghost !p-1.5" onClick={() => setOpen(false)}><X size={14} /></button>

@@ -151,21 +151,21 @@ export default function RespondioTemplateModal({ open, onClose, lead }) {
       <div className="space-y-3">
         <div>
           <label className="text-[10.5px] uppercase tracking-wider text-slate-500 font-semibold mb-1 block">Template</label>
-          <select className="input" value={templateId} onChange={e => setTemplateId(e.target.value)}>
+          <select className="input select-strong" value={templateId} onChange={e => setTemplateId(e.target.value)}>
             {templates.map(t => <option key={t.id} value={t.id}>{t.label || t.name}</option>)}
           </select>
-          <div className="text-[11px] text-slate-500 mt-1 flex items-center gap-1.5">
+          <div className="text-[11px] text-slate-500 mt-1 flex items-center gap-1.5 flex-wrap">
             <Sparkles size={11} />
             {apiTemplates?.length ? 'Live approved templates from your Respond.io WhatsApp channel' : 'Manually configured in Settings > Integrations'}
           </div>
-          {loadError && !apiTemplates?.length && <p className="text-[11px] text-blue-500 mt-1">{loadError}</p>}
+          {loadError && !apiTemplates?.length && <p className="text-[11px] text-amber-500 mt-1">{loadError}</p>}
         </div>
 
         <div className="space-y-2">
           {(selected?.parameters || []).map((label, idx) => (
             <div key={idx}>
               <label className="text-[10.5px] uppercase tracking-wider text-slate-500 font-semibold mb-1 block">Parameter {idx + 1}{label ? ` — ${label}` : ''}</label>
-              <input className="input" value={values[idx] || ''} onChange={e => setValue(idx, e.target.value)} placeholder={label || `Value ${idx + 1}`} />
+              <input className="input !bg-white/[0.06]" value={values[idx] || ''} onChange={e => setValue(idx, e.target.value)} placeholder={label || `Value ${idx + 1}`} />
             </div>
           ))}
           {!selected?.parameters?.length && <p className="text-[12px] text-slate-500">This template has no parameters.</p>}

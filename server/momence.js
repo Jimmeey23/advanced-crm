@@ -120,6 +120,15 @@ async function paginate(db, path, { pageSize = 100, extra = {} } = {}) {
   return all
 }
 
+async function safePaginate(db, path, opts = {}, fallback = []) {
+  try {
+    return await paginate(db, path, opts)
+  } catch (e) {
+    if (String(e?.message || '').includes('Momence API 404')) return fallback
+    throw e
+  }
+}
+
 export async function getProfile(db) {
   return request(db, '/api/v2/auth/profile')
 }
@@ -133,11 +142,15 @@ export async function getMemberSessions(db, memberId) {
 }
 
 export async function getMemberMemberships(db, memberId) {
-  return paginate(db, `/api/v2/host/members/${memberId}/bought-memberships/active`, { extra: { includeFrozen: true } })
+  return safePaginate(db, `/api/v2/host/members/${memberId}/bought-memberships/active`, { extra: { includeFrozen: true } }, [])
 }
 
 export async function getMemberNotes(db, memberId) {
-  return paginate(db, `/api/v2/host/members/${memberId}/notes`)
+  return safePaginate(db, `/api/v2/host/members/${memberId}/notes`, {}, [])
+}
+
+export async function getMemberAppointments(db, memberId) {
+  return paginate(db, `/api/v2/host/members/${memberId}/appointments`, { extra: { includeCancelled: true } })
 }
 
 export async function getSales(db, { memberId } = {}) {
@@ -146,6 +159,33 @@ export async function getSales(db, { memberId } = {}) {
 
 export async function searchMembers(db, query) {
   return paginate(db, '/api/v2/host/members', { extra: { query } })
+}
+
+const digitsOnly = (v) => String(v || '').replace(/\D+/g, '')
+const normEmail = (v) => String(v || '').trim().toLowerCase()
+
+// Locate the Momence member(s) matching a lead's email/phone — this is how a
+// lead gets linked without anyone having to know or paste a numeric Momence
+// member ID. Email match takes priority (unique in practice); phone falls
+// back to comparing the last 10 digits, since Momence and CRM numbers may
+// differ in country-code formatting.
+export async function findMemberCandidates(db, { email, phone } = {}) {
+  const wantEmail = normEmail(email)
+  const wantPhone = digitsOnly(phone).slice(-10)
+
+  if (wantEmail) {
+    const byEmail = await searchMembers(db, email)
+    const exact = byEmail.filter(m => normEmail(m.email) === wantEmail)
+    if (exact.length) return exact
+  }
+
+  if (wantPhone && wantPhone.length >= 7) {
+    const byPhone = await searchMembers(db, phone)
+    const exact = byPhone.filter(m => digitsOnly(m.phoneNumber).slice(-10) === wantPhone)
+    if (exact.length) return exact
+  }
+
+  return []
 }
 
 export async function testConnection(db) {
@@ -208,12 +248,31 @@ export function mapMemberships(memberships) {
   }))
 }
 
+export function mapAppointments(appointments) {
+  return (appointments || [])
+    .map(a => ({
+      id: a.id,
+      name: a.appointment?.name || a.service?.name || 'Appointment',
+      startsAt: a.startsAt || a.appointment?.startsAt,
+      endsAt: a.endsAt || a.appointment?.endsAt,
+      staff: a.staff ? `${a.staff.firstName || ''} ${a.staff.lastName || ''}`.trim() : null,
+      status: a.status || (a.cancelledAt ? 'cancelled' : 'booked'),
+      cancelledAt: a.cancelledAt
+    }))
+    .sort((a, b) => new Date(b.startsAt) - new Date(a.startsAt))
+}
+
 export async function buildProfile(db, memberId) {
-  const [member, sessions, memberships, notes] = await Promise.all([
-    getMember(db, memberId),
-    getMemberSessions(db, memberId),
-    getMemberMemberships(db, memberId),
-    getMemberNotes(db, memberId)
+  const safeMemberId = String(memberId || '').trim()
+  if (!safeMemberId || safeMemberId === '-' || safeMemberId === 'undefined' || safeMemberId === 'null') {
+    throw new Error('Momence member ID is missing or invalid.')
+  }
+  const [member, sessions, memberships, notes, appointments] = await Promise.all([
+    getMember(db, safeMemberId),
+    getMemberSessions(db, safeMemberId),
+    getMemberMemberships(db, safeMemberId),
+    getMemberNotes(db, safeMemberId),
+    getMemberAppointments(db, safeMemberId).catch(() => [])
   ])
   let salesHistory = []
   try {
@@ -241,6 +300,7 @@ export async function buildProfile(db, memberId) {
     },
     memberships: mapMemberships(memberships),
     classHistory: mapClassHistory(sessions),
+    appointments: mapAppointments(appointments),
     salesHistory,
     notes: (notes || []).slice(0, 10),
     syncedAt: nowIso()
@@ -249,9 +309,27 @@ export async function buildProfile(db, memberId) {
 }
 
 export async function syncLeadMomence(db, lead) {
+  if (!String(lead?.memberId || '').trim() || ['-','null','undefined'].includes(String(lead.memberId).trim())) {
+    throw new Error('Lead is not linked to a valid Momence member yet.')
+  }
   const profile = await buildProfile(db, lead.memberId)
   lead.momence = profile
   lead.momenceSyncedAt = nowIso()
   save()
   return profile
+}
+
+// Resolves a lead's Momence member ID by contact match and persists it,
+// so future syncs skip the lookup. Throws with a message safe to surface
+// to the UI ('no-match' / 'ambiguous') when the caller needs to branch.
+export async function resolveLeadMember(db, lead) {
+  if (lead.memberId) return { memberId: lead.memberId, candidates: null }
+
+  const candidates = await findMemberCandidates(db, { email: lead.email, phone: lead.phone })
+  if (candidates.length === 1) {
+    lead.memberId = String(candidates[0].id)
+    save()
+    return { memberId: lead.memberId, candidates: null }
+  }
+  return { memberId: null, candidates }
 }

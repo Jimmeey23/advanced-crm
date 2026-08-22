@@ -2,9 +2,12 @@ import React, { useState } from 'react'
 import {
   LayoutDashboard, KanbanSquare, Users, UploadCloud, Settings, Search,
   Bell, Plus, Zap, Link2, ShieldCheck, Sun, Moon, BarChart3, ChevronsLeft, ChevronsRight,
-  CalendarDays, CalendarRange
+  CalendarDays, CalendarRange, Activity
 } from 'lucide-react'
 import { AppProvider, Toasts, useApp } from './store.jsx'
+import { useFetch } from './hooks.js'
+import { api } from './api.js'
+import { money } from './lib.js'
 import Dashboard from './pages/Dashboard.jsx'
 import Performance from './pages/Performance.jsx'
 import Pipeline from './pages/Pipeline.jsx'
@@ -20,15 +23,15 @@ import AlertsDropdown from './components/AlertsDropdown.jsx'
 import Logo from './components/Logo.jsx'
 
 const NAV = [
-  { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
-  { id: 'performance', label: 'Performance', icon: BarChart3 },
-  { id: 'studio-weekly', label: 'Weekly studio report', icon: CalendarDays },
-  { id: 'studio-monthly', label: 'Monthly studio report', icon: CalendarRange },
-  { id: 'pipeline', label: 'Pipeline', icon: KanbanSquare },
-  { id: 'leads', label: 'Leads', icon: Users },
-  { id: 'import', label: 'Import CSV', icon: UploadCloud },
-  { id: 'team', label: 'Team & Studios', icon: Users },
-  { id: 'settings', label: 'Settings', icon: Settings }
+  { id: 'dashboard', label: 'Dashboard', title: 'Executive Overview', icon: LayoutDashboard },
+  { id: 'performance', label: 'Performance', title: 'Sales Performance', icon: BarChart3 },
+  { id: 'studio-weekly', label: 'Weekly studio report', title: 'Weekly Studio Pulse', icon: CalendarDays },
+  { id: 'studio-monthly', label: 'Monthly studio report', title: 'Monthly Studio Review', icon: CalendarRange },
+  { id: 'pipeline', label: 'Pipeline', title: 'Sales Pipeline', icon: KanbanSquare },
+  { id: 'leads', label: 'Leads', title: 'Lead Directory', icon: Users },
+  { id: 'import', label: 'Import CSV', title: 'Lead Import Centre', icon: UploadCloud },
+  { id: 'team', label: 'Team & Studios', title: 'Studios & Sales Team', icon: Users },
+  { id: 'settings', label: 'Settings', title: 'Workspace Settings', icon: Settings }
 ]
 
 function Sidebar() {
@@ -40,7 +43,9 @@ function Sidebar() {
   return (
     <aside className={`${sidebarCollapsed ? 'w-[72px]' : 'w-[248px]'} shrink-0 h-full flex flex-col border-r border-white/6 bg-[#0a0d18]/80 backdrop-blur-xl transition-[width] duration-200`}>
       <div className={`px-5 pt-6 pb-5 flex items-center gap-3 ${sidebarCollapsed ? '!px-0 justify-center' : ''}`}>
-        <Logo size={40} />
+        <button type="button" onClick={() => navigate('dashboard')} className="rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-400" aria-label="Go to dashboard" title="Home">
+          <Logo size={40} />
+        </button>
         {!sidebarCollapsed && (
           <div className="min-w-0">
             <div className="font-display font-bold text-white leading-tight text-[15px] truncate">{boot?.settings?.org?.name || 'Lead Studio'}</div>
@@ -110,12 +115,18 @@ function Sidebar() {
 function Topbar({ onAdd }) {
   const { view, navigate, alerts, boot, theme, setTheme } = useApp()
   const [query, setQuery] = useState('')
-  const title = NAV.find(n => n.id === view)?.label || 'Dashboard'
+  const title = NAV.find(n => n.id === view)?.title || 'Executive Overview'
   const todayCount = alerts.filter(a => a.level === 'high').length
 
   return (
-    <header className="relative z-30 h-[64px] shrink-0 flex items-center gap-4 px-6 border-b border-white/6 bg-[#080a12]/70 backdrop-blur-xl">
-      <h1 className="font-display text-[19px] font-bold text-white flex-1">{title}</h1>
+    <header className="relative z-30 h-[74px] shrink-0 flex items-center gap-4 px-6 border-b border-white/6 bg-[#080a12]/70 backdrop-blur-xl">
+      <div className="app-page-title flex-1" key={view}>
+        <span className="app-page-title-icon"><Activity size={15} /></span>
+        <div>
+          <span className="app-page-title-kicker">CRM workspace</span>
+          <h1 className="font-display">{title}</h1>
+        </div>
+      </div>
 
       <div className="relative w-[300px]">
         <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
@@ -154,6 +165,75 @@ function Topbar({ onAdd }) {
   )
 }
 
+function MarqueeBanner() {
+  const { boot, alerts, dataVersion, view } = useApp()
+  const { data: metrics } = useFetch(() => api.get('/api/analytics/overview'), [dataVersion])
+  const highPriority = alerts.filter(alert => alert.level === 'high').length
+  const integrationCount = boot ? Object.values(boot.integrations || {}).filter(value => value === true).length : 0
+  const analytics = metrics || {}
+  const loaded = (items) => items.filter(item => item.value !== undefined && item.value !== null)
+  const pageMetrics = {
+    dashboard: loaded([
+      { label: 'Total leads', value: analytics.totalLeads }, { label: 'Open pipeline', value: analytics.openLeads },
+      { label: 'Conversion', value: analytics.conversionRate !== undefined ? `${analytics.conversionRate}%` : undefined },
+      { label: 'Revenue this month', value: analytics.revenueThisMonth !== undefined ? money(analytics.revenueThisMonth) : undefined },
+      { label: 'Priority alerts', value: highPriority }
+    ]),
+    performance: loaded([
+      { label: 'Won deals', value: analytics.won }, { label: 'Conversion', value: analytics.conversionRate !== undefined ? `${analytics.conversionRate}%` : undefined },
+      { label: 'Average deal', value: analytics.avgDealValue !== undefined ? money(analytics.avgDealValue) : undefined },
+      { label: 'Monthly revenue', value: analytics.revenueThisMonth !== undefined ? money(analytics.revenueThisMonth) : undefined },
+      { label: 'Reporting months', value: 12 }, { label: 'Studios measured', value: boot?.locations?.length }
+    ]),
+    'studio-weekly': loaded([
+      { label: 'Active studios', value: boot?.locations?.filter(location => location.active !== false).length },
+      { label: 'Sales associates', value: boot?.associates?.filter(associate => associate.active !== false).length },
+      { label: 'Hot leads', value: analytics.hotLeads }, { label: 'High priority', value: highPriority }
+    ]),
+    'studio-monthly': loaded([
+      { label: 'New this month', value: analytics.newThisMonth }, { label: 'Won this month', value: analytics.wonThisMonth },
+      { label: 'Monthly revenue', value: analytics.revenueThisMonth !== undefined ? money(analytics.revenueThisMonth) : undefined },
+      { label: 'Monthly target', value: analytics.monthlyTarget }, { label: 'Studios reporting', value: boot?.locations?.length }
+    ]),
+    pipeline: loaded([
+      { label: 'Open opportunities', value: analytics.openLeads }, { label: 'Hot opportunities', value: analytics.hotLeads },
+      { label: 'Trials booked', value: analytics.trialBooked }, { label: 'Unassigned', value: analytics.unassigned },
+      { label: 'Pipeline stages', value: boot?.stages?.length }
+    ]),
+    leads: loaded([
+      { label: 'Lead database', value: analytics.totalLeads }, { label: 'Open leads', value: analytics.openLeads },
+      { label: 'Hot leads', value: analytics.hotLeads }, { label: 'Unassigned leads', value: analytics.unassigned },
+      { label: 'Lead sources', value: boot?.sources?.length }
+    ]),
+    import: loaded([
+      { label: 'Import destinations', value: boot?.locations?.length }, { label: 'Available sources', value: boot?.sources?.length },
+      { label: 'Pipeline stages', value: boot?.stages?.length }, { label: 'Assignable owners', value: boot?.associates?.length }
+    ]),
+    team: loaded([
+      { label: 'Studio locations', value: boot?.locations?.length }, { label: 'Team members', value: boot?.associates?.length },
+      { label: 'Monthly team target', value: analytics.monthlyTarget }, { label: 'Open assignments', value: analytics.openLeads }
+    ]),
+    settings: loaded([
+      { label: 'Pipeline stages', value: boot?.stages?.length }, { label: 'Lead sources', value: boot?.sources?.length },
+      { label: 'Outreach channels', value: boot?.channels?.length }, { label: 'Connected services', value: integrationCount }
+    ])
+  }
+  const items = pageMetrics[view]?.length ? pageMetrics[view] : [{ label: 'Active alerts', value: alerts.length }, { label: 'High priority', value: highPriority }]
+
+  return (
+    <div className="app-marquee" aria-label={`Live metrics for ${view}`} key={view}>
+      <div className="app-marquee-track">
+        <div className="app-marquee-group">
+          {items.map(item => <span key={item.label}><small>{item.label}</small><strong>{item.value}</strong></span>)}
+        </div>
+        <div className="app-marquee-group" aria-hidden="true">
+          {items.map(item => <span key={item.label}><small>{item.label}</small><strong>{item.value}</strong></span>)}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export default function App() {
   const [addOpen, setAddOpen] = useState(false)
   return (
@@ -163,6 +243,7 @@ export default function App() {
         <div className="flex-1 flex flex-col min-w-0">
           <Topbar onAdd={() => setAddOpen(true)} />
           <main className="flex-1 overflow-y-auto scrollbar-thin">
+            <MarqueeBanner />
             <Shell />
           </main>
         </div>

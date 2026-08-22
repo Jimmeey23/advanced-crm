@@ -20,15 +20,16 @@ export function ScorePill({ score, size = 'md' }) {
   const color = pct >= 70 ? '#34d399' : pct >= 45 ? '#fbbf24' : '#94a3b8'
   const r = size === 'lg' ? 20 : 14
   const circ = 2 * Math.PI * r
+  const d = r * 2 + 6
   return (
-    <div className="inline-flex items-center gap-2">
-      <svg width={r * 2 + 6} height={r * 2 + 6} viewBox={`0 0 ${r * 2 + 6} ${r * 2 + 6}`}>
+    <div className="relative inline-flex items-center justify-center" style={{ width: d, height: d }}>
+      <svg width={d} height={d} viewBox={`0 0 ${d} ${d}`}>
         <circle cx={r + 3} cy={r + 3} r={r} fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth={3.5} />
         <circle cx={r + 3} cy={r + 3} r={r} fill="none" stroke={color} strokeWidth={3.5}
           strokeLinecap="round" strokeDasharray={circ} strokeDashoffset={circ * (1 - pct / 100)}
           transform={`rotate(-90 ${r + 3} ${r + 3})`} style={{ transition: 'stroke-dashoffset .6s ease' }} />
       </svg>
-      <span className="mono text-[12px] font-semibold" style={{ color }}>{pct}</span>
+      <span className="absolute mono text-[12px] font-semibold" style={{ color }}>{pct}</span>
     </div>
   )
 }

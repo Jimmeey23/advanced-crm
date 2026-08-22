@@ -194,7 +194,7 @@ function FaceoffCard({ r, accent, score, vs }) {
 
 function SummaryCard({ icon, label, value, sub }) {
   return (
-    <div className="card !rounded-2xl p-3.5">
+    <div className="card reference-metric-card !rounded-2xl p-3.5" style={{ '--metric-accent': '#3b82f6' }}>
       <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-slate-500 mb-2">{icon}{label}</div>
       <div className="font-display text-[15px] font-bold text-slate-900 truncate" title={value}>{value}</div>
       {sub && <div className="text-[11px] text-slate-500 mt-0.5 truncate">{sub}</div>}

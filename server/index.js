@@ -755,11 +755,18 @@ app.post('/api/leads/import/apply', (req, res) => {
         .filter(p => p.date || p.comments)
 
       const stageVal = get('stage') || ''
+      const rawCreatedAt = get('createdAt')
+      const importedCreatedAt = parseFlexibleDate(rawCreatedAt)
+      if (mapping.createdAt && String(rawCreatedAt || '').trim() && !importedCreatedAt) {
+        throw new Error(`Invalid Created At value: ${String(rawCreatedAt).trim()}`)
+      }
       const lead = createLeadFrom({
         fullName: String(fullName).trim(),
         phone: String(get('phone') || '').trim(),
         email: String(get('email') || '-').trim() || '-',
-        createdAt: parseFlexibleDate(get('createdAt')) || nowIso(),
+        // The source row's Created At is the lead creation date. Import time
+        // is used only when the CSV has no mapped/value-bearing date at all.
+        createdAt: importedCreatedAt || nowIso(),
         sourceName: get('sourceName') || 'Website Form',
         sourceId: get('sourceId'),
         memberId: get('memberId'),
@@ -872,6 +879,22 @@ app.get('/api/analytics/timeline', (req, res) => {
   res.json(months)
 })
 
+app.get('/api/analytics/funnel-by-month', (req, res) => {
+  const months = []
+  const now = new Date()
+  for (let i = 11; i >= 0; i--) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1)
+    const key = d.toISOString().slice(0, 7)
+    const cohort = db.leads.filter(l => (l.createdAt || '').slice(0, 7) === key)
+    const stages = {}
+    db.stages.forEach((stage, idx) => {
+      stages[stage] = cohort.filter(l => db.stages.indexOf(l.stage) >= idx).length
+    })
+    months.push({ month: d.toLocaleString('en-US', { month: 'short' }), key, total: cohort.length, stages })
+  }
+  res.json({ stages: db.stages, months })
+})
+
 app.get('/api/analytics/funnel', (req, res) => {
   const funnel = db.stages.map(stage => ({
     stage,
@@ -951,13 +974,77 @@ app.post('/api/momence/test', async (req, res) => {
   }
 })
 
+// Resolves the Momence member for a lead by matching email/phone against the
+// Momence member directory — no manual member ID entry required. Returns the
+// candidate list unsynced when the match is ambiguous, so the UI can offer a
+// short pick-list instead of asking for a raw ID.
+app.get('/api/momence/lookup/:leadId', async (req, res) => {
+  const lead = leadById(req.params.leadId)
+  if (!lead) return res.status(404).json({ error: 'Lead not found' })
+  if (!momence.isConfigured(db)) return res.status(400).json({ ok: false, error: 'Momence is not configured' })
+  try {
+    if (lead.memberId) return res.json({ ok: true, memberId: lead.memberId, candidates: null })
+    const candidates = await momence.findMemberCandidates(db, { email: lead.email, phone: lead.phone })
+    res.json({ ok: true, memberId: null, candidates })
+  } catch (e) {
+    res.status(502).json({ ok: false, error: e.message })
+  }
+})
+
+// Links a lead to a specific Momence member (used only to disambiguate when
+// lookup finds more than one candidate) and syncs its profile immediately.
+app.post('/api/momence/link/:leadId', async (req, res) => {
+  const lead = leadById(req.params.leadId)
+  if (!lead) return res.status(404).json({ error: 'Lead not found' })
+  if (!momence.isConfigured(db)) return res.status(400).json({ ok: false, error: 'Momence is not configured' })
+  const memberId = String(req.body?.memberId || '').trim()
+  if (!memberId) return res.status(400).json({ ok: false, error: 'memberId is required' })
+  lead.memberId = memberId
+  try {
+    const profile = await momence.syncLeadMomence(db, lead)
+    lead.lastActivityAt = nowIso()
+    markDirty(lead.id)
+    save()
+    log('sync', `Linked and synced Momence profile for ${lead.fullName}`, lead.id)
+    res.json({ ok: true, profile: enrichLead(lead, db).momence, syncedAt: lead.momenceSyncedAt })
+  } catch (e) {
+    res.status(502).json({ ok: false, error: e.message })
+  }
+})
+
 app.post('/api/momence/sync/:leadId', async (req, res) => {
   const lead = leadById(req.params.leadId)
   if (!lead) return res.status(404).json({ error: 'Lead not found' })
   if (!momence.isConfigured(db)) return res.status(400).json({ ok: false, error: 'Momence is not configured' })
-  if (!lead.memberId) return res.status(400).json({ ok: false, error: 'Lead has no Momence member ID' })
   try {
-    const profile = await momence.syncLeadMomence(db, lead)
+    if (!lead.memberId) {
+      const { memberId, candidates } = await momence.resolveLeadMember(db, lead)
+      if (!memberId) {
+        if (candidates && candidates.length > 1) {
+          return res.status(300).json({ ok: false, ambiguous: true, error: 'Multiple Momence members match this lead — pick the right one.', candidates })
+        }
+        return res.status(404).json({ ok: false, error: `No Momence member found matching ${lead.email || lead.phone || 'this lead'}.` })
+      }
+    }
+    let profile
+    try {
+      profile = await momence.syncLeadMomence(db, lead)
+    } catch (syncError) {
+      // Imported member IDs can become stale or belong to another Momence host.
+      // On a direct-profile 404, re-resolve by the lead's current contact details.
+      if (!String(syncError?.message || '').includes('Momence API 404 for /api/v2/host/members/')) throw syncError
+      const staleMemberId = lead.memberId
+      lead.memberId = ''
+      const { memberId, candidates } = await momence.resolveLeadMember(db, lead)
+      if (!memberId) {
+        lead.memberId = staleMemberId
+        if (candidates && candidates.length > 1) {
+          return res.status(300).json({ ok: false, ambiguous: true, error: 'The saved Momence link is no longer valid. Choose the current matching member.', candidates })
+        }
+        return res.status(404).json({ ok: false, error: 'The saved Momence member no longer exists for this host, and no current member matched this lead. Relink the member.' })
+      }
+      profile = await momence.syncLeadMomence(db, lead)
+    }
     lead.lastActivityAt = nowIso()
     markDirty(lead.id)
     save()
@@ -1367,7 +1454,7 @@ function periodCohortConversion(range, offset, now, locationId) {
 // custom `&from&to` window is pro-rated by day-count against a 30-day month;
 // a `range=week` bucket is pro-rated by the average weeks-per-month; a plain
 // `range=month` bucket uses the monthly target as-is.
-function periodGoalTracking(range, start, end, customRange) {
+function periodGoalTracking(range, start, end, customRange, locationId) {
   const periodDays = Math.max(1, Math.round((end - start) / 86400000))
   const WEEKS_PER_MONTH = 365 / 12 / 7
   const inRange = periodInRangeFn(start, end)
@@ -1376,7 +1463,8 @@ function periodGoalTracking(range, start, end, customRange) {
     return range === 'week' ? Math.round(monthly / WEEKS_PER_MONTH) : monthly
   }
 
-  const perAssociate = db.associates.filter(a => a.active !== false).map(a => {
+  const scopedAssociates = locationId ? db.associates.filter(a => a.locationId === locationId) : db.associates
+  const perAssociate = scopedAssociates.filter(a => a.active !== false).map(a => {
     const actual = db.leads.filter(l => l.associateId === a.id && l.status === 'won' && inRange(l.convertedAt)).length
     const target = proRate(a.targetMonthly || 10)
     return {
@@ -1386,7 +1474,8 @@ function periodGoalTracking(range, start, end, customRange) {
     }
   })
 
-  const perStudio = db.locations.map(loc => {
+  const scopedLocations = locationId ? db.locations.filter(loc => loc.id === locationId) : db.locations
+  const perStudio = scopedLocations.map(loc => {
     const owned = perAssociate.filter(a => a.locationId === loc.id)
     const target = owned.reduce((s, a) => s + a.target, 0)
     const actual = owned.reduce((s, a) => s + a.actual, 0)
@@ -1485,6 +1574,41 @@ app.get('/api/analytics/performance/by-location', (req, res) => {
   const cohortConversion = periodCohortConversion(range, customRange ? 0 : offset, now)
   const goalTracking = periodGoalTracking(range, start, end, customRange)
 
+  // Per-location breakdown, scoped to whichever studios the client selected
+  // (`&locations=id1,id2`) — the report renders one full section per entry
+  // here, primary studio first, defaulting to just the first studio in `rows`
+  // when nothing was requested so the report opens focused rather than dumping
+  // every studio at once.
+  const requestedIds = (req.query.locations || '').split(',').map(s => s.trim()).filter(Boolean)
+  const selectedIds = requestedIds.length ? requestedIds : (rows[0] ? [rows[0].locationId] : [])
+  const perLocation = selectedIds.map(id => {
+    const loc = db.locations.find(l => l.id === id)
+    const locStart = periodSummary(start, end, id)
+    const locPrev = periodSummary(pStart, pEnd, id)
+    let locHistory = []
+    if (historyLen > 0 && !customRange) {
+      for (let i = historyLen - 1; i >= 0; i--) {
+        const { start: s, end: e } = periodBounds(range, offset + i, now)
+        locHistory.push({ periodLabel: periodLabelFor(range, s), ...periodSummary(s, e, id) })
+      }
+    }
+    return {
+      locationId: id,
+      locationName: loc?.name || rows.find(r => r.locationId === id)?.locationName || 'Unknown studio',
+      summary: locStart,
+      previous: locPrev,
+      history: locHistory,
+      funnel: periodFunnel(start, end, id),
+      leaderboard: periodLeaderboard(start, end, id),
+      sourceBreakdown: periodSourceBreakdown(start, end, id),
+      channelPerformance: periodChannelPerformance(start, end, id),
+      followUpAnalytics: periodFollowUpAnalytics(start, end, id),
+      revenueMix: periodRevenueMix(start, end, id),
+      cohortConversion: periodCohortConversion(range, customRange ? 0 : offset, now, id),
+      goalTracking: periodGoalTracking(range, start, end, customRange, id)
+    }
+  })
+
   res.json({
     range, offset, label, compare, customRange,
     start: start.toISOString().slice(0, 10), end: new Date(end.getTime() - 86400000).toISOString().slice(0, 10),
@@ -1498,7 +1622,9 @@ app.get('/api/analytics/performance/by-location', (req, res) => {
     followUpAnalytics,
     revenueMix,
     cohortConversion,
-    goalTracking
+    goalTracking,
+    selectedLocationIds: selectedIds,
+    perLocation
   })
 })
 

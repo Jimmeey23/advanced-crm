@@ -77,12 +77,19 @@ export default function Leads({ initialSearch = '' }) {
   const [collapsed, setCollapsed] = useState({})
   const [composeLead, setComposeLead] = useState(null)
   const [templateLead, setTemplateLead] = useState(null)
+  const [focusLeadIds, setFocusLeadIds] = useState([])
   const [selected, setSelected] = useState(() => new Set())
   const [selectAllMatching, setSelectAllMatching] = useState(false)
   const [selectAllBusy, setSelectAllBusy] = useState(false)
   const [bulkBusy, setBulkBusy] = useState(false)
   const [columns, setColumnsRaw] = useState(loadColumns)
+  const [pinnedCols, setPinnedCols] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('p57_leads_pinned_cols') || '[]') } catch (e) { return [] }
+  })
+  const [headerPinned, setHeaderPinned] = useState(() => localStorage.getItem('p57_leads_header_pinned') !== 'false')
+  const [pageSize, setPageSize] = useState(() => Number(localStorage.getItem('p57_leads_page_size')) || 25)
   const [density, setDensity] = useState(() => localStorage.getItem('p57_leads_density') || 'comfortable')
+  const tableJumpRef = useRef(null)
   const setColumns = (updater) => setColumnsRaw(prev => {
     const next = typeof updater === 'function' ? updater(prev) : updater
     try { localStorage.setItem(COLUMNS_KEY, JSON.stringify(next)) } catch (e) { /* ignore */ }
@@ -93,8 +100,6 @@ export default function Leads({ initialSearch = '' }) {
     try { localStorage.setItem('p57_leads_density', next) } catch (e) { /* ignore */ }
     return next
   })
-  const pageSize = 25
-
   const hasFilters = Object.values(filters).some(Boolean) || search
   const q = buildQuery({ ...filters, search: search.trim() || undefined, page, pageSize, sortBy, sortDir })
 
@@ -194,6 +199,22 @@ export default function Leads({ initialSearch = '' }) {
   }, [items, groupBy, lookup])
 
   const toggleGroup = (key) => setCollapsed(c => ({ ...c, [key]: !c[key] }))
+  const savePinnedCols = (next) => {
+    setPinnedCols(next)
+    try { localStorage.setItem('p57_leads_pinned_cols', JSON.stringify(next)) } catch (e) { /* ignore */ }
+  }
+  const toggleHeaderPinned = () => setHeaderPinned(current => {
+    const next = !current
+    try { localStorage.setItem('p57_leads_header_pinned', String(next)) } catch (e) { /* ignore */ }
+    return next
+  })
+  const jumpToTable = () => {
+    const ids = [...new Set([...missedLeads, ...outreachLeads].map(l => l.id))]
+    setFocusLeadIds(ids)
+    setGroupBy('')
+    setView('table')
+    requestAnimationFrame(() => tableJumpRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }))
+  }
 
   return (
     <div className="p-6 space-y-4">
@@ -209,7 +230,7 @@ export default function Leads({ initialSearch = '' }) {
               hover the Call / WhatsApp / Email / SMS indicators for AI-suggested messages.
             </div>
           </div>
-          <button className="btn btn-ghost !py-1.5 !text-[12px]" onClick={() => setView('table')}>View in table</button>
+          <button className="btn btn-ghost !py-1.5 !text-[12px]" onClick={jumpToTable}>View in table</button>
         </div>
       )}
 
@@ -267,6 +288,12 @@ export default function Leads({ initialSearch = '' }) {
           <button className="btn btn-ghost !py-2" onClick={exportCsv}><Download size={14} /> Export</button>
           {view === 'table' && (
             <>
+              <button className={`btn btn-ghost !py-2 ${pinnedCols.length ? 'btn-soft' : ''}`} onClick={() => savePinnedCols(pinnedCols.length ? [] : ['select', 'lead', 'stage'])} title="Pin the first 1–2 columns">
+                <ColumnsToggleIcon pinned={pinnedCols.length > 0} /> {pinnedCols.length ? 'Pinned' : 'Pin cols'}
+              </button>
+              <button className={`btn btn-ghost !py-2 ${headerPinned ? 'btn-soft' : ''}`} onClick={toggleHeaderPinned} title="Pin or unpin the table header row">
+                <TableIcon size={14} /> {headerPinned ? 'Header pinned' : 'Pin header'}
+              </button>
               <button className="btn btn-ghost !py-2" onClick={toggleDensity} title="Row density">
                 <Rows3 size={14} /> {density === 'compact' ? 'Compact' : 'Comfortable'}
               </button>
@@ -353,7 +380,7 @@ export default function Leads({ initialSearch = '' }) {
       {view === 'kanban' && <KanbanView items={items} boot={boot} lookup={lookup} openLead={openLead} changeStage={changeStage} />}
 
       {view !== 'summary' && view !== 'timeline' && view !== 'kanban' && (
-        <div className="card overflow-hidden">
+        <div className="card overflow-hidden" ref={tableJumpRef}>
           {view === 'table' && (
             <TableView
               items={items} boot={boot} lookup={lookup} openLead={openLead}
@@ -361,7 +388,7 @@ export default function Leads({ initialSearch = '' }) {
                   onMessage={setComposeLead}
                   onTemplateMessage={setTemplateLead}
               selected={selected} toggleSelect={toggleSelect} toggleSelectAll={toggleSelectAll}
-              columns={columns} density={density}
+              columns={columns} density={density} pinnedCols={pinnedCols} headerPinned={headerPinned} focusLeadIds={focusLeadIds} clearFocus={() => setFocusLeadIds([])} sortBy={sortBy} sortDir={sortDir} setSortBy={setSortBy} setSortDir={setSortDir}
             />
           )}
               {view === 'cards' && <CardsView items={items} lookup={lookup} openLead={openLead} grouped={grouped} collapsed={collapsed} toggleGroup={toggleGroup} boot={boot} onMessage={setComposeLead} onTemplateMessage={setTemplateLead} />}
@@ -374,6 +401,11 @@ export default function Leads({ initialSearch = '' }) {
       <div className="flex items-center justify-between text-[12.5px] text-slate-400">
         <span>Showing {items.length} of {data?.total || 0} leads</span>
         <div className="flex items-center gap-2">
+          <label className="flex items-center gap-2 mr-2">Rows
+            <select className="input !w-auto !py-1.5 !px-2" value={pageSize} onChange={e => { const next = Number(e.target.value); setPageSize(next); setPage(0); localStorage.setItem('p57_leads_page_size', String(next)) }}>
+              {[10, 25, 50, 100, 250].map(size => <option key={size} value={size}>{size}</option>)}
+            </select>
+          </label>
           <button className="btn btn-ghost !py-1.5 !px-3" disabled={page === 0} onClick={() => setPage(p => Math.max(0, p - 1))}>Prev</button>
           <span className="mono">{page + 1} / {pages}</span>
           <button className="btn btn-ghost !py-1.5 !px-3" disabled={page >= pages - 1} onClick={() => setPage(p => Math.min(pages - 1, p + 1))}>Next</button>
@@ -397,6 +429,10 @@ function groupKey(l, by, lookup) {
     case 'risk': return l.ai?.risk || 'cold'
     default: return ''
   }
+}
+
+function ColumnsToggleIcon({ pinned }) {
+  return <span className={`inline-flex w-4 h-4 rounded border items-center justify-center text-[9px] ${pinned ? 'bg-rose-500/20 border-rose-400/30 text-rose-300' : 'bg-white/5 border-white/10 text-slate-400'}`}>▥</span>
 }
 
 function Metric({ icon: Icon, children, tone = 'neutral', title }) {
@@ -445,7 +481,8 @@ function GroupSummary({ list }) {
   )
 }
 
-function TableView({ items, boot, lookup, openLead, changeStage, grouped, collapsed, toggleGroup, onMessage, onTemplateMessage, selected, toggleSelect, toggleSelectAll, columns, density }) {
+function TableView({ items, boot, lookup, openLead, changeStage, grouped, collapsed, toggleGroup, onMessage, onTemplateMessage, selected, toggleSelect, toggleSelectAll, columns, density, pinnedCols = [], headerPinned = true, focusLeadIds = [], clearFocus, sortBy, sortDir, setSortBy, setSortDir }) {
+  const focusedItems = focusLeadIds.length ? items.filter(l => focusLeadIds.includes(l.id)) : items
   if (grouped) {
     return (
       <div className="divide-y divide-white/5">
@@ -458,48 +495,46 @@ function TableView({ items, boot, lookup, openLead, changeStage, grouped, collap
                 <span className="font-display text-[13.5px] font-semibold text-white shrink-0">{g.key}</span>
                 <GroupSummary list={g.list} />
               </button>
-              {isOpen && <TableGrid items={g.list} boot={boot} lookup={lookup} openLead={openLead} changeStage={changeStage} onMessage={onMessage} onTemplateMessage={onTemplateMessage} selected={selected} toggleSelect={toggleSelect} toggleSelectAll={toggleSelectAll} columns={columns} density={density} />}
+              {isOpen && <TableGrid items={focusLeadIds.length ? g.list.filter(l => focusLeadIds.includes(l.id)) : g.list} boot={boot} lookup={lookup} openLead={openLead} changeStage={changeStage} onMessage={onMessage} onTemplateMessage={onTemplateMessage} selected={selected} toggleSelect={toggleSelect} toggleSelectAll={toggleSelectAll} columns={columns} density={density} pinnedCols={pinnedCols} headerPinned={headerPinned} focusLeadIds={focusLeadIds} clearFocus={clearFocus} sortBy={sortBy} sortDir={sortDir} setSortBy={setSortBy} setSortDir={setSortDir} />}
             </div>
           )
         })}
       </div>
     )
   }
-  return <TableGrid items={items} boot={boot} lookup={lookup} openLead={openLead} changeStage={changeStage} onMessage={onMessage} onTemplateMessage={onTemplateMessage} selected={selected} toggleSelect={toggleSelect} toggleSelectAll={toggleSelectAll} columns={columns} density={density} />
+  return <TableGrid items={focusedItems} boot={boot} lookup={lookup} openLead={openLead} changeStage={changeStage} onMessage={onMessage} onTemplateMessage={onTemplateMessage} selected={selected} toggleSelect={toggleSelect} toggleSelectAll={toggleSelectAll} columns={columns} density={density} pinnedCols={pinnedCols} headerPinned={headerPinned} focusLeadIds={focusLeadIds} clearFocus={clearFocus} sortBy={sortBy} sortDir={sortDir} setSortBy={setSortBy} setSortDir={setSortDir} />
 }
 
 const FU_LABELS = ['1', '2', '3', '4']
 
-function TableGrid({ items, boot, lookup, openLead, changeStage, onMessage, onTemplateMessage, selected, toggleSelect, toggleSelectAll, columns, density }) {
+function TableGrid({ items, boot, lookup, openLead, changeStage, onMessage, onTemplateMessage, selected, toggleSelect, toggleSelectAll, columns, density, pinnedCols = [], headerPinned = true, focusLeadIds = [], clearFocus, sortBy, sortDir, setSortBy, setSortDir }) {
   const cadenceDays = boot?.settings?.cadence?.outreachDays || 7
   const allChecked = items.length > 0 && items.every(l => selected?.has(l.id))
   const visibleCols = (columns || []).filter(c => !c.hidden && c.field !== 'created')
   const py = density === 'compact' ? 'py-1.5' : ''
   return (
-    <div className="overflow-x-auto scrollbar-thin">
-      <table className="data-table">
-        <thead>
+    <div className="lead-table-scroll scrollbar-thin">
+      {focusLeadIds.length > 0 && (
+        <div className="px-4 pt-4 pb-3 flex items-center gap-2">
+          <span className="chip bg-rose-500/15 border border-rose-400/25 text-rose-300">{focusLeadIds.length} highlighted lead{focusLeadIds.length === 1 ? '' : 's'}</span>
+          <button className="btn btn-ghost !py-1.5 !text-[12px]" onClick={clearFocus}>Show all leads</button>
+        </div>
+      )}
+      <table className="data-table leads-data-table">
+        <thead className={headerPinned ? 'is-pinned' : 'is-unpinned'}>
           <tr className="text-[10.5px] uppercase tracking-wider text-slate-500 border-b border-white/8">
-            <th className="px-4 py-3 font-semibold w-[36px]">
+            <th className={`px-4 py-3 font-semibold w-[36px] ${pinnedCols.includes('select') ? 'sticky left-0 z-40 table-sticky-surface' : ''}`}>
               <button className="flex items-center justify-center text-slate-400 hover:text-white" onClick={toggleSelectAll} title={allChecked ? 'Deselect all' : 'Select all'}>
                 {allChecked ? <CheckSquare size={15} className="text-rose-400" /> : <Square size={15} />}
               </button>
             </th>
-            <th className="px-4 py-3 font-semibold">Lead</th>
-            <th className="px-4 py-3 font-semibold w-[100px]">Stage</th>
-            <th className="px-4 py-3 font-semibold w-[190px]">Created</th>
-            {visibleCols.map(c => <th key={c.id} className="px-4 py-3 font-semibold">{c.label}</th>)}
-            <th className="px-4 py-3 font-semibold">Next</th>
-            <th className="px-4 py-3 font-semibold text-center" colSpan={4}>Follow-ups</th>
+            <SortHead label="Lead" field="fullName" className={`px-4 py-3 font-semibold w-[240px] ${pinnedCols.includes('lead') ? 'sticky left-[44px] z-30 table-sticky-surface' : ''}`} sortBy={sortBy} sortDir={sortDir} setSortBy={setSortBy} setSortDir={setSortDir} />
+            <SortHead label="Stage" field="stage" className={`px-4 py-3 font-semibold w-[140px] ${pinnedCols.includes('stage') ? 'sticky left-[284px] z-30 table-sticky-surface' : ''}`} sortBy={sortBy} sortDir={sortDir} setSortBy={setSortBy} setSortDir={setSortDir} />
+            <SortHead label="Created" field="createdAt" className="px-4 py-3 font-semibold w-[190px]" sortBy={sortBy} sortDir={sortDir} setSortBy={setSortBy} setSortDir={setSortDir} />
+            {visibleCols.map(c => <SortHead key={c.id} label={c.label} field={c.field || c.id} className="px-4 py-3 font-semibold" sortBy={sortBy} sortDir={sortDir} setSortBy={setSortBy} setSortDir={setSortDir} />)}
+            <th className="px-4 py-3 font-semibold min-w-[190px]">Next follow-up</th>
+            {FU_LABELS.map(label => <th key={label} className="px-2 py-3 font-semibold text-center min-w-[48px]" title={`Follow-up ${label}`}>FU {label}</th>)}
             <th className="px-4 py-3 font-semibold text-right">Message</th>
-          </tr>
-          <tr className="text-[9.5px] uppercase tracking-wider text-slate-600 border-b border-white/5">
-            <th colSpan={5 + visibleCols.length} />
-            <th className="px-1 py-1.5 text-center font-semibold text-slate-500 mono">{FU_LABELS[0]}</th>
-            <th className="px-1 py-1.5 text-center font-semibold text-slate-500 mono">{FU_LABELS[1]}</th>
-            <th className="px-1 py-1.5 text-center font-semibold text-slate-500 mono">{FU_LABELS[2]}</th>
-            <th className="px-1 py-1.5 text-center font-semibold text-slate-500 mono">{FU_LABELS[3]}</th>
-            <th />
           </tr>
         </thead>
         <tbody>
@@ -508,13 +543,13 @@ function TableGrid({ items, boot, lookup, openLead, changeStage, onMessage, onTe
             const nextFu = l.followUps?.find(f => f.date && f.done === false && f.date !== '-')
             const dueIn = nextFu ? daysFromNow(nextFu.date) : null
             return (
-              <tr key={l.id} className={`border-b border-white/5 hover:bg-white/[0.035] cursor-pointer transition-colors ${selected?.has(l.id) ? 'bg-rose-500/[0.05]' : ''}`} onClick={() => openLead(l.id)}>
-                <td className={`px-4 ${py}`} onClick={e => e.stopPropagation()}>
+              <tr key={l.id} className={`border-b border-white/5 hover:bg-white/[0.035] cursor-pointer transition-colors ${selected?.has(l.id) ? 'bg-rose-500/[0.05]' : ''} ${focusLeadIds.includes(l.id) ? 'ring-1 ring-rose-400/30 bg-rose-500/[0.08]' : ''}`} onClick={() => openLead(l.id)}>
+                <td className={`px-4 ${py} ${pinnedCols.includes('select') ? 'sticky left-0 z-20 table-sticky-surface' : ''}`} onClick={e => e.stopPropagation()}>
                   <button className="flex items-center justify-center text-slate-400 hover:text-white" onClick={() => toggleSelect(l.id)}>
                     {selected?.has(l.id) ? <CheckSquare size={15} className="text-rose-400" /> : <Square size={15} />}
                   </button>
                 </td>
-                <td className={`px-4 ${py}`}>
+                <td className={`px-4 ${py} w-[240px] ${pinnedCols.includes('lead') ? 'sticky left-[44px] z-20 table-sticky-surface' : ''}`}>
                   <div className="flex items-center gap-2.5">
                     <Avatar name={l.fullName} color={owner?.color} size={density === 'compact' ? 24 : 34} />
                     <div className="min-w-0">
@@ -528,8 +563,8 @@ function TableGrid({ items, boot, lookup, openLead, changeStage, onMessage, onTe
                     </div>
                   </div>
                 </td>
-                <td className={`px-4 ${py} w-[100px]`}>
-                  <select className="input !py-1 !text-[11.5px] !w-[88px] truncate" title={l.stage} value={l.stage} onClick={e => e.stopPropagation()} onChange={e => changeStage(l, e.target.value)}>
+                <td className={`px-4 ${py} w-[140px] ${pinnedCols.includes('stage') ? 'sticky left-[284px] z-20 table-sticky-surface' : ''}`}>
+                  <select className="input !py-1 !text-[11.5px] !w-[124px] truncate" title={l.stage} value={l.stage} onClick={e => e.stopPropagation()} onChange={e => changeStage(l, e.target.value)}>
                     {(boot?.stages || []).map(s => <option key={s}>{s}</option>)}
                   </select>
                 </td>
@@ -542,7 +577,7 @@ function TableGrid({ items, boot, lookup, openLead, changeStage, onMessage, onTe
                     </td>
                   )
                 })}
-                <td className={`px-4 ${py}`}>
+                <td className={`px-4 ${py} min-w-[190px]`}>
                   {nextFu ? (
                     <div>
                       <span className={`text-[12px] mono ${dueIn < 0 ? 'text-rose-400 font-semibold' : 'text-slate-400'}`}>
@@ -565,7 +600,9 @@ function TableGrid({ items, boot, lookup, openLead, changeStage, onMessage, onTe
                     </div>
                   ) : (
                     <div>
-                      <span className="text-[12px] text-slate-600">—</span>
+                      <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-white/5 border border-white/10 text-slate-500" title="No follow-up scheduled yet">
+                        <Clock size={10} />
+                      </span>
                       {l.status === 'open' && l.fu?.lastOutreachDays > cadenceDays && (
                         <div className="mt-1">
                           <span className="chip !px-1.5 !py-0.5 text-[9px] bg-amber-500/15 text-amber-300 border border-amber-400/20" title={`No outreach in ${l.fu.lastOutreachDays}d (cadence ${cadenceDays}d)`}>
@@ -595,6 +632,19 @@ function TableGrid({ items, boot, lookup, openLead, changeStage, onMessage, onTe
         </tbody>
       </table>
     </div>
+  )
+}
+
+function SortHead({ label, field, className = '', sortBy, sortDir, setSortBy, setSortDir }) {
+  const active = sortBy === field
+  const nextDir = active && sortDir === 'asc' ? 'desc' : 'asc'
+  return (
+    <th className={`${className} cursor-pointer select-none`} onClick={() => { setSortBy(field); setSortDir(nextDir) }}>
+      <span className="inline-flex items-center gap-1.5">
+        {label}
+        <ChevronDown size={11} className={`transition-transform ${active && sortDir === 'asc' ? 'rotate-180' : ''} ${active ? 'text-rose-400' : 'text-slate-500'}`} />
+      </span>
+    </th>
   )
 }
 

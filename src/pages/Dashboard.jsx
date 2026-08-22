@@ -1,12 +1,12 @@
 import React from 'react'
 import {
   Users, Trophy, TrendingUp, IndianRupee, Target, Flame, UserPlus,
-  ArrowUpRight, ArrowDownRight, Sparkles, ChevronRight, ShieldAlert,
+  Sparkles, ChevronRight, ShieldAlert,
   BarChart3, Award, CalendarRange
 } from 'lucide-react'
 import {
   ResponsiveContainer, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip,
-  PieChart, Pie, Cell, BarChart, Bar, Legend
+  PieChart, Pie, Cell, BarChart, Bar
 } from 'recharts'
 import { useApp } from '../store.jsx'
 import { useFetch } from '../hooks.js'
@@ -15,30 +15,16 @@ import { money, stageClass, riskClass, fmtDate, timeAgo } from '../lib.js'
 import { Avatar, ScorePill, Empty } from '../ui.jsx'
 import AssociateCompareModal from '../components/AssociateCompareModal.jsx'
 import PerformanceModal from '../components/PerformanceModal.jsx'
+import MetricCard from '../components/MetricCard.jsx'
 
 const DONUT_COLORS = ['#f43f5e', '#8b5cf6', '#06b6d4', '#f59e0b', '#10b981', '#6366f1', '#ec4899', '#14b8a6']
 
-function StatCard({ icon: Icon, label, value, sub, delta, deltaUp = true, color }) {
-  return (
-    <div className="card card-hover p-4">
-      <div className="flex items-center justify-between mb-3">
-        <span className="text-[11.5px] font-semibold uppercase tracking-wider text-slate-400">{label}</span>
-        <span className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: `${color}1c`, color }}>
-          <Icon size={15} />
-        </span>
-      </div>
-      <div className="font-display text-[24px] font-bold text-white mono leading-none">{value}</div>
-      <div className="mt-2 flex items-center gap-1.5 text-[11.5px]">
-        {delta !== undefined && delta !== null && (
-          <span className={`inline-flex items-center gap-0.5 font-semibold ${delta >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-            {delta >= 0 ? <ArrowUpRight size={12} /> : <ArrowDownRight size={12} />}
-            {Math.abs(delta)}%
-          </span>
-        )}
-        <span className="text-slate-500 truncate">{sub}</span>
-      </div>
-    </div>
-  )
+function momPct(series) {
+  if (series.length < 2) return null
+  const prev = series[series.length - 2].value
+  const cur = series[series.length - 1].value
+  if (!prev) return null
+  return ((cur - prev) / prev) * 100
 }
 
 const tooltipStyle = () => ({
@@ -47,11 +33,102 @@ const tooltipStyle = () => ({
 })
 const AXIS = { fill: 'var(--axis)', fontSize: 11 }
 
+function SourceConversionJourney({ data = [] }) {
+  const [active, setActive] = React.useState(0)
+  const max = Math.max(...data.map(d => d.count), 1)
+  const selected = data[active] || data[0]
+  const conversionRate = selected?.count ? Math.round((selected.won / selected.count) * 100) : 0
+
+  return (
+    <div className="pipeline-journey">
+      <div className="pipeline-journey-summary">
+        <div><span>Selected source</span><strong>{selected?.source || 'No sources'}</strong></div>
+        <div className="text-right"><span>Leads / conversions</span><strong className="mono">{selected?.count || 0} / {selected?.won || 0}</strong></div>
+        <div className="text-right"><span>Conversion rate</span><strong className="mono text-emerald-400">{conversionRate}%</strong></div>
+      </div>
+      <div className="pipeline-steps source-conversion-steps" role="list" aria-label="Lead and conversion performance by source">
+        {data.map((item, i) => {
+          const rate = item.count ? Math.round((item.won / item.count) * 100) : 0
+          return (
+            <button key={item.source} type="button" role="listitem"
+              className={`pipeline-step ${active === i ? 'is-active' : ''}`}
+              style={{ '--step-color': DONUT_COLORS[i % DONUT_COLORS.length], '--step-width': `${Math.max(8, (item.count / max) * 100)}%`, '--won-width': `${item.count ? (item.won / item.count) * 100 : 0}%` }}
+              onClick={() => setActive(i)} aria-pressed={active === i}>
+              <span className="pipeline-step-index">{String(i + 1).padStart(2, '0')}</span>
+              <span className="pipeline-step-label">{item.source}</span>
+              <span className="pipeline-step-track source-track"><span className="lead-volume"><i /></span></span>
+              <strong className="mono">{item.count} / <em>{item.won}</em></strong>
+              <small>{rate}%</small>
+            </button>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+function MonthlyPipeline({ stages, data }) {
+  const [range, setRange] = React.useState(6)
+  const [stage, setStage] = React.useState('all')
+  const [selectedMonth, setSelectedMonth] = React.useState(null)
+  const visible = data.slice(-range)
+  const shownStages = stage === 'all' ? stages : stages.filter(s => s === stage)
+  const ranked = visible.map(row => ({
+    ...row,
+    total: shownStages.reduce((sum, s) => sum + (row[s] || 0), 0)
+  })).sort((a, b) => b.total - a.total)
+  const splitAt = Math.ceil(ranked.length / 2)
+  const selected = selectedMonth ? visible.find(row => row.month === selectedMonth) : ranked[0]
+
+  return (
+    <>
+      <div className="pipeline-controls" aria-label="Monthly pipeline chart controls">
+        <div className="pipeline-control-group">
+          {[6, 12].map(n => <button key={n} type="button" className={range === n ? 'is-active' : ''} onClick={() => setRange(n)}>{n}M</button>)}
+        </div>
+        <div className="pipeline-stage-tabs">
+          <button type="button" className={stage === 'all' ? 'is-active' : ''} onClick={() => setStage('all')}>All stages</button>
+          {stages.map((s, i) => <button key={s} type="button" className={stage === s ? 'is-active' : ''} style={{ '--tab-color': DONUT_COLORS[i % DONUT_COLORS.length] }} onClick={() => setStage(s)}>{s}</button>)}
+        </div>
+      </div>
+      <div className="pipeline-ranking-panel">
+        <div className="pipeline-ranking-spotlight">
+          <div><span>Selected period</span><strong>{selected?.month || 'No data'}</strong></div>
+          <div><span>Pipeline volume</span><strong>{selected ? shownStages.reduce((sum, s) => sum + (selected[s] || 0), 0) : 0}</strong></div>
+          <div><span>Stage filter</span><strong>{stage === 'all' ? 'All stages' : stage}</strong></div>
+        </div>
+        <div className="pipeline-ranking-columns">
+          <RankingColumn title="Top periods" tone="top" rows={ranked.slice(0, splitAt)} selected={selected?.month} onSelect={setSelectedMonth} />
+          <RankingColumn title="Bottom periods" tone="bottom" rows={ranked.slice(splitAt)} selected={selected?.month} onSelect={setSelectedMonth} rankOffset={splitAt} />
+        </div>
+      </div>
+    </>
+  )
+}
+
+function RankingColumn({ title, tone, rows, selected, onSelect, rankOffset = 0 }) {
+  return (
+    <div className={`pipeline-ranking-column is-${tone}`}>
+      <div className="pipeline-ranking-heading"><span>{title}</span><small>{rows.length} periods</small></div>
+      <div className="pipeline-ranking-list" role="list">
+        {rows.map((row, i) => (
+          <button key={row.month} type="button" role="listitem" className={selected === row.month ? 'is-active' : ''} onClick={() => onSelect(row.month)}>
+            <span className="pipeline-ranking-position">#{rankOffset + i + 1}</span>
+            <strong>{row.month}</strong>
+            <span className="pipeline-ranking-score">{row.total}</span>
+          </button>
+        ))}
+        {!rows.length && <p>No periods available</p>}
+      </div>
+    </div>
+  )
+}
+
 export default function Dashboard() {
   const { openLead, refreshData, boot, dataVersion } = useApp()
   const { data: ov, loading: l1, error: e1, reload: r1 } = useFetch(() => api.get('/api/analytics/overview'), [])
   const { data: tl, loading: l2 } = useFetch(() => api.get('/api/analytics/timeline'), [])
-  const { data: funnel, loading: l3 } = useFetch(() => api.get('/api/analytics/funnel'), [])
+  const { data: funnelByMonth } = useFetch(() => api.get('/api/analytics/funnel-by-month'), [])
   const { data: sources, loading: l4 } = useFetch(() => api.get('/api/analytics/sources'), [])
   const { data: team, loading: l5 } = useFetch(() => api.get('/api/analytics/team'), [])
   const { data: hotResp } = useFetch(() => api.get('/api/leads?risk=hot&pageSize=50'), [])
@@ -68,6 +145,14 @@ export default function Dashboard() {
   const perfTotals = perf?.totals || {}
 
   const reload = () => { r1(); refreshData() }
+
+  const newLeadsTrend = (tl || []).map(m => ({ label: m.month, value: m.newLeads }))
+  const revenueTrend = (tl || []).map(m => ({ label: m.month, value: m.revenue }))
+  const conversionTrend = (tl || []).map(m => ({ label: m.month, value: m.newLeads ? Math.round((m.won / m.newLeads) * 100) : 0 }))
+  const avgDealTrend = (tl || []).map(m => ({ label: m.month, value: m.won ? m.revenue / m.won : 0 }))
+
+  const funnelStages = funnelByMonth?.stages || []
+  const funnelMonthData = (funnelByMonth?.months || []).map(m => ({ month: m.month, ...m.stages }))
 
   if (l1) return <Loading />
   if (e1 || !ov) {
@@ -92,12 +177,18 @@ export default function Dashboard() {
 
       {/* KPI row */}
       <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-6 gap-3">
-        <StatCard icon={Users} label="Total leads" value={ov.totalLeads} sub="all time" color="#8b5cf6" />
-        <StatCard icon={Users} label="Open leads" value={ov.openLeads} sub={`${ov.hotLeads} hot right now`} color="#06b6d4" />
-        <StatCard icon={TrendingUp} label="Conversion" value={`${ov.conversionRate}%`} sub={`${ov.won} won`} color="#10b981" />
-        <StatCard icon={Target} label="New this month" value={ov.newThisMonth} sub="vs last month" delta={ov.newDeltaPct} color="#f59e0b" />
-        <StatCard icon={IndianRupee} label="Revenue (month)" value={money(ov.revenueThisMonth)} sub="est. from won deals" delta={ov.revenueDeltaPct} color="#f43f5e" />
-        <StatCard icon={Flame} label="Avg deal value" value={money(ov.avgDealValue)} sub="per won lead" color="#ec4899" />
+        <MetricCard icon={Users} title="Total leads" value={ov.totalLeads} color="#8b5cf6"
+          description="All-time leads captured across every source." trend={newLeadsTrend} mom={momPct(newLeadsTrend)} />
+        <MetricCard icon={Users} title="Open leads" value={ov.openLeads} color="#06b6d4"
+          description={`${ov.hotLeads} hot right now — active, not yet won or lost.`} />
+        <MetricCard icon={TrendingUp} title="Conversion" value={`${ov.conversionRate}%`} color="#10b981"
+          description={`${ov.won} leads won out of all leads created.`} trend={conversionTrend} mom={momPct(conversionTrend)} />
+        <MetricCard icon={Target} title="New this month" value={ov.newThisMonth} color="#f59e0b"
+          description="New leads created in the current calendar month." trend={newLeadsTrend} mom={ov.newDeltaPct} />
+        <MetricCard icon={IndianRupee} title="Revenue (month)" value={money(ov.revenueThisMonth)} color="#f43f5e"
+          description="Estimated revenue from deals won this month." trend={revenueTrend} mom={ov.revenueDeltaPct} />
+        <MetricCard icon={Flame} title="Avg deal value" value={money(ov.avgDealValue)} color="#ec4899"
+          description="Average estimated value per won lead." trend={avgDealTrend} mom={momPct(avgDealTrend)} />
       </div>
 
       {/* row 2: timeline + sources */}
@@ -166,20 +257,15 @@ export default function Dashboard() {
       {/* row 3: funnel + AI + alerts */}
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
         <div className="card p-5">
-          <h3 className="font-display font-semibold text-white text-[14px] mb-1">Pipeline funnel</h3>
-          <p className="text-[11.5px] text-slate-500 mb-4">Leads by stage</p>          <div className="chart-3d h-[280px]">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={funnel || []} layout="vertical" margin={{ left: 8, right: 8 }}>
-                <CartesianGrid stroke="rgba(255,255,255,0.05)" horizontal={false} />
-                <XAxis type="number" tick={AXIS} axisLine={false} tickLine={false} />
-                <YAxis type="category" dataKey="stage" width={110} tick={{ fill: 'var(--axis)', fontSize: 11 }} axisLine={false} tickLine={false} />
-                <Tooltip contentStyle={tooltipStyle()} cursor={{ fill: 'rgba(255,255,255,0.04)' }} />
-                <Bar dataKey="count" name="Leads" radius={[0, 6, 6, 0]}>
-                  {(funnel || []).map((_, i) => <Cell key={i} fill={DONUT_COLORS[i % DONUT_COLORS.length]} opacity={0.9} />)}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
+          <h3 className="font-display font-semibold text-white text-[14px] mb-1">Leads & conversions by source</h3>
+          <p className="text-[11.5px] text-slate-500 mb-4">Select a source to compare lead volume with converted leads</p>
+          <SourceConversionJourney data={sources || []} />
+        </div>
+
+        <div className="card p-5 xl:col-span-2">
+          <h3 className="font-display font-semibold text-white text-[14px] mb-1">Pipeline funnel by month</h3>
+          <p className="text-[11.5px] text-slate-500 mb-3">Compare the last 6 or 12 months, then isolate any pipeline stage</p>
+          <MonthlyPipeline stages={funnelStages} data={funnelMonthData} />
         </div>
 
         <div className="card p-5">

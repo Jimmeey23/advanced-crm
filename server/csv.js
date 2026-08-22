@@ -46,9 +46,12 @@ export function autoMap(columns) {
     retentionStatus: ['retentionstatus']
   }
   for (const [field, aliases] of Object.entries(table)) {
-    for (const c of columns) {
-      if (aliases.includes(norm(c))) {
-        map[field] = c
+    // Alias order is intentional: an exact/specific header such as "Created
+    // At" must win over a generic earlier CSV column such as "Date".
+    for (const alias of aliases) {
+      const column = columns.find(c => norm(c) === norm(alias))
+      if (column) {
+        map[field] = column
         break
       }
     }

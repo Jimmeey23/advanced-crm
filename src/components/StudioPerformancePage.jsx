@@ -1,10 +1,10 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import {
-  Building2, ChevronLeft, ChevronRight, ChevronDown, Trophy, IndianRupee,
-  Users, CalendarCheck2, Crown, TrendingDown, ArrowUpRight, ArrowDownRight,
+  Building2, ChevronLeft, ChevronRight, Trophy, IndianRupee,
+  Users, CalendarCheck2, Crown, TrendingDown,
   ArrowUp, ArrowDown, Filter, ListFilter, Tags, Download, CalendarRange,
   GitCompareArrows, X, Radio, Clock3, AlertTriangle, PieChart as PieChartIcon,
-  Target, Layers
+  Target, Layers, MapPin, FileDown, Check, ChevronDown as ChevronDownIcon
 } from 'lucide-react'
 import {
   ResponsiveContainer, LineChart, Line, BarChart, Bar, XAxis, YAxis,
@@ -14,6 +14,7 @@ import { useApp } from '../store.jsx'
 import { api } from '../api.js'
 import { Spinner } from '../ui.jsx'
 import { money, downloadText } from '../lib.js'
+import MetricCard from './MetricCard.jsx'
 
 const DONUT_COLORS = ['#f43f5e', '#8b5cf6', '#06b6d4', '#f59e0b', '#10b981', '#6366f1', '#ec4899', '#14b8a6']
 const CHANNEL_COLORS = { call: '#06b6d4', whatsapp: '#10b981', email: '#8b5cf6', sms: '#f59e0b' }
@@ -24,6 +25,10 @@ const tooltipStyle = () => ({
 })
 const AXIS = { fill: 'var(--axis)', fontSize: 10.5 }
 const FUNNEL_COLORS = { new: '#8b5cf6', trial: '#06b6d4', won: '#10b981', lost: '#f43f5e' }
+
+function historyTrend(history, dataKey) {
+  return (history || []).filter(h => h[dataKey] !== undefined).map(h => ({ label: h.periodLabel, value: h[dataKey] }))
+}
 
 function deltaPct(curr, prev) {
   if (prev === undefined || prev === null) return null
@@ -37,20 +42,19 @@ export default function StudioPerformancePage({ range, title, desc }) {
   const [offset, setOffset] = useState(range === 'week' ? 1 : 0)
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(false)
-  const [openLoc, setOpenLoc] = useState(null)
   const [funnelLocationId, setFunnelLocationId] = useState('')
-  const [locHistory, setLocHistory] = useState({})
-  const [locHistoryLoading, setLocHistoryLoading] = useState({})
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
   const [compareMode, setCompareMode] = useState('prev')
+  const [selectedLocationIds, setSelectedLocationIds] = useState([])
+  const [studioPickerOpen, setStudioPickerOpen] = useState(false)
+  const [exporting, setExporting] = useState(false)
+  const reportRef = useRef(null)
 
   const customRange = Boolean(dateFrom && dateTo)
 
   useEffect(() => {
     setLoading(true)
-    setOpenLoc(null)
-    setLocHistory({})
     const params = new URLSearchParams({ range, compare: compareMode })
     if (customRange) {
       params.set('from', dateFrom)
@@ -59,42 +63,93 @@ export default function StudioPerformancePage({ range, title, desc }) {
       params.set('offset', offset)
       params.set('history', 12)
     }
+    if (selectedLocationIds.length) params.set('locations', selectedLocationIds.join(','))
     api.get(`/api/analytics/performance/by-location?${params.toString()}`)
-      .then(setData)
+      .then(d => {
+        setData(d)
+        // First load (or a stale selection referring to studios no longer
+        // returned): adopt the server's default so the picker and the report
+        // agree on what's actually shown, without fighting the user's choice
+        // on every subsequent fetch.
+        if (!selectedLocationIds.length && d?.selectedLocationIds?.length) {
+          setSelectedLocationIds(d.selectedLocationIds)
+        }
+      })
       .catch(() => {})
       .finally(() => setLoading(false))
-  }, [range, offset, dataVersion, dateFrom, dateTo, compareMode])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [range, offset, dataVersion, dateFrom, dateTo, compareMode, selectedLocationIds.join(',')])
 
   const rows = data?.rows || []
-  const totals = rows.reduce((acc, r) => ({
-    newLeads: acc.newLeads + r.newLeads, trials: acc.trials + r.trials, won: acc.won + r.won,
-    revenue: acc.revenue + r.revenue, followUps: acc.followUps + r.followUps, missed: acc.missed + r.missed
-  }), { newLeads: 0, trials: 0, won: 0, revenue: 0, followUps: 0, missed: 0 })
+  const perLocation = data?.perLocation || []
+  const primary = perLocation[0] || null
+  const comparedLocations = perLocation.slice(1)
+  const selectedRows = selectedLocationIds.length ? rows.filter(r => selectedLocationIds.includes(r.locationId)) : rows
+
+  const toggleCompareLocation = (locationId) => {
+    setSelectedLocationIds(ids => {
+      if (!ids.length) return ids
+      const [primaryId, ...rest] = ids
+      if (locationId === primaryId) return ids
+      return rest.includes(locationId) ? [primaryId, ...rest.filter(id => id !== locationId)] : [primaryId, ...rest, locationId]
+    })
+  }
+  const setPrimaryLocation = (locationId) => {
+    setSelectedLocationIds(ids => [locationId, ...ids.filter(id => id !== locationId)])
+  }
+
+  const exportPdf = async () => {
+    if (!reportRef.current || exporting) return
+    setExporting(true)
+    try {
+      const [{ default: html2canvas }, { default: jsPDF }] = await Promise.all([import('html2canvas'), import('jspdf')])
+      const canvas = await html2canvas(reportRef.current, {
+        backgroundColor: '#0b0f1a', scale: 2, useCORS: true,
+        windowWidth: reportRef.current.scrollWidth
+      })
+      const pdf = new jsPDF({ orientation: 'portrait', unit: 'pt', format: 'a4' })
+      const pageW = pdf.internal.pageSize.getWidth()
+      const pageH = pdf.internal.pageSize.getHeight()
+      const imgW = pageW
+      const imgH = (canvas.height * imgW) / canvas.width
+      const pxPerPage = (canvas.width * pageH) / imgW
+      let renderedPx = 0
+      let page = 0
+      while (renderedPx < canvas.height) {
+        const sliceH = Math.min(pxPerPage, canvas.height - renderedPx)
+        const sliceCanvas = document.createElement('canvas')
+        sliceCanvas.width = canvas.width
+        sliceCanvas.height = sliceH
+        sliceCanvas.getContext('2d').drawImage(canvas, 0, renderedPx, canvas.width, sliceH, 0, 0, canvas.width, sliceH)
+        const sliceImg = sliceCanvas.toDataURL('image/jpeg', 0.92)
+        if (page > 0) pdf.addPage()
+        pdf.addImage(sliceImg, 'JPEG', 0, 0, imgW, (sliceH * imgW) / canvas.width)
+        renderedPx += sliceH
+        page++
+      }
+      void imgH
+      pdf.save(`studio-performance-${range}-${data?.start || ''}-to-${data?.end || ''}.pdf`)
+    } finally {
+      setExporting(false)
+    }
+  }
+  const totals = primary?.summary || { newLeads: 0, trials: 0, won: 0, revenue: 0, followUps: 0, missed: 0 }
   const followUpRate = totals.followUps ? Math.round(((totals.followUps - totals.missed) / totals.followUps) * 100) : 0
-  const prev = data?.previous || null
-  const history = data?.history || []
+  const prev = primary?.previous || null
+  const history = primary?.history || []
 
   const funnelSource = funnelLocationId
     ? data?.funnel?.byLocation?.find(f => f.locationId === funnelLocationId)
-    : data?.funnel
+    : primary?.funnel || data?.funnel
   const funnelData = funnelSource ? [
     { stage: 'New', key: 'new', count: funnelSource.new },
     { stage: 'Trial', key: 'trial', count: funnelSource.trial },
     { stage: 'Won', key: 'won', count: funnelSource.won },
     { stage: 'Lost', key: 'lost', count: funnelSource.lost }
   ] : []
-
-  const toggleRow = (locId) => {
-    const next = openLoc === locId ? null : locId
-    setOpenLoc(next)
-    if (next && !locHistory[next] && !locHistoryLoading[next]) {
-      setLocHistoryLoading(s => ({ ...s, [next]: true }))
-      api.get(`/api/analytics/performance/by-location?range=${range}&offset=${offset}&history=12&location=${next}`)
-        .then(res => setLocHistory(s => ({ ...s, [next]: res.history || [] })))
-        .catch(() => {})
-        .finally(() => setLocHistoryLoading(s => ({ ...s, [next]: false })))
-    }
-  }
+  const [funnelStage, setFunnelStage] = useState('all')
+  const visibleFunnel = funnelStage === 'all' ? funnelData : funnelData.filter(d => d.key === funnelStage)
+  const rankedFunnel = [...visibleFunnel].sort((a, b) => b.count - a.count)
 
   const exportCsv = () => {
     if (!data) return
@@ -184,8 +239,54 @@ export default function StudioPerformancePage({ range, title, desc }) {
             </select>
           </div>
 
+          <div className="relative">
+            <button
+              type="button"
+              className="btn btn-ghost !py-2 !px-3 !text-[12px] flex items-center gap-1.5"
+              onClick={() => setStudioPickerOpen(o => !o)}
+            >
+              <MapPin size={13} /> {primary?.locationName || 'Studio'}
+              {comparedLocations.length > 0 && <span className="chip !px-1.5 !py-0.5 text-[9px] bg-white/10 border border-white/10 text-slate-300">+{comparedLocations.length}</span>}
+              <ChevronDownIcon size={13} className={`transition-transform ${studioPickerOpen ? 'rotate-180' : ''}`} />
+            </button>
+            {studioPickerOpen && (
+              <div className="absolute right-0 top-[calc(100%+6px)] z-20 w-64 rounded-xl bg-[var(--card-bg,#111730)] border border-white/10 shadow-2xl p-2">
+                <div className="text-[10px] uppercase tracking-wider text-slate-500 px-2 py-1">Primary studio</div>
+                <select
+                  className="input !text-[12px] mb-2"
+                  value={primary?.locationId || ''}
+                  onChange={e => setPrimaryLocation(e.target.value)}
+                >
+                  {rows.map(r => <option key={r.locationId} value={r.locationId}>{r.locationName}</option>)}
+                </select>
+                <div className="text-[10px] uppercase tracking-wider text-slate-500 px-2 py-1">Add studios to compare</div>
+                <div className="max-h-none flex flex-col gap-0.5">
+                  {rows.filter(r => r.locationId !== primary?.locationId).map(r => {
+                    const checked = selectedLocationIds.includes(r.locationId)
+                    return (
+                      <button
+                        key={r.locationId}
+                        type="button"
+                        className="flex items-center gap-2 px-2 py-1.5 rounded-lg text-[12px] text-slate-300 hover:bg-white/5 text-left"
+                        onClick={() => toggleCompareLocation(r.locationId)}
+                      >
+                        <span className={`w-4 h-4 rounded flex items-center justify-center border ${checked ? 'bg-rose-500/80 border-rose-500' : 'border-white/20'}`}>
+                          {checked && <Check size={11} className="text-white" />}
+                        </span>
+                        {r.locationName}
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+
           <button className="btn btn-ghost !py-2 !px-3 !text-[12px] flex items-center gap-1.5" onClick={exportCsv} disabled={!data}>
             <Download size={13} /> Export CSV
+          </button>
+          <button className="btn btn-primary !py-2 !px-3 !text-[12px] flex items-center gap-1.5" onClick={exportPdf} disabled={!data || exporting}>
+            {exporting ? <Spinner size={13} /> : <FileDown size={13} />} {exporting ? 'Exporting…' : 'Export PDF'}
           </button>
         </div>
       </div>
@@ -193,13 +294,23 @@ export default function StudioPerformancePage({ range, title, desc }) {
       {loading && <div className="py-20 text-center text-slate-500"><Spinner size={22} /></div>}
 
       {!loading && data && (
-        <div className="space-y-5">
+        <div className="space-y-5" ref={reportRef}>
           <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
-            <Summary icon={<Users size={14} />} label="New leads" value={totals.newLeads} color="#8b5cf6" delta={deltaPct(totals.newLeads, prev?.newLeads)} history={history} dataKey="newLeads" compareLabel={compareLabel} />
-            <Summary icon={<Crown size={14} />} label="Trials" value={totals.trials} color="#06b6d4" delta={deltaPct(totals.trials, prev?.trials)} history={history} dataKey="trials" compareLabel={compareLabel} />
-            <Summary icon={<Trophy size={14} />} label="Won deals" value={totals.won} color="#10b981" delta={deltaPct(totals.won, prev?.won)} history={history} dataKey="won" compareLabel={compareLabel} />
-            <Summary icon={<IndianRupee size={14} />} label="Revenue" value={money(totals.revenue)} color="#f43f5e" delta={deltaPct(totals.revenue, prev?.revenue)} history={history} dataKey="revenue" compareLabel={compareLabel} />
-            <Summary icon={<CalendarCheck2 size={14} />} label="Follow-up completion" value={`${followUpRate}%`} color="#fbbf24" sub={`${totals.missed} missed of ${totals.followUps}`} delta={deltaPct(followUpRate, prev?.followUpRate)} history={history} dataKey="followUpRate" compareLabel={compareLabel} />
+            <MetricCard icon={Users} title="New leads" value={totals.newLeads} color="#8b5cf6"
+              description={`${compareLabel} · ${prev?.newLeads ?? '—'} previous`}
+              trend={historyTrend(history, 'newLeads')} mom={deltaPct(totals.newLeads, prev?.newLeads)} />
+            <MetricCard icon={Crown} title="Trials" value={totals.trials} color="#06b6d4"
+              description={`${compareLabel} · ${prev?.trials ?? '—'} previous`}
+              trend={historyTrend(history, 'trials')} mom={deltaPct(totals.trials, prev?.trials)} />
+            <MetricCard icon={Trophy} title="Won deals" value={totals.won} color="#10b981"
+              description={`${compareLabel} · ${prev?.won ?? '—'} previous`}
+              trend={historyTrend(history, 'won')} mom={deltaPct(totals.won, prev?.won)} />
+            <MetricCard icon={IndianRupee} title="Revenue" value={money(totals.revenue)} color="#f43f5e"
+              description={`${compareLabel} · ${money(prev?.revenue || 0)} previous`}
+              trend={historyTrend(history, 'revenue')} mom={deltaPct(totals.revenue, prev?.revenue)} />
+            <MetricCard icon={CalendarCheck2} title="Follow-up completion" value={`${followUpRate}%`} color="#fbbf24"
+              description={`${totals.missed} missed of ${totals.followUps} · ${compareLabel}`}
+              trend={historyTrend(history, 'followUpRate')} mom={deltaPct(followUpRate, prev?.followUpRate)} />
           </div>
 
           {history.length > 1 && (
@@ -218,89 +329,148 @@ export default function StudioPerformancePage({ range, title, desc }) {
                   <Filter size={14} className="text-cyan-400" />
                   <h3 className="font-display font-semibold text-white text-[13.5px]">Pipeline funnel</h3>
                 </div>
+                <div className="flex items-center gap-1.5 rounded-xl bg-white/5 border border-white/10 p-1">
+                  <button type="button" className={`px-3 py-1.5 rounded-lg text-[11.5px] font-semibold ${funnelStage === 'all' ? 'bg-rose-500/25 text-white' : 'text-slate-400 hover:text-white'}`} onClick={() => setFunnelStage('all')}>All</button>
+                  {funnelData.map((d) => (
+                    <button key={d.key} type="button" className={`px-3 py-1.5 rounded-lg text-[11.5px] font-semibold ${funnelStage === d.key ? 'text-white' : 'text-slate-400 hover:text-white'}`} style={{ background: funnelStage === d.key ? `${FUNNEL_COLORS[d.key]}22` : 'transparent' }} onClick={() => setFunnelStage(d.key)}>
+                      {d.stage}
+                    </button>
+                  ))}
+                </div>
                 <select className="input !w-auto !py-1.5 !text-[12px] ml-auto" value={funnelLocationId} onChange={e => setFunnelLocationId(e.target.value)}>
                   <option value="">All studios</option>
                   {rows.map(r => <option key={r.locationId} value={r.locationId}>{r.locationName}</option>)}
                 </select>
               </div>
-              <div className="h-[180px]">
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={funnelData} layout="vertical" margin={{ left: 8, right: 16 }}>
-                    <CartesianGrid stroke="rgba(255,255,255,0.05)" horizontal={false} />
-                    <XAxis type="number" tick={AXIS} axisLine={false} tickLine={false} allowDecimals={false} />
-                    <YAxis type="category" dataKey="stage" width={60} tick={AXIS} axisLine={false} tickLine={false} />
-                    <Tooltip contentStyle={tooltipStyle()} cursor={{ fill: 'rgba(255,255,255,0.04)' }} />
-                    <Bar dataKey="count" name="Leads" radius={[0, 6, 6, 0]}>
-                      {funnelData.map(d => <Cell key={d.key} fill={FUNNEL_COLORS[d.key]} opacity={0.9} />)}
-                    </Bar>
-                  </BarChart>
-                </ResponsiveContainer>
+              <div className="pipeline-ranking-panel">
+                <div className="pipeline-ranking-spotlight">
+                  <div><span>Highest volume</span><strong>{rankedFunnel[0]?.stage || '—'}</strong></div>
+                  <div><span>Highest count</span><strong>{rankedFunnel[0]?.count || 0}</strong></div>
+                  <div><span>Scope</span><strong>{funnelLocationId ? 'Selected studio' : 'All studios'}</strong></div>
+                </div>
+                <div className="pipeline-ranking-columns">
+                  <div className="pipeline-ranking-column is-top">
+                    <div className="pipeline-ranking-heading"><span>Top stages</span><small>highest volume</small></div>
+                    <div className="pipeline-ranking-list" role="list">
+                      {rankedFunnel.slice(0, 2).map((d, i) => (
+                        <button key={d.key} type="button" role="listitem" className={funnelStage === d.key ? 'is-active' : ''} style={{ '--rank-color': FUNNEL_COLORS[d.key] }} onClick={() => setFunnelStage(funnelStage === d.key ? 'all' : d.key)}>
+                          <span className="pipeline-ranking-position">#{i + 1}</span><strong>{d.stage}</strong><span className="pipeline-ranking-score">{d.count}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="pipeline-ranking-column is-bottom">
+                    <div className="pipeline-ranking-heading"><span>Bottom stages</span><small>lowest volume</small></div>
+                    <div className="pipeline-ranking-list" role="list">
+                      {rankedFunnel.slice(2).map((d, i) => (
+                        <button key={d.key} type="button" role="listitem" className={funnelStage === d.key ? 'is-active' : ''} style={{ '--rank-color': FUNNEL_COLORS[d.key] }} onClick={() => setFunnelStage(funnelStage === d.key ? 'all' : d.key)}>
+                          <span className="pipeline-ranking-position">#{i + 3}</span><strong>{d.stage}</strong><span className="pipeline-ranking-score">{d.count}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+                <div className="pipeline-ranking-footer"><span>Click a stage to isolate it</span><strong>{visibleFunnel.length} shown</strong></div>
               </div>
             </div>
           )}
 
-          <div className="space-y-3">
-            {rows.map(r => {
-              const isOpen = openLoc === r.locationId
-              const rate = r.followUps ? Math.round(((r.followUps - r.missed) / r.followUps) * 100) : 0
-              const sparkData = locHistory[r.locationId]
-              return (
-                <div key={r.locationId} className="card overflow-hidden">
-                  <button className="w-full flex items-center gap-4 px-4 py-3.5 text-left hover:bg-white/[0.03] transition-colors" onClick={() => toggleRow(r.locationId)}>
-                    <div className="flex-1 min-w-0">
-                      <div className="font-display font-semibold text-white text-[13.5px]">{r.locationName}</div>
-                      <div className="text-[11px] text-slate-500 mt-0.5">{r.newLeads} new · {r.trials} trials · {r.won} won</div>
-                    </div>
-                    <Metric label="Revenue" value={money(r.revenue)} color="#34d399" />
-                    <Metric label="Follow-up" value={`${rate}%`} color="#fbbf24" />
-                    <span className="inline-flex items-center justify-center w-7 h-7 rounded-lg bg-white/5 border border-white/10 text-slate-400 shrink-0">
-                      <ChevronDown size={13} className={`transition-transform ${isOpen ? 'rotate-180' : ''}`} />
-                    </span>
-                  </button>
-                  {isOpen && (
-                    <div className="px-4 pb-4 pt-1 border-t border-white/8 space-y-3">
-                      <div className="rounded-lg bg-white/[0.02] border border-white/8 px-3 py-2">
-                        <div className="flex items-center justify-between mb-1">
-                          <span className="text-[10.5px] uppercase tracking-wider font-bold text-slate-500">Revenue trend (12 periods)</span>
-                          {locHistoryLoading[r.locationId] && <Spinner size={12} />}
-                        </div>
-                        {sparkData?.length > 1 ? (
-                          <div className="h-[46px]">
-                            <ResponsiveContainer width="100%" height="100%">
-                              <LineChart data={sparkData} margin={{ top: 2, right: 2, left: 2, bottom: 0 }}>
-                                <Tooltip contentStyle={tooltipStyle()} formatter={(v) => money(v)} labelFormatter={(l) => l} />
-                                <Line type="monotone" dataKey="revenue" stroke="#34d399" strokeWidth={1.75} dot={false} />
-                              </LineChart>
-                            </ResponsiveContainer>
-                          </div>
-                        ) : (
-                          <div className="text-[11px] text-slate-600 py-2">{locHistoryLoading[r.locationId] ? 'Loading…' : 'No history yet'}</div>
-                        )}
-                      </div>
-                      <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-                        <AssociateCard label="Top associate" icon={<Crown size={13} className="text-amber-400" />} associate={r.topAssociate} />
-                        <AssociateCard label="Needs support" icon={<TrendingDown size={13} className="text-slate-500" />} associate={r.bottomAssociate} />
-                        <DetailList title="New leads" color="#a78bfa" items={r.newLeadDetails} openLead={openLead} />
-                        <DetailList title="Won" color="#34d399" items={r.wonDetails} openLead={openLead} moneyValue />
-                      </div>
-                    </div>
+          {selectedRows.length > 1 && <StudioReportMatrix rows={selectedRows} />}
+
+          <section className="studio-report-section">
+            <ReportHeading number="02" title="Studio performance briefs" subtitle={comparedLocations.length ? 'Complete studio detail, shown together for direct comparison' : 'Complete detail for the selected studio'} />
+            <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 p-4">
+              {selectedRows.map(r => <StudioBrief key={r.locationId} row={r} openLead={openLead} />)}
+              {!selectedRows.length && <div className="col-span-full text-center text-slate-500 py-10 text-[12.5px]">No studios found.</div>}
+            </div>
+          </section>
+
+          {perLocation.map((loc, i) => (
+            <div key={loc.locationId} className="space-y-5">
+              {perLocation.length > 1 && (
+                <div className="flex items-center gap-2 pt-1">
+                  <Building2 size={14} className="text-rose-400 shrink-0" />
+                  <h3 className="font-display font-semibold text-white text-[14px]">{loc.locationName}</h3>
+                  {i === 0 ? (
+                    <span className="chip !px-2 !py-0.5 text-[9.5px] bg-rose-500/15 border border-rose-500/20 text-rose-300">Primary</span>
+                  ) : (
+                    <span className="chip !px-2 !py-0.5 text-[9.5px] bg-white/5 border border-white/10 text-slate-400">Compare</span>
                   )}
                 </div>
-              )
-            })}
-            {!rows.length && <div className="text-center text-slate-500 py-10 text-[12.5px]">No studios found.</div>}
-          </div>
-
-          <LeaderboardSection leaderboard={data?.leaderboard || []} />
-          <SourceBreakdownSection sourceBreakdown={data?.sourceBreakdown || []} />
-          <ChannelPerformanceSection channelPerformance={data?.channelPerformance || []} />
-          <FollowUpAnalyticsSection data={data?.followUpAnalytics} />
-          <RevenueMixSection revenueMix={data?.revenueMix || []} />
-          <CohortConversionSection cohortConversion={data?.cohortConversion || []} />
-          <GoalTrackingSection goalTracking={data?.goalTracking} />
+              )}
+              <LeaderboardSection leaderboard={loc.leaderboard || []} />
+              <SourceBreakdownSection sourceBreakdown={loc.sourceBreakdown || []} />
+              <ChannelPerformanceSection channelPerformance={loc.channelPerformance || []} />
+              <FollowUpAnalyticsSection data={loc.followUpAnalytics} />
+              <RevenueMixSection revenueMix={loc.revenueMix || []} />
+              <CohortConversionSection cohortConversion={loc.cohortConversion || []} />
+              <GoalTrackingSection goalTracking={loc.goalTracking} />
+            </div>
+          ))}
         </div>
       )}
     </div>
+  )
+}
+
+function StudioReportMatrix({ rows }) {
+  return (
+    <section className="studio-report-section">
+      <ReportHeading number="01" title="Studio performance matrix" subtitle="Side-by-side operating results for the selected reporting period" />
+      <div className="overflow-x-auto scrollbar-thin">
+        <table className="studio-report-table">
+          <thead><tr><th>Studio</th><th>New leads</th><th>Trials</th><th>Won</th><th>Conversion</th><th>Revenue</th><th>Follow-up</th></tr></thead>
+          <tbody>
+            {rows.map(row => {
+              const conversion = row.newLeads ? Math.round((row.won / row.newLeads) * 100) : 0
+              const followUp = row.followUps ? Math.round(((row.followUps - row.missed) / row.followUps) * 100) : 0
+              return (
+                <tr key={row.locationId}>
+                  <td><strong>{row.locationName}</strong><small>{row.missed} missed follow-ups</small></td>
+                  <td>{row.newLeads}</td><td>{row.trials}</td><td className="text-emerald-400">{row.won}</td>
+                  <td>{conversion}%</td><td className="text-emerald-400">{money(row.revenue)}</td><td className="text-amber-400">{followUp}%</td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  )
+}
+
+function ReportHeading({ number, title, subtitle }) {
+  return (
+    <div className="studio-report-heading">
+      <span>{number}</span>
+      <div><h3>{title}</h3><p>{subtitle}</p></div>
+    </div>
+  )
+}
+
+function StudioBrief({ row, openLead }) {
+  const conversion = row.newLeads ? Math.round((row.won / row.newLeads) * 100) : 0
+  const followUp = row.followUps ? Math.round(((row.followUps - row.missed) / row.followUps) * 100) : 0
+  return (
+    <article className="studio-report-brief">
+      <div className="studio-report-brief-title">
+        <div><span>Studio brief</span><h4>{row.locationName}</h4></div>
+        <strong>{money(row.revenue)}</strong>
+      </div>
+      <div className="studio-report-brief-kpis">
+        <div><span>New leads</span><strong>{row.newLeads}</strong></div>
+        <div><span>Trials</span><strong>{row.trials}</strong></div>
+        <div><span>Won</span><strong>{row.won}</strong></div>
+        <div><span>Conversion</span><strong>{conversion}%</strong></div>
+        <div><span>Follow-up</span><strong>{followUp}%</strong></div>
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <AssociateCard label="Top associate" icon={<Crown size={13} className="text-amber-400" />} associate={row.topAssociate} />
+        <AssociateCard label="Needs support" icon={<TrendingDown size={13} className="text-slate-500" />} associate={row.bottomAssociate} />
+        <DetailList title="New lead register" color="#a78bfa" items={row.newLeadDetails} openLead={openLead} />
+        <DetailList title="Won business" color="#34d399" items={row.wonDetails} openLead={openLead} moneyValue />
+      </div>
+    </article>
   )
 }
 
@@ -332,7 +502,7 @@ function DetailList({ title, color, items, openLead, moneyValue }) {
   return (
     <div>
       <div className="text-[10.5px] uppercase tracking-wider font-bold mb-1.5" style={{ color }}>{title} ({items.length})</div>
-      <div className="space-y-1 max-h-[160px] overflow-y-auto scrollbar-thin">
+      <div className="space-y-1">
         {items.map(it => (
           <button key={it.id} className="w-full text-left flex items-center justify-between gap-2 text-[12px] text-slate-300 bg-white/[0.03] border border-white/8 rounded-lg px-2.5 py-1.5 hover:bg-white/[0.06] transition-colors" onClick={() => openLead(it.id)}>
             <span className="truncate">{it.fullName}</span>
@@ -340,36 +510,6 @@ function DetailList({ title, color, items, openLead, moneyValue }) {
           </button>
         ))}
       </div>
-    </div>
-  )
-}
-
-function Summary({ icon, label, value, color, sub, delta, history, dataKey, compareLabel }) {
-  const sparkData = (history || []).filter(h => h[dataKey] !== undefined)
-  return (
-    <div className="card !rounded-xl px-3.5 py-3">
-      <div className="flex items-center justify-between gap-2">
-        <div className="min-w-0">
-          <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-slate-500 mb-1" style={{ color }}>{icon}{label}</div>
-          <div className="font-display text-[18px] font-bold mono truncate" style={{ color }}>{value}</div>
-          {sub && <div className="text-[10.5px] text-slate-500 mt-0.5">{sub}</div>}
-        </div>
-        {sparkData.length > 1 && (
-          <div className="w-16 h-8 shrink-0 hidden sm:block">
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={sparkData}>
-                <Line type="monotone" dataKey={dataKey} stroke={color} strokeWidth={1.75} dot={false} />
-              </LineChart>
-            </ResponsiveContainer>
-          </div>
-        )}
-      </div>
-      {delta !== null && delta !== undefined && (
-        <div className={`mt-1.5 inline-flex items-center gap-0.5 text-[11px] font-semibold ${delta >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-          {delta >= 0 ? <ArrowUpRight size={11} /> : <ArrowDownRight size={11} />}
-          {Math.abs(delta)}% {compareLabel || 'vs prev period'}
-        </div>
-      )}
     </div>
   )
 }
@@ -564,14 +704,10 @@ function FollowUpAnalyticsSection({ data }) {
       </div>
       <div className="p-4 space-y-4">
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          <div className="rounded-lg bg-white/[0.02] border border-white/8 px-3 py-2.5">
-            <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-slate-500 mb-1"><AlertTriangle size={11} className="text-rose-400" /> Overdue</div>
-            <div className="font-display text-[17px] font-bold mono text-rose-400">{overdueCount}</div>
-          </div>
-          <div className="rounded-lg bg-white/[0.02] border border-white/8 px-3 py-2.5">
-            <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-slate-500 mb-1"><Clock3 size={11} className="text-amber-400" /> Avg response time</div>
-            <div className="font-display text-[17px] font-bold mono text-amber-400">{avgResponseLabel}</div>
-          </div>
+          <MetricCard icon={AlertTriangle} title="Overdue follow-ups" value={overdueCount} color="#f43f5e"
+            description="Follow-ups past their due date, as of now." />
+          <MetricCard icon={Clock3} title="Avg response time" value={avgResponseLabel} color="#f59e0b"
+            description="Average gap between a lead's consecutive logged follow-ups." />
         </div>
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           <div>
@@ -743,7 +879,7 @@ function GoalTrackingSection({ goalTracking }) {
         </div>
         <div>
           <div className="text-[10.5px] uppercase tracking-wider font-bold text-slate-500 mb-2.5">By associate</div>
-          <div className="space-y-3 max-h-[260px] overflow-y-auto scrollbar-thin pr-1">
+          <div className="space-y-3">
             {perAssociate.map(a => <ProgressBar key={a.associateId} label={a.name} target={a.target} actual={a.actual} attainmentPct={a.attainmentPct} />)}
           </div>
         </div>
