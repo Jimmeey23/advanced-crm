@@ -31,7 +31,14 @@ export function isConfigured(db) {
   return Boolean(apiKey(db))
 }
 
-async function api(db, path, { method = 'GET', body } = {}) {
+const sleep = (ms) => new Promise(r => setTimeout(r, ms))
+
+// Respond.io enforces a small per-second point budget (observed: 5 points).
+// Pagination and multi-channel lookups can burst past that in normal use, so
+// retry a 429 after the `retryAfter` (seconds) it reports instead of failing
+// the whole request — a transient rate limit shouldn't drop every template
+// already fetched in this call.
+async function api(db, path, { method = 'GET', body } = {}, attempt = 0) {
   if (!isConfigured(db)) throw new Error('Respond.io is not configured. Add your API key in Settings > Integrations.')
   const headers = { Authorization: `Bearer ${apiKey(db)}`, Accept: 'application/json' }
   if (body) headers['Content-Type'] = 'application/json'
@@ -39,6 +46,12 @@ async function api(db, path, { method = 'GET', body } = {}) {
   const res = await fetch(BASE + path, { method, headers, body: body ? JSON.stringify(body) : undefined })
   if (!res.ok) {
     const text = await res.text().catch(() => '')
+    if (res.status === 429 && attempt < 4) {
+      let retryAfter = 1
+      try { retryAfter = Number(JSON.parse(text)?.retryAfter) || 1 } catch { /* non-JSON body, use default */ }
+      await sleep(Math.min(retryAfter, 5) * 1000 + 100)
+      return api(db, path, { method, body }, attempt + 1)
+    }
     throw new Error(`Respond.io ${res.status} ${path}: ${text.slice(0, 300)}`)
   }
   return res.json()

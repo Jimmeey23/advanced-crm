@@ -1613,14 +1613,13 @@ app.get('/api/respondio/templates', async (req, res) => {
     const channelIds = await respondio.resolveWhatsAppChannelIds(db)
     if (!channelIds.length) return res.json({ configured: true, templates: [], error: 'No WhatsApp channel found in your Respond.io workspace.' })
 
-    const perChannel = await Promise.all(channelIds.map(async id => {
-      const list = await respondio.listTemplates(db, id)
-      return list.map(t => ({ ...t, channelId: t.channelId || id }))
-    }))
-
+    // Fetched sequentially, not Promise.all — Respond.io's per-second rate
+    // limit is small enough that fetching every channel's paginated template
+    // list in parallel reliably triggers a 429 (see server/respondio.js api()).
     const seen = new Set()
     const all = []
-    for (const list of perChannel) {
+    for (const id of channelIds) {
+      const list = (await respondio.listTemplates(db, id)).map(t => ({ ...t, channelId: t.channelId || id }))
       for (const t of list) {
         const key = `${t.channelId}:${t.id || t.name}`
         if (seen.has(key)) continue
