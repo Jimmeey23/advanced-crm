@@ -59,15 +59,15 @@ function Sidebar() {
               onClick={() => navigate(item.id)}
               title={sidebarCollapsed ? item.label : undefined}
               className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-[13px] font-medium transition-all ${sidebarCollapsed ? 'justify-center !px-0' : ''} ${
-                active
-                  ? 'bg-gradient-to-r from-rose-500/15 to-fuchsia-500/10 text-white border border-rose-400/20'
+                  active
+                  ? 'accent-nav text-white'
                   : 'text-slate-400 hover:text-slate-100 hover:bg-white/5 border border-transparent'
               }`}
             >
               <Icon size={17} className={active ? 'text-rose-400' : ''} />
               {!sidebarCollapsed && <span className="flex-1 text-left">{item.label}</span>}
               {!sidebarCollapsed && item.id === 'dashboard' && highCount > 0 && (
-                <span className="chip !px-1.5 !py-0.5 text-[10px]" style={{ background: 'rgba(244,63,94,.2)', color: '#fda4af' }}>{highCount}</span>
+                <span className="chip notification-count !px-1.5 !py-0.5 text-[10px]">{highCount}</span>
               )}
             </button>
           )

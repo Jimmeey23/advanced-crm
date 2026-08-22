@@ -3,6 +3,9 @@ import { api, API_BASE } from './api.js'
 
 const Ctx = createContext(null)
 
+const SESSION_ACCENTS = ['crimson', 'blue', 'purple', 'rani', 'bottle', 'ash', 'blood', 'deep']
+const randomAccent = () => SESSION_ACCENTS[Math.floor(Math.random() * SESSION_ACCENTS.length)]
+
 export function useApp() {
   return useContext(Ctx)
 }
@@ -22,15 +25,12 @@ export function AppProvider({ children }) {
   })
 
   const [accent, setAccentState] = useState(() => {
-    try { return localStorage.getItem('p57_accent') || 'rose' } catch (e) { return 'rose' }
+    return randomAccent()
   })
 
   useEffect(() => {
     if (boot?.settings?.ui?.theme && !localStorage.getItem('p57_theme')) {
       setThemeState(boot.settings.ui.theme)
-    }
-    if (boot?.settings?.ui?.accent && !localStorage.getItem('p57_accent')) {
-      setAccentState(boot.settings.ui.accent)
     }
   }, [boot])
 
@@ -39,12 +39,11 @@ export function AppProvider({ children }) {
     document.documentElement.setAttribute('data-accent', accent)
     try {
       localStorage.setItem('p57_theme', theme)
-      localStorage.setItem('p57_accent', accent)
     } catch (e) { /* ignore */ }
   }, [theme, accent])
 
   const setTheme = useCallback((t) => setThemeState(t === 'light' ? 'light' : 'dark'), [])
-  const setAccent = useCallback((a) => setAccentState(['rose', 'violet', 'amber', 'emerald', 'cyan'].includes(a) ? a : 'rose'), [])
+  const setAccent = useCallback((a) => setAccentState(SESSION_ACCENTS.includes(a) ? a : 'blue'), [])
 
   const refreshData = useCallback(() => {
     setDataVersion(v => v + 1)

@@ -30,7 +30,7 @@ export default function AlertsDropdown() {
       <button className="relative w-9 h-9 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center text-slate-300 hover:text-white hover:bg-white/10 transition-colors" onClick={() => setOpen(o => !o)}>
         <Bell size={16} />
         {high > 0 && (
-          <span className="absolute -top-1 -right-1 min-w-[17px] h-[17px] px-1 rounded-full bg-rose-500 text-white text-[10px] font-bold flex items-center justify-center">{high}</span>
+          <span className="notification-count absolute -top-1 -right-1 min-w-[17px] h-[17px] px-1 rounded-full bg-rose-500 text-white text-[10px] font-bold flex items-center justify-center">{high}</span>
         )}
       </button>
 

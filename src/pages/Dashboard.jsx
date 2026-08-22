@@ -113,7 +113,7 @@ export default function Dashboard() {
               <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm" style={{ background: '#10b981' }} /> Won</span>
             </div>
           </div>
-          <div className="h-[250px]">
+          <div className="chart-3d h-[250px]">
             <ResponsiveContainer width="100%" height="100%">
               <AreaChart data={tl || []} margin={{ top: 5, right: 5, left: -20, bottom: 0 }}>
                 <defs>
@@ -130,8 +130,8 @@ export default function Dashboard() {
                 <XAxis dataKey="month" tick={AXIS} axisLine={false} tickLine={false} />
                 <YAxis tick={AXIS} axisLine={false} tickLine={false} />
                 <Tooltip contentStyle={tooltipStyle()} />
-                <Area type="monotone" dataKey="newLeads" name="New leads" stroke="#a78bfa" fill="url(#gNew)" strokeWidth={2} />
-                <Area type="monotone" dataKey="won" name="Won" stroke="#34d399" fill="url(#gWon)" strokeWidth={2} />
+                <Area type="monotone" dataKey="newLeads" name="New leads" stroke="#a78bfa" fill="url(#gNew)" strokeWidth={2} activeDot={{ r: 5, strokeWidth: 2 }} />
+                <Area type="monotone" dataKey="won" name="Won" stroke="#34d399" fill="url(#gWon)" strokeWidth={2} activeDot={{ r: 5, strokeWidth: 2 }} />
               </AreaChart>
             </ResponsiveContainer>
           </div>
@@ -140,7 +140,7 @@ export default function Dashboard() {
         <div className="card p-5">
           <h3 className="font-display font-semibold text-white text-[14px] mb-1">Leads by source</h3>
           <p className="text-[11.5px] text-slate-500 mb-3">Where leads are coming from</p>
-          <div className="h-[190px]">
+          <div className="chart-3d h-[190px]">
             <ResponsiveContainer width="100%" height="100%">
               <PieChart>
                 <Pie data={srcData} dataKey="count" nameKey="source" innerRadius={52} outerRadius={78} paddingAngle={2} strokeWidth={0}>
@@ -167,7 +167,7 @@ export default function Dashboard() {
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
         <div className="card p-5">
           <h3 className="font-display font-semibold text-white text-[14px] mb-1">Pipeline funnel</h3>
-          <p className="text-[11.5px] text-slate-500 mb-4">Leads by stage</p>          <div className="h-[280px]">
+          <p className="text-[11.5px] text-slate-500 mb-4">Leads by stage</p>          <div className="chart-3d h-[280px]">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={funnel || []} layout="vertical" margin={{ left: 8, right: 8 }}>
                 <CartesianGrid stroke="rgba(255,255,255,0.05)" horizontal={false} />
@@ -248,16 +248,16 @@ export default function Dashboard() {
           <button className="btn btn-ghost !py-1.5 !text-[12px]" onClick={() => setPerfOpen(true)}><BarChart3 size={13} /> Full details</button>
         </div>
         <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
-          <div className="lg:col-span-3 h-[250px]">
+          <div className="chart-3d lg:col-span-3 h-[250px]">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={perfBuckets} margin={{ top: 5, right: 5, left: -20, bottom: 0 }}>
                 <CartesianGrid stroke="rgba(255,255,255,0.06)" vertical={false} />
                 <XAxis dataKey="label" tick={AXIS} axisLine={false} tickLine={false} />
                 <YAxis tick={AXIS} axisLine={false} tickLine={false} />
                 <Tooltip contentStyle={tooltipStyle()} cursor={{ fill: 'rgba(255,255,255,0.04)' }} />
-                <Bar dataKey="newLeads" name="New leads" fill="#8b5cf6" radius={[4, 4, 0, 0]} />
-                <Bar dataKey="won" name="Won" fill="#10b981" radius={[4, 4, 0, 0]} />
-                <Bar dataKey="missed" name="Missed follow-ups" fill="#fbbf24" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="newLeads" name="New leads" fill="#8b5cf6" radius={[4, 4, 0, 0]} activeBar={{ opacity: 1 }} />
+                <Bar dataKey="won" name="Won" fill="#10b981" radius={[4, 4, 0, 0]} activeBar={{ opacity: 1 }} />
+                <Bar dataKey="missed" name="Missed follow-ups" fill="#fbbf24" radius={[4, 4, 0, 0]} activeBar={{ opacity: 1 }} />
               </BarChart>
             </ResponsiveContainer>
           </div>

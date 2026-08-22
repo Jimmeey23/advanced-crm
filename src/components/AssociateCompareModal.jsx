@@ -9,11 +9,11 @@ import { api } from '../api.js'
 import { Modal, ModalHeader, Avatar } from '../ui.jsx'
 import { money } from '../lib.js'
 
-const BAR_COLORS = ['#f43f5e', '#8b5cf6', '#06b6d4', '#f59e0b', '#10b981', '#6366f1', '#ec4899', '#14b8a6', '#e11d48', '#7c3aed']
+const BAR_COLORS = ['var(--accent)', '#2563eb', '#10b981']
 
 const tooltipStyle = {
-  background: '#13172a', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 12,
-  fontSize: 12, color: '#e6e8f0', boxShadow: '0 10px 30px rgba(0,0,0,.5)'
+  background: '#ffffff', border: '1px solid rgba(15,23,42,0.12)', borderRadius: 14,
+  fontSize: 12, color: '#0f172a', boxShadow: '0 16px 38px rgba(15,23,42,.12)'
 }
 
 export default function AssociateCompareModal({ open, onClose }) {
@@ -66,17 +66,17 @@ export default function AssociateCompareModal({ open, onClose }) {
         <div className="space-y-4">
           {/* Head-to-head pickers */}
           <div className="card !rounded-xl p-4">
-            <div className="flex items-center gap-2 text-[12px] font-bold text-slate-200 mb-3">
+            <div className="flex items-center gap-2 text-[12px] font-bold text-slate-700 mb-3">
               <Swords size={14} className="text-rose-400" /> Head to head
             </div>
             <div className="grid grid-cols-2 gap-3">
               {[
                 { id: aIdEff, set: setAId, label: 'Associate A', accent: '#f43f5e' },
-                { id: bIdEff, set: setBId, label: 'Associate B', accent: '#8b5cf6' }
+                { id: bIdEff, set: setBId, label: 'Associate B', accent: '#2563eb' }
               ].map(slot => (
                 <div key={slot.label}>
                   <div className="text-[10px] uppercase tracking-wider font-semibold mb-1" style={{ color: slot.accent }}>{slot.label}</div>
-                  <select className="input !py-2" value={slot.id} onChange={e => slot.set(e.target.value || null)}>
+                  <select className="input !py-2 !bg-white !border-slate-200" value={slot.id} onChange={e => slot.set(e.target.value || null)}>
                     {rows.map(r => <option key={r.associateId} value={r.associateId}>{r.name}</option>)}
                   </select>
                 </div>
@@ -85,8 +85,8 @@ export default function AssociateCompareModal({ open, onClose }) {
 
             {faceoff && (
               <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
-                <FaceoffCard r={A} color={boot?.associates.find(a => a.id === A.associateId)?.color} accent="#f43f5e" score={faceoff.totalA} vs={faceoff.totalB} />
-                <FaceoffCard r={B} color={boot?.associates.find(a => a.id === B.associateId)?.color} accent="#8b5cf6" score={faceoff.totalB} vs={faceoff.totalA} />
+                <FaceoffCard r={A} color="var(--accent)" accent="var(--accent)" score={faceoff.totalA} vs={faceoff.totalB} />
+                <FaceoffCard r={B} color="#2563eb" accent="#2563eb" score={faceoff.totalB} vs={faceoff.totalA} />
               </div>
             )}
           </div>
@@ -94,16 +94,16 @@ export default function AssociateCompareModal({ open, onClose }) {
           {/* Metric-by-metric table */}
           {faceoff && (
             <div className="card overflow-hidden">
-              <div className="px-5 py-3 border-b border-white/8 text-[12.5px] font-semibold text-slate-200">
+              <div className="px-5 py-3 border-b border-slate-200 text-[12.5px] font-semibold text-slate-700">
                 Metric by metric
               </div>
               <div className="overflow-x-auto scrollbar-thin">
                 <table className="w-full text-left">
                   <thead>
-                    <tr className="text-[10.5px] uppercase tracking-wider text-slate-500 border-b border-white/8">
+                    <tr className="text-[10.5px] uppercase tracking-wider text-slate-500 border-b border-slate-200">
                       <th className="px-4 py-2.5 font-semibold text-rose-400">{A?.name}</th>
                       <th className="px-3 py-2.5 font-semibold">Metric</th>
-                      <th className="px-4 py-2.5 font-semibold text-right text-violet-400">{B?.name}</th>
+                      <th className="px-4 py-2.5 font-semibold text-right text-blue-500">{B?.name}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -112,7 +112,7 @@ export default function AssociateCompareModal({ open, onClose }) {
                       const winB = s.b > s.a
                       const tie = s.a === s.b
                       return (
-                        <tr key={s.key} className="border-b border-white/5 hover:bg-white/[0.035]">
+                        <tr key={s.key} className="border-b border-slate-200 hover:bg-slate-50">
                           <td className={`px-4 py-2 text-[12.5px] mono ${winA ? 'text-white font-semibold' : 'text-slate-400'}`}>
                             <span className="flex items-center gap-1.5 justify-end">{s.fmt(s.a)}{winA && !tie && <CheckCircle2 size={12} className="text-emerald-400" />}</span>
                           </td>
@@ -132,7 +132,7 @@ export default function AssociateCompareModal({ open, onClose }) {
           {/* Team-wide chart */}
           <div className="card p-4">
             <h3 className="font-display font-semibold text-white text-[13px] mb-3">Revenue by associate (won deals)</h3>
-            <div className="h-[240px]">
+          <div className="chart-3d h-[240px]">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={chartData} margin={{ left: -12, right: 8 }}>
                   <CartesianGrid stroke="rgba(255,255,255,0.05)" vertical={false} />
@@ -148,10 +148,10 @@ export default function AssociateCompareModal({ open, onClose }) {
           </div>
 
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            <SummaryCard icon={<Trophy size={15} className="text-amber-400" />} label="Top earner" value={best?.name || '—'} sub={best ? money(best.revenue) : ''} />
+            <SummaryCard icon={<Trophy size={15} className="text-blue-400" />} label="Top earner" value={best?.name || '—'} sub={best ? money(best.revenue) : ''} />
             <SummaryCard icon={<Target size={15} className="text-emerald-400" />} label="Best monthly attainment" value={topTarget?.name || '—'} sub={topTarget ? `${topTarget.wonThisMonth} of ${topTarget.target} target` : ''} />
-            <SummaryCard icon={<TrendingUp size={15} className="text-violet-400" />} label="Best conversion" value={rows.find(r => r.conversion === Math.max(...rows.map(x => x.conversion)))?.name || '—'} sub={rows.length ? `${Math.max(...rows.map(x => x.conversion))}%` : ''} />
-            <SummaryCard icon={<Users size={15} className="text-cyan-400" />} label="Team size" value={rows.length} sub={`${rows.reduce((s, r) => s + r.open, 0)} open leads`} />
+            <SummaryCard icon={<TrendingUp size={15} className="text-blue-400" />} label="Best conversion" value={rows.find(r => r.conversion === Math.max(...rows.map(x => x.conversion)))?.name || '—'} sub={rows.length ? `${Math.max(...rows.map(x => x.conversion))}%` : ''} />
+            <SummaryCard icon={<Users size={15} className="text-rose-400" />} label="Team size" value={rows.length} sub={`${rows.reduce((s, r) => s + r.open, 0)} open leads`} />
           </div>
         </div>
       )}
@@ -169,20 +169,20 @@ function FaceoffCard({ r, accent, score, vs }) {
     { label: 'Attainment', value: `${r.attainment}%` }
   ]
   return (
-    <div className="rounded-xl border p-3.5" style={{ borderColor: `${accent}44`, background: `${accent}0d` }}>
+    <div className="rounded-2xl border border-slate-200 bg-white p-3.5 shadow-[0_10px_28px_rgba(15,23,42,0.06)]">
       <div className="flex items-center gap-2.5 mb-3">
         <Avatar name={r.name} color={r.color} size={34} />
         <div className="flex-1 min-w-0">
-          <div className="text-[13px] font-bold text-white truncate">{r.name}</div>
+          <div className="text-[13px] font-bold text-slate-900 truncate">{r.name}</div>
           <div className="text-[10.5px] text-slate-500">{r.conversion}% conversion · score {r.avgScore}</div>
         </div>
-        {won && <span className="chip !px-2 !py-1 text-[10px] bg-amber-500/20 text-amber-300"><Trophy size={10} className="inline -mt-0.5 mr-1" />Leading</span>}
+        {won && <span className="chip !px-2 !py-1 text-[10px] bg-blue-500/10 text-blue-500 border border-blue-500/20"><Trophy size={10} className="inline -mt-0.5 mr-1" />Leading</span>}
       </div>
       <div className="grid grid-cols-2 gap-2">
         {cells.map(c => (
-          <div key={c.label} className="rounded-lg bg-black/20 border border-white/8 px-2.5 py-2">
+          <div key={c.label} className="rounded-xl bg-slate-50 border border-slate-200 px-2.5 py-2">
             <div className="flex items-center gap-1 text-[9px] uppercase tracking-wider text-slate-500">
-              {c.warn && <AlertTriangle size={9} className="text-amber-400" />}{c.label}
+              {c.warn && <AlertTriangle size={9} className="text-rose-400" />}{c.label}
             </div>
             <div className="font-display text-[15px] font-bold mono" style={{ color: accent }}>{c.value}</div>
           </div>
@@ -194,9 +194,9 @@ function FaceoffCard({ r, accent, score, vs }) {
 
 function SummaryCard({ icon, label, value, sub }) {
   return (
-    <div className="card !rounded-xl p-3.5">
+    <div className="card !rounded-2xl p-3.5">
       <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-slate-500 mb-2">{icon}{label}</div>
-      <div className="font-display text-[15px] font-bold text-white truncate" title={value}>{value}</div>
+      <div className="font-display text-[15px] font-bold text-slate-900 truncate" title={value}>{value}</div>
       {sub && <div className="text-[11px] text-slate-500 mt-0.5 truncate">{sub}</div>}
     </div>
   )

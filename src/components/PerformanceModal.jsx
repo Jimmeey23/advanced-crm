@@ -6,7 +6,7 @@ import { api } from '../api.js'
 import { Modal, ModalHeader, Spinner } from '../ui.jsx'
 import { money } from '../lib.js'
 
-const COLORS = { newLeads: '#8b5cf6', won: '#10b981', missed: '#fbbf24' }
+const COLORS = { newLeads: '#2563eb', won: '#10b981', missed: '#f43f5e' }
 
 export default function PerformanceModal({ open, onClose, range = 'week' }) {
   const { openLead } = useApp()
@@ -51,34 +51,34 @@ export default function PerformanceModal({ open, onClose, range = 'week' }) {
           </div>
 
           <div className="card p-4">
-            <div className="flex items-center gap-4 text-[11px] text-slate-400 mb-3">
+            <div className="flex items-center gap-4 text-[11px] text-slate-500 mb-3">
               <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm" style={{ background: COLORS.newLeads }} /> New</span>
               <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm" style={{ background: COLORS.won }} /> Won</span>
               <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm" style={{ background: COLORS.missed }} /> Missed FU</span>
             </div>
-            <div className="h-[260px]">
+            <div className="chart-3d h-[260px]">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={chartData} margin={{ top: 5, right: 5, left: -18, bottom: 0 }}>
-                  <CartesianGrid stroke="rgba(255,255,255,0.06)" vertical={false} />
+                  <CartesianGrid stroke="rgba(15,23,42,0.08)" vertical={false} />
                   <XAxis dataKey="label" tick={{ fill: 'var(--axis)', fontSize: 11 }} axisLine={false} tickLine={false} />
                   <YAxis tick={{ fill: 'var(--axis)', fontSize: 11 }} axisLine={false} tickLine={false} />
-                  <Tooltip cursor={{ fill: 'rgba(255,255,255,0.04)' }} contentStyle={tooltipStyle()} />
-                  <Bar dataKey="newLeads" name="New leads" fill={COLORS.newLeads} radius={[4, 4, 0, 0]} />
-                  <Bar dataKey="won" name="Won" fill={COLORS.won} radius={[4, 4, 0, 0]} />
-                  <Bar dataKey="missed" name="Missed follow-ups" fill={COLORS.missed} radius={[4, 4, 0, 0]} />
+                  <Tooltip cursor={{ fill: 'rgba(37,99,235,0.06)' }} contentStyle={tooltipStyle()} />
+                  <Bar dataKey="newLeads" name="New leads" fill={COLORS.newLeads} radius={[4, 4, 0, 0]} activeBar={{ opacity: 1 }} />
+                  <Bar dataKey="won" name="Won" fill={COLORS.won} radius={[4, 4, 0, 0]} activeBar={{ opacity: 1 }} />
+                  <Bar dataKey="missed" name="Missed follow-ups" fill={COLORS.missed} radius={[4, 4, 0, 0]} activeBar={{ opacity: 1 }} />
                 </BarChart>
               </ResponsiveContainer>
             </div>
           </div>
 
           <div className="card overflow-hidden">
-            <div className="px-5 py-3 border-b border-white/8 flex items-center gap-2 text-[12.5px] font-semibold text-slate-200">
-              <CalendarClock size={13} className="text-cyan-400" /> Bucket breakdown
+            <div className="px-5 py-3 border-b border-slate-200 flex items-center gap-2 text-[12.5px] font-semibold text-slate-700">
+              <CalendarClock size={13} className="text-blue-400" /> Bucket breakdown
             </div>
             <div className="overflow-x-auto scrollbar-thin">
               <table className="w-full text-left">
                 <thead>
-                  <tr className="text-[10.5px] uppercase tracking-wider text-slate-500 border-b border-white/8">
+                  <tr className="text-[10.5px] uppercase tracking-wider text-slate-500 border-b border-slate-200">
                     <th className="px-4 py-2.5 font-semibold">Period</th>
                     <th className="px-3 py-2.5 font-semibold text-center">New</th>
                     <th className="px-3 py-2.5 font-semibold text-center">Won</th>
@@ -94,25 +94,25 @@ export default function PerformanceModal({ open, onClose, range = 'week' }) {
                     const hasDetail = (det?.newLeads?.length || 0) + (det?.won?.length || 0) + (det?.missed?.length || 0) > 0
                     return (
                       <React.Fragment key={b.key}>
-                        <tr className="border-b border-white/5 hover:bg-white/[0.035] cursor-pointer" onClick={() => hasDetail && setOpenIdx(isOpen ? null : i)}>
-                          <td className="px-4 py-2.5 text-[12.5px] text-slate-300">{b.label}</td>
-                          <td className="px-3 py-2.5 text-center text-[12.5px] text-violet-300 mono">{b.newLeads || 0}</td>
+                        <tr className="border-b border-slate-200 hover:bg-slate-50 cursor-pointer" onClick={() => hasDetail && setOpenIdx(isOpen ? null : i)}>
+                          <td className="px-4 py-2.5 text-[12.5px] text-slate-700">{b.label}</td>
+                          <td className="px-3 py-2.5 text-center text-[12.5px] text-blue-400 mono">{b.newLeads || 0}</td>
                           <td className="px-3 py-2.5 text-center text-[12.5px] text-emerald-400 mono">{b.won || 0}</td>
                           <td className="px-3 py-2.5 text-center text-[12.5px] mono">{b.missed ? <span className="text-rose-400">{b.missed}</span> : <span className="text-slate-500">0</span>}</td>
-                          <td className="px-3 py-2.5 text-center text-[12.5px] text-slate-200 mono">{money(b.revenue || 0)}</td>
+                          <td className="px-3 py-2.5 text-center text-[12.5px] text-slate-900 mono">{money(b.revenue || 0)}</td>
                           <td className="px-3 py-2.5 text-center">
-                            <span className="inline-flex items-center justify-center w-6 h-6 rounded-lg bg-white/5 border border-white/10 text-slate-400">
+                            <span className="inline-flex items-center justify-center w-6 h-6 rounded-lg bg-slate-50 border border-slate-200 text-slate-500">
                               <ChevronDown size={12} className={`transition-transform ${isOpen ? 'rotate-180' : ''}`} />
                             </span>
                           </td>
                         </tr>
                         {isOpen && det && (
-                          <tr className="border-b border-white/5 bg-white/[0.02]">
+                          <tr className="border-b border-slate-200 bg-slate-50">
                             <td colSpan={6} className="px-4 py-3">
                               <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                                <DetailList title="New leads" color="#a78bfa" items={det.newLeads || []} openLead={openLead} />
+                                <DetailList title="New leads" color="#2563eb" items={det.newLeads || []} openLead={openLead} />
                                 <DetailList title="Won" color="#34d399" items={det.won || []} openLead={openLead} moneyValue />
-                                <DetailList title="Missed follow-ups" color="#fbbf24" items={det.missed || []} openLead={openLead} />
+                                <DetailList title="Missed follow-ups" color="#f43f5e" items={det.missed || []} openLead={openLead} />
                               </div>
                             </td>
                           </tr>
@@ -137,9 +137,9 @@ function DetailList({ title, color, items, openLead, moneyValue }) {
       <div className="text-[10.5px] uppercase tracking-wider font-bold mb-1.5" style={{ color }}>{title} ({items.length})</div>
       <div className="space-y-1 max-h-[180px] overflow-y-auto scrollbar-thin">
         {items.map(it => (
-          <button key={it.id} className="w-full text-left flex items-center justify-between gap-2 text-[12px] text-slate-300 bg-white/[0.03] border border-white/8 rounded-lg px-2.5 py-1.5 hover:bg-white/[0.06] transition-colors" onClick={() => openLead(it.id)}>
+          <button key={it.id} className="w-full text-left flex items-center justify-between gap-2 text-[12px] text-slate-700 bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 hover:bg-slate-50 transition-colors" onClick={() => openLead(it.id)}>
             <span className="truncate">{it.fullName}</span>
-            {moneyValue && it.value ? <span className="mono text-emerald-400 shrink-0">{money(it.value)}</span> : it.comments ? <span className="text-slate-500 truncate max-w-[120px]">{it.comments}</span> : <span className="chip !px-1.5 !py-0.5 text-[9px] bg-white/5 border border-white/10 text-slate-400">{it.stage}</span>}
+            {moneyValue && it.value ? <span className="mono text-emerald-500 shrink-0">{money(it.value)}</span> : it.comments ? <span className="text-slate-500 truncate max-w-[120px]">{it.comments}</span> : <span className="chip !px-1.5 !py-0.5 text-[9px] bg-slate-50 border border-slate-200 text-slate-500">{it.stage}</span>}
           </button>
         ))}
       </div>
@@ -149,10 +149,10 @@ function DetailList({ title, color, items, openLead, moneyValue }) {
 
 function Summary({ icon, label, value, color, sub }) {
   return (
-    <div className="card !rounded-xl px-3.5 py-3 flex items-center justify-between">
+    <div className="card !rounded-2xl px-3.5 py-3 flex items-center justify-between">
       <div>
         <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-slate-500 mb-1" style={{ color }}>{icon}{label}</div>
-        <div className="font-display text-[18px] font-bold mono" style={{ color }}>{value}</div>
+        <div className="font-display text-[18px] font-bold mono text-slate-900" style={{ color: color }}>{value}</div>
         {sub && <div className="text-[10.5px] text-slate-500 mt-0.5">{sub}</div>}
       </div>
     </div>
@@ -161,11 +161,11 @@ function Summary({ icon, label, value, color, sub }) {
 
 function tooltipStyle() {
   return {
-    background: 'var(--tt-bg)',
-    border: '1px solid var(--tt-border)',
+    background: '#ffffff',
+    border: '1px solid rgba(15,23,42,0.12)',
     borderRadius: 12,
     fontSize: 12,
-    color: 'var(--tt-color)',
-    boxShadow: '0 10px 30px rgba(0,0,0,.5)'
+    color: '#0f172a',
+    boxShadow: '0 16px 38px rgba(15,23,42,.12)'
   }
 }

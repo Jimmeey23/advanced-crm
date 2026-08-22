@@ -10,11 +10,14 @@ import { api } from '../api.js'
 import { Spinner } from '../ui.jsx'
 
 const ACCENTS = [
-  { id: 'rose', label: 'Rose', from: '#f43f5e', to: '#d946ef' },
-  { id: 'violet', label: 'Violet', from: '#8b5cf6', to: '#6366f1' },
-  { id: 'amber', label: 'Amber', from: '#f59e0b', to: '#f97316' },
-  { id: 'emerald', label: 'Emerald', from: '#10b981', to: '#06b6d4' },
-  { id: 'cyan', label: 'Cyan', from: '#06b6d4', to: '#3b82f6' }
+  { id: 'crimson', label: 'Crimson', from: '#be123c', to: '#f43f5e' },
+  { id: 'blue', label: 'Blue', from: '#1d4ed8', to: '#3b82f6' },
+  { id: 'purple', label: 'Purple', from: '#6d28d9', to: '#a855f7' },
+  { id: 'rani', label: 'Rani pink', from: '#be185d', to: '#ec4899' },
+  { id: 'bottle', label: 'Bottle green', from: '#047857', to: '#10b981' },
+  { id: 'ash', label: 'Ash gray', from: '#475569', to: '#94a3b8' },
+  { id: 'blood', label: 'Blood red', from: '#7f1d1d', to: '#dc2626' },
+  { id: 'deep', label: 'Deep blue', from: '#172554', to: '#1e40af' }
 ]
 
 const TABS = [

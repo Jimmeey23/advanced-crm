@@ -75,7 +75,7 @@ export default function ComposeModal({ open, onClose, lead, defaultChannel = 'wh
               key={c.id}
               onClick={() => setChannel(c.id)}
               className={`flex-1 flex items-center justify-center gap-1.5 rounded-xl border px-2 py-2 text-[12px] font-semibold transition-colors ${
-                active ? 'border-white/20 bg-white/10 text-white' : 'border-white/8 bg-white/[0.03] text-slate-400 hover:text-slate-200'
+                active ? 'border-blue-500/20 bg-blue-500/10 text-slate-900' : 'border-slate-200 bg-white text-slate-500 hover:text-slate-700'
               }`}
             >
               <Icon size={13} style={{ color: active ? c.color : undefined }} /> {c.label}
@@ -94,11 +94,11 @@ export default function ComposeModal({ open, onClose, lead, defaultChannel = 'wh
         />
 
         {suggestions.length > 0 && (
-          <div className="rounded-xl bg-fuchsia-500/[0.07] border border-fuchsia-400/15 p-2.5">
-            <div className="text-[10.5px] uppercase tracking-wider text-fuchsia-300 font-bold mb-1.5 flex items-center gap-1"><Sparkles size={10} /> AI suggested messages</div>
+          <div className="rounded-xl bg-blue-500/[0.06] border border-blue-500/15 p-2.5">
+            <div className="text-[10.5px] uppercase tracking-wider text-blue-500 font-bold mb-1.5 flex items-center gap-1"><Sparkles size={10} /> AI suggested messages</div>
             <div className="space-y-1.5">
               {suggestions.slice(0, 2).map((s, i) => (
-                <button key={i} className="w-full text-left text-[11.5px] text-slate-300 bg-white/[0.03] border border-white/8 rounded-lg px-2.5 py-1.5 hover:bg-white/[0.06] transition-colors" onClick={() => setMessage(s.text)}>
+                <button key={i} className="w-full text-left text-[11.5px] text-slate-700 bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 hover:bg-slate-50 transition-colors" onClick={() => setMessage(s.text)}>
                   “{s.text}”
                 </button>
               ))}
@@ -106,7 +106,7 @@ export default function ComposeModal({ open, onClose, lead, defaultChannel = 'wh
           </div>
         )}
 
-        <label className="flex items-center gap-2 text-[12px] text-slate-300 select-none">
+        <label className="flex items-center gap-2 text-[12px] text-slate-700 select-none">
           <input type="checkbox" className="accent-rose-500" checked={log} onChange={e => setLog(e.target.checked)} />
           Log this message as a completed follow-up
         </label>

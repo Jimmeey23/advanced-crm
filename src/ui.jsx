@@ -43,9 +43,9 @@ export function Modal({ open, onClose, children, width = 520 }) {
   if (!open) return null
   return (
     <div className="fixed inset-0 z-[90] flex items-center justify-center p-4" role="dialog">
-      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
+      <div className="absolute inset-0 modal-backdrop" onClick={onClose} />
       <div
-        className="relative card p-6 w-full"
+        className="relative card modal-panel p-6 w-full"
         style={{ maxWidth: width, animation: 'fadeIn .18s ease' }}
       >
         <div className="modal-scroll">{children}</div>
@@ -56,12 +56,12 @@ export function Modal({ open, onClose, children, width = 520 }) {
 
 export function ModalHeader({ title, subtitle, onClose }) {
   return (
-    <div className="flex items-start justify-between mb-5">
+    <div className="modal-header flex items-start justify-between mb-5">
       <div>
         <h2 className="font-display text-[17px] font-semibold text-white">{title}</h2>
         {subtitle && <p className="text-[12.5px] text-slate-400 mt-1">{subtitle}</p>}
       </div>
-      <button className="btn btn-ghost !p-2" onClick={onClose}><X size={16} /></button>
+      <button className="btn btn-ghost modal-close !p-2" onClick={onClose}><X size={16} /></button>
     </div>
   )
 }

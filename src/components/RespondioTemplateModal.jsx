@@ -144,7 +144,7 @@ export default function RespondioTemplateModal({ open, onClose, lead }) {
             <div className="text-[13px] font-semibold text-white truncate">{lead.fullName}</div>
             <div className="text-[11px] text-slate-500 truncate flex items-center gap-1.5"><MessageCircle size={11} /> {lead.phone || lead.email}</div>
           </div>
-          {firstMessage && <span className="chip bg-emerald-500/10 text-emerald-300 border border-emerald-400/20">first message</span>}
+          {firstMessage && <span className="chip bg-emerald-500/10 text-emerald-400 border border-emerald-400/20">first message</span>}
         </div>
       )}
 
@@ -158,7 +158,7 @@ export default function RespondioTemplateModal({ open, onClose, lead }) {
             <Sparkles size={11} />
             {apiTemplates?.length ? 'Live approved templates from your Respond.io WhatsApp channel' : 'Manually configured in Settings > Integrations'}
           </div>
-          {loadError && !apiTemplates?.length && <p className="text-[11px] text-amber-400 mt-1">{loadError}</p>}
+          {loadError && !apiTemplates?.length && <p className="text-[11px] text-blue-500 mt-1">{loadError}</p>}
         </div>
 
         <div className="space-y-2">

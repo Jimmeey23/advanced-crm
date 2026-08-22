@@ -65,7 +65,7 @@ export default function LeadDrawer() {
     return (
       <div className="fixed inset-0 z-[80] flex justify-end">
         <div className="absolute inset-0 bg-black/55 backdrop-blur-[2px]" onClick={closeLead} />
-        <aside className="relative w-full max-w-[580px] h-full bg-[#0b0e1a] border-l border-white/10 flex items-center justify-center">
+        <aside className="lead-drawer relative w-full max-w-[580px] h-full bg-[#0b0e1a] border-l border-white/10 flex items-center justify-center">
           <div className="flex flex-col items-center gap-3">
             <Spinner size={26} />
             <span className="text-[12px] text-slate-500">Loading lead…</span>
@@ -131,7 +131,7 @@ export default function LeadDrawer() {
     <>
       <div className="fixed inset-0 z-[80] flex justify-end">
       <div className="absolute inset-0 bg-black/55 backdrop-blur-[2px]" onClick={closeLead} />
-      <aside className="relative w-full max-w-[580px] h-full bg-[#0b0e1a] border-l border-white/10 flex flex-col shadow-2xl" style={{ animation: 'slideIn .2s ease' }}>
+      <aside className="lead-drawer relative w-full max-w-[580px] h-full bg-[#0b0e1a] border-l border-white/10 flex flex-col shadow-2xl" style={{ animation: 'slideIn .2s ease' }}>
         {/* header */}
         <div className="px-6 pt-5 pb-4 border-b border-white/8">
           <div className="flex items-start gap-3">
@@ -188,7 +188,7 @@ export default function LeadDrawer() {
         {/* body */}
         <div className="flex-1 overflow-y-auto scrollbar-thin px-6 py-5 space-y-5">
           {/* AI panel */}
-          <section className="card !rounded-2xl p-4 border-fuchsia-400/15" style={{ background: 'linear-gradient(135deg, rgba(217,70,239,0.08), rgba(244,63,94,0.04))' }}>
+          <section className="card ai-panel !rounded-2xl p-4 border-fuchsia-400/15" style={{ background: 'linear-gradient(135deg, var(--accent-soft), rgba(255,255,255,0.02))' }}>
             <div className="flex items-center gap-2 mb-3">
               <Sparkles size={14} className="text-fuchsia-400" />
               <h3 className="font-display font-semibold text-white text-[13px]">AI lead intelligence</h3>
@@ -223,7 +223,7 @@ export default function LeadDrawer() {
           </section>
 
           {/* GPT enrichment */}
-          <section className="card !rounded-2xl p-4 border-cyan-400/15">
+          <section className="card gpt-panel !rounded-2xl p-4 border-cyan-400/15">
             <div className="flex items-center gap-2 mb-3">
               <Bot size={14} className="text-cyan-400" />
               <h3 className="font-display font-semibold text-white text-[13px]">GPT deep-dive</h3>
