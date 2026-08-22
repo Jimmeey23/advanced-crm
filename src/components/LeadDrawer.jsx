@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react'
 import {
   X, Phone, Mail, MapPin, Sparkles, CalendarPlus, RefreshCw, Link2,
   CheckCircle2, Send, Clock, Lightbulb, TrendingUp, Tags, Receipt,
-  Award, MessageSquare, ChevronDown, Bot, MessageCircle, Loader2, Inbox
+  Award, MessageSquare, Bot, MessageCircle, Loader2, Inbox
 } from 'lucide-react'
 import { useApp } from '../store.jsx'
 import { useFetch } from '../hooks.js'
@@ -387,10 +387,24 @@ export default function LeadDrawer() {
               <div>
                 {m.member && (
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-3">
-                    <Stat label="Total visits" value={m.member.visits?.total ?? '—'} />
+                    <Stat label="Home location" value={m.member.homeLocationName || m.member.homeLocation || m.member.locationName || loc?.name?.split(',')[0] || '—'} />
                     <Stat label="Classes attended" value={classesAttended} />
                     <Stat label="Active plans" value={m.memberships.length} />
                     <Stat label="First seen" value={fmtDate(m.member.firstSeen)} />
+                  </div>
+                )}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-3">
+                  <InfoTile label="Momence member" value={[m.member?.firstName, m.member?.lastName].filter(Boolean).join(' ') || lead.fullName} sub={`#${lead.memberId || m.member?.id || '—'}`} />
+                  <InfoTile label="Contact context" value={m.member?.email || lead.email || '—'} sub={m.member?.phoneNumber || m.member?.phone || lead.phone || '—'} />
+                  <InfoTile label="Visit context" value={`${m.member?.visits?.total ?? classesAttended} total visits`} sub={`Last visit ${fmtDate(m.member?.visits?.lastVisit || m.member?.lastSeen || m.member?.lastVisit)}`} />
+                  <InfoTile label="Membership context" value={(m.memberships || []).find(p => !p.isFrozen)?.name || 'No active plan'} sub={`${m.memberships?.length || 0} active/linked membership records`} />
+                </div>
+                {m.customFields && Object.keys(m.customFields).length > 0 && (
+                  <div className="rounded-xl bg-white/[0.03] border border-white/8 p-3 mb-3">
+                    <div className="text-[10.5px] uppercase tracking-wider text-slate-500 font-semibold mb-2">Custom fields</div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      {Object.entries(m.customFields).slice(0, 8).map(([key, value]) => <InfoTile key={key} label={key} value={String(value || '—')} />)}
+                    </div>
                   </div>
                 )}
                 {m.tags && m.tags.length > 0 && (
@@ -414,14 +428,14 @@ export default function LeadDrawer() {
                     {!m.salesHistory?.length && <EmptyNote text="No sales records found for this member." />}
                   </div>
                   <div key="classes">
-                    {(m?.classHistory || []).slice(0, 8).map((c, i) => (
-                      <Row key={i} icon={<Award size={13} className={c.checkedIn ? 'text-emerald-400' : 'text-slate-500'} />} title={c.name} sub={[c.type, c.teacher].filter(Boolean).join(' · ')} right={c.checkedIn ? 'Attended' : 'Booked'} meta={fmtDateTime(c.startsAt)} />
+                    {(m?.classHistory || []).slice(0, 16).map((c, i) => (
+                      <Row key={i} icon={<Award size={13} className={c.checkedIn ? 'text-emerald-400' : 'text-slate-500'} />} title={c.name || c.className || 'Class'} sub={[c.type, c.teacher || c.instructorName, c.locationName || c.roomName].filter(Boolean).join(' · ')} right={c.checkedIn ? 'Attended' : (c.status || 'Booked')} meta={fmtDateTime(c.startsAt || c.date)} />
                     ))}
                     {!m.classHistory?.length && <EmptyNote text="No class history for this member yet." />}
                   </div>
                   <div key="plans">
                     {(m?.memberships || []).map((p, i) => (
-                      <Row key={i} icon={<CalendarPlus size={13} className={p.isFrozen ? 'text-amber-400' : 'text-cyan-400'} />} title={p.name} sub={p.type.replace(/-/g, ' ')} right={p.isFrozen ? 'Frozen' : (p.endDate ? `until ${fmtDate(p.endDate)}` : 'active')} meta={`${p.eventCreditsLeft ?? p.usedSessions ?? '—'} credits used`} />
+                      <Row key={i} icon={<CalendarPlus size={13} className={p.isFrozen ? 'text-amber-400' : 'text-cyan-400'} />} title={p.name} sub={[String(p.type || '').replace(/-/g, ' '), p.locationName].filter(Boolean).join(' · ')} right={p.isFrozen ? 'Frozen' : (p.endDate ? `until ${fmtDate(p.endDate)}` : 'active')} meta={`${p.eventCreditsLeft ?? p.remainingCredits ?? '—'} left · ${p.usedSessions ?? '—'} used`} />
                     ))}
                     {!m.memberships?.length && <EmptyNote text="No active memberships." />}
                   </div>
@@ -505,6 +519,16 @@ function Stat({ label, value }) {
     <div className="rounded-xl bg-black/20 border border-white/8 px-3 py-2 text-center">
       <div className="font-display text-[15px] font-bold text-white mono">{value}</div>
       <div className="text-[9.5px] uppercase tracking-wider text-slate-500 mt-0.5">{label}</div>
+    </div>
+  )
+}
+
+function InfoTile({ label, value, sub }) {
+  return (
+    <div className="rounded-xl bg-white/[0.035] border border-white/8 px-3 py-2 min-w-0">
+      <div className="text-[9.5px] uppercase tracking-wider text-slate-500 font-semibold truncate">{label}</div>
+      <div className="text-[12.5px] text-slate-200 font-semibold truncate mt-0.5">{value || '—'}</div>
+      {sub && <div className="text-[11px] text-slate-500 truncate mt-0.5">{sub}</div>}
     </div>
   )
 }

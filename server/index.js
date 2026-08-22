@@ -855,7 +855,7 @@ app.get('/api/analytics/overview', (req, res) => {
     trialBooked,
     hotLeads: hot,
     unassigned,
-    monthlyTarget: db.associates.reduce((s, a) => s + (a.targetMonthly || 0), 0),
+    monthlyTarget: db.associates.filter(a => a.active !== false).reduce((s, a) => s + (a.targetMonthly || 0), 0),
     closedThisMonth: wonThisMonth
   })
 })
@@ -1212,7 +1212,8 @@ function periodLocationRows(start, end, locations) {
       byAssociate[l.associateId] = (byAssociate[l.associateId] || 0) + (l.valueEstimate || 0)
     }
     const ranked = Object.entries(byAssociate)
-      .map(([associateId, rev]) => ({ associateId, name: db.associates.find(a => a.id === associateId)?.name || 'Unknown', revenue: rev }))
+      .map(([associateId, rev]) => ({ associateId, active: db.associates.find(a => a.id === associateId)?.active !== false, name: db.associates.find(a => a.id === associateId)?.name || 'Unknown', revenue: rev }))
+      .filter(a => a.active)
       .sort((a, b) => b.revenue - a.revenue)
 
     return {
@@ -1269,7 +1270,7 @@ function periodFunnel(start, end, locationId) {
 // Full (not just top/bottom) associate leaderboard for a period, optionally scoped to one location.
 function periodLeaderboard(start, end, locationId) {
   const inRange = periodInRangeFn(start, end)
-  const associates = locationId ? db.associates.filter(a => a.locationId === locationId) : db.associates
+  const associates = (locationId ? db.associates.filter(a => a.locationId === locationId) : db.associates).filter(a => a.active !== false)
   return associates.map(a => {
     const owned = db.leads.filter(l => l.associateId === a.id)
     const newLeads = owned.filter(l => inRange(l.createdAt))
@@ -1285,7 +1286,7 @@ function periodLeaderboard(start, end, locationId) {
       }
     }
     return {
-      associateId: a.id, name: a.name, locationId: a.locationId,
+      associateId: a.id, name: a.name, locationId: a.locationId, active: a.active !== false,
       newLeads: newLeads.length, trials: trials.length, won: won.length, revenue,
       followUpRate: followUps ? Math.round(((followUps - missed) / followUps) * 100) : 0
     }

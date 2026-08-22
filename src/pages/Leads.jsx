@@ -4,7 +4,7 @@ import {
   Search, SlidersHorizontal, ChevronDown, ChevronRight, X, Download,
   Table as TableIcon, LayoutGrid, Rows3, PieChart, KanbanSquare, CalendarDays,
   Phone, MessageCircle, Mail, MessageSquareText, Sparkles, Trash2, CheckSquare, Square,
-  Users, TrendingUp, XCircle, Wallet, Clock, AlertTriangle
+  Users, TrendingUp, XCircle, Wallet, Clock, AlertTriangle, Flag
 } from 'lucide-react'
 import { useApp } from '../store.jsx'
 import { useFetch } from '../hooks.js'
@@ -111,6 +111,17 @@ export default function Leads({ initialSearch = '' }) {
   const changeStage = async (lead, stage) => {
     try { await api.patch(`/api/leads/${lead.id}`, { stage }); refreshData() }
     catch (e) { toast(e.message, 'error') }
+  }
+
+  const toggleManualFlag = async (lead) => {
+    const flagged = lead.manualFlags?.some(f => f.id === 'focus')
+    const manualFlags = flagged
+      ? (lead.manualFlags || []).filter(f => f.id !== 'focus')
+      : [...(lead.manualFlags || []), { id: 'focus', label: 'Flagged', color: '#f43f5e' }]
+    try {
+      await api.patch(`/api/leads/${lead.id}`, { manualFlags })
+      refreshData()
+    } catch (e) { toast(e.message, 'error') }
   }
 
   const toggleSelect = (id) => setSelected(s => {
@@ -385,6 +396,7 @@ export default function Leads({ initialSearch = '' }) {
             <TableView
               items={items} boot={boot} lookup={lookup} openLead={openLead}
               changeStage={changeStage} grouped={grouped} collapsed={collapsed} toggleGroup={toggleGroup}
+              toggleManualFlag={toggleManualFlag}
                   onMessage={setComposeLead}
                   onTemplateMessage={setTemplateLead}
               selected={selected} toggleSelect={toggleSelect} toggleSelectAll={toggleSelectAll}
@@ -481,7 +493,7 @@ function GroupSummary({ list }) {
   )
 }
 
-function TableView({ items, boot, lookup, openLead, changeStage, grouped, collapsed, toggleGroup, onMessage, onTemplateMessage, selected, toggleSelect, toggleSelectAll, columns, density, pinnedCols = [], headerPinned = true, focusLeadIds = [], clearFocus, sortBy, sortDir, setSortBy, setSortDir }) {
+function TableView({ items, boot, lookup, openLead, changeStage, toggleManualFlag, grouped, collapsed, toggleGroup, onMessage, onTemplateMessage, selected, toggleSelect, toggleSelectAll, columns, density, pinnedCols = [], headerPinned = true, focusLeadIds = [], clearFocus, sortBy, sortDir, setSortBy, setSortDir }) {
   const focusedItems = focusLeadIds.length ? items.filter(l => focusLeadIds.includes(l.id)) : items
   if (grouped) {
     return (
@@ -495,19 +507,19 @@ function TableView({ items, boot, lookup, openLead, changeStage, grouped, collap
                 <span className="font-display text-[13.5px] font-semibold text-white shrink-0">{g.key}</span>
                 <GroupSummary list={g.list} />
               </button>
-              {isOpen && <TableGrid items={focusLeadIds.length ? g.list.filter(l => focusLeadIds.includes(l.id)) : g.list} boot={boot} lookup={lookup} openLead={openLead} changeStage={changeStage} onMessage={onMessage} onTemplateMessage={onTemplateMessage} selected={selected} toggleSelect={toggleSelect} toggleSelectAll={toggleSelectAll} columns={columns} density={density} pinnedCols={pinnedCols} headerPinned={headerPinned} focusLeadIds={focusLeadIds} clearFocus={clearFocus} sortBy={sortBy} sortDir={sortDir} setSortBy={setSortBy} setSortDir={setSortDir} />}
+              {isOpen && <TableGrid items={focusLeadIds.length ? g.list.filter(l => focusLeadIds.includes(l.id)) : g.list} boot={boot} lookup={lookup} openLead={openLead} changeStage={changeStage} toggleManualFlag={toggleManualFlag} onMessage={onMessage} onTemplateMessage={onTemplateMessage} selected={selected} toggleSelect={toggleSelect} toggleSelectAll={toggleSelectAll} columns={columns} density={density} pinnedCols={pinnedCols} headerPinned={headerPinned} focusLeadIds={focusLeadIds} clearFocus={clearFocus} sortBy={sortBy} sortDir={sortDir} setSortBy={setSortBy} setSortDir={setSortDir} />}
             </div>
           )
         })}
       </div>
     )
   }
-  return <TableGrid items={focusedItems} boot={boot} lookup={lookup} openLead={openLead} changeStage={changeStage} onMessage={onMessage} onTemplateMessage={onTemplateMessage} selected={selected} toggleSelect={toggleSelect} toggleSelectAll={toggleSelectAll} columns={columns} density={density} pinnedCols={pinnedCols} headerPinned={headerPinned} focusLeadIds={focusLeadIds} clearFocus={clearFocus} sortBy={sortBy} sortDir={sortDir} setSortBy={setSortBy} setSortDir={setSortDir} />
+  return <TableGrid items={focusedItems} boot={boot} lookup={lookup} openLead={openLead} changeStage={changeStage} toggleManualFlag={toggleManualFlag} onMessage={onMessage} onTemplateMessage={onTemplateMessage} selected={selected} toggleSelect={toggleSelect} toggleSelectAll={toggleSelectAll} columns={columns} density={density} pinnedCols={pinnedCols} headerPinned={headerPinned} focusLeadIds={focusLeadIds} clearFocus={clearFocus} sortBy={sortBy} sortDir={sortDir} setSortBy={setSortBy} setSortDir={setSortDir} />
 }
 
 const FU_LABELS = ['1', '2', '3', '4']
 
-function TableGrid({ items, boot, lookup, openLead, changeStage, onMessage, onTemplateMessage, selected, toggleSelect, toggleSelectAll, columns, density, pinnedCols = [], headerPinned = true, focusLeadIds = [], clearFocus, sortBy, sortDir, setSortBy, setSortDir }) {
+function TableGrid({ items, boot, lookup, openLead, changeStage, toggleManualFlag, onMessage, onTemplateMessage, selected, toggleSelect, toggleSelectAll, columns, density, pinnedCols = [], headerPinned = true, focusLeadIds = [], clearFocus, sortBy, sortDir, setSortBy, setSortDir }) {
   const cadenceDays = boot?.settings?.cadence?.outreachDays || 7
   const allChecked = items.length > 0 && items.every(l => selected?.has(l.id))
   const visibleCols = (columns || []).filter(c => !c.hidden && c.field !== 'created')
@@ -523,13 +535,13 @@ function TableGrid({ items, boot, lookup, openLead, changeStage, onMessage, onTe
       <table className="data-table leads-data-table">
         <thead className={headerPinned ? 'is-pinned' : 'is-unpinned'}>
           <tr className="text-[10.5px] uppercase tracking-wider text-slate-500 border-b border-white/8">
-            <th className={`px-4 py-3 font-semibold w-[36px] ${pinnedCols.includes('select') ? 'sticky left-0 z-40 table-sticky-surface' : ''}`}>
+            <th className={`px-3 py-3 font-semibold w-[76px] ${pinnedCols.includes('select') ? 'sticky left-0 z-40 table-sticky-surface' : ''}`}>
               <button className="flex items-center justify-center text-slate-400 hover:text-white" onClick={toggleSelectAll} title={allChecked ? 'Deselect all' : 'Select all'}>
                 {allChecked ? <CheckSquare size={15} className="text-rose-400" /> : <Square size={15} />}
               </button>
             </th>
-            <SortHead label="Lead" field="fullName" className={`px-4 py-3 font-semibold w-[240px] ${pinnedCols.includes('lead') ? 'sticky left-[44px] z-30 table-sticky-surface' : ''}`} sortBy={sortBy} sortDir={sortDir} setSortBy={setSortBy} setSortDir={setSortDir} />
-            <SortHead label="Stage" field="stage" className={`px-4 py-3 font-semibold w-[140px] ${pinnedCols.includes('stage') ? 'sticky left-[284px] z-30 table-sticky-surface' : ''}`} sortBy={sortBy} sortDir={sortDir} setSortBy={setSortBy} setSortDir={setSortDir} />
+            <SortHead label="Lead" field="fullName" className={`px-4 py-3 font-semibold w-[260px] ${pinnedCols.includes('lead') ? 'sticky left-[76px] z-30 table-sticky-surface' : ''}`} sortBy={sortBy} sortDir={sortDir} setSortBy={setSortBy} setSortDir={setSortDir} />
+            <SortHead label="Stage" field="stage" className={`px-4 py-3 font-semibold min-w-[190px] ${pinnedCols.includes('stage') ? 'sticky left-[336px] z-30 table-sticky-surface' : ''}`} sortBy={sortBy} sortDir={sortDir} setSortBy={setSortBy} setSortDir={setSortDir} />
             <SortHead label="Created" field="createdAt" className="px-4 py-3 font-semibold w-[190px]" sortBy={sortBy} sortDir={sortDir} setSortBy={setSortBy} setSortDir={setSortDir} />
             {visibleCols.map(c => <SortHead key={c.id} label={c.label} field={c.field || c.id} className="px-4 py-3 font-semibold" sortBy={sortBy} sortDir={sortDir} setSortBy={setSortBy} setSortDir={setSortDir} />)}
             <th className="px-4 py-3 font-semibold min-w-[190px]">Next follow-up</th>
@@ -544,18 +556,23 @@ function TableGrid({ items, boot, lookup, openLead, changeStage, onMessage, onTe
             const dueIn = nextFu ? daysFromNow(nextFu.date) : null
             return (
               <tr key={l.id} className={`border-b border-white/5 hover:bg-white/[0.035] cursor-pointer transition-colors ${selected?.has(l.id) ? 'bg-rose-500/[0.05]' : ''} ${focusLeadIds.includes(l.id) ? 'ring-1 ring-rose-400/30 bg-rose-500/[0.08]' : ''}`} onClick={() => openLead(l.id)}>
-                <td className={`px-4 ${py} ${pinnedCols.includes('select') ? 'sticky left-0 z-20 table-sticky-surface' : ''}`} onClick={e => e.stopPropagation()}>
-                  <button className="flex items-center justify-center text-slate-400 hover:text-white" onClick={() => toggleSelect(l.id)}>
-                    {selected?.has(l.id) ? <CheckSquare size={15} className="text-rose-400" /> : <Square size={15} />}
-                  </button>
+                <td className={`px-3 ${py} ${pinnedCols.includes('select') ? 'sticky left-0 z-20 table-sticky-surface' : ''}`} onClick={e => e.stopPropagation()}>
+                  <div className="flex items-center gap-2">
+                    <button className="flex items-center justify-center text-slate-400 hover:text-white" onClick={() => toggleSelect(l.id)}>
+                      {selected?.has(l.id) ? <CheckSquare size={15} className="text-rose-400" /> : <Square size={15} />}
+                    </button>
+                    <button className={`lead-row-flag ${l.manualFlags?.some(f => f.id === 'focus') ? 'is-active' : ''}`} title={l.manualFlags?.some(f => f.id === 'focus') ? 'Remove row flag' : 'Flag this member'} onClick={() => toggleManualFlag(l)}>
+                      <Flag size={14} />
+                    </button>
+                  </div>
                 </td>
-                <td className={`px-4 ${py} w-[240px] ${pinnedCols.includes('lead') ? 'sticky left-[44px] z-20 table-sticky-surface' : ''}`}>
+                <td className={`px-4 ${py} w-[260px] ${pinnedCols.includes('lead') ? 'sticky left-[76px] z-20 table-sticky-surface' : ''}`}>
                   <div className="flex items-center gap-2.5">
                     <Avatar name={l.fullName} color={owner?.color} size={density === 'compact' ? 24 : 34} />
                     <div className="min-w-0">
                       <div className="text-[13px] font-semibold text-white truncate max-w-[160px] flex items-center gap-1.5">
                         {l.fullName}
-                        {(l.flags || []).map(f => (
+                        {[...(l.manualFlags || []), ...(l.flags || [])].map(f => (
                           <span key={f.id} title={f.name} className="chip !px-1.5 !py-0 text-[9px]" style={{ background: `${f.color}22`, color: f.color, border: `1px solid ${f.color}44` }}>{f.label}</span>
                         ))}
                       </div>
@@ -563,8 +580,8 @@ function TableGrid({ items, boot, lookup, openLead, changeStage, onMessage, onTe
                     </div>
                   </div>
                 </td>
-                <td className={`px-4 ${py} w-[140px] ${pinnedCols.includes('stage') ? 'sticky left-[284px] z-20 table-sticky-surface' : ''}`}>
-                  <select className="input !py-1 !text-[11.5px] !w-[124px] truncate" title={l.stage} value={l.stage} onClick={e => e.stopPropagation()} onChange={e => changeStage(l, e.target.value)}>
+                <td className={`px-4 ${py} min-w-[190px] ${pinnedCols.includes('stage') ? 'sticky left-[336px] z-20 table-sticky-surface' : ''}`}>
+                  <select className="input stage-select !py-1 !text-[11.5px] !w-[170px]" title={l.stage} value={l.stage} onClick={e => e.stopPropagation()} onChange={e => changeStage(l, e.target.value)}>
                     {(boot?.stages || []).map(s => <option key={s}>{s}</option>)}
                   </select>
                 </td>
@@ -580,8 +597,8 @@ function TableGrid({ items, boot, lookup, openLead, changeStage, onMessage, onTe
                 <td className={`px-4 ${py} min-w-[190px]`}>
                   {nextFu ? (
                     <div>
-                      <span className={`text-[12px] mono ${dueIn < 0 ? 'text-rose-400 font-semibold' : 'text-slate-400'}`}>
-                        {fmtDate(nextFu.date)}{dueIn < 0 ? ` (${-dueIn}d)` : ''}
+                      <span className={`followup-date-pill ${dueIn < 0 ? 'is-overdue' : dueIn === 0 ? 'is-today' : ''}`}>
+                        <Clock size={10} /> {dueIn === 0 ? 'Today' : fmtDate(nextFu.date)}{dueIn < 0 ? ` · ${-dueIn}d overdue` : ''}
                       </span>
                       {(l.fu?.missedCount > 0 || (l.status === 'open' && l.fu?.lastOutreachDays > cadenceDays)) && (
                         <div className="mt-1 flex flex-wrap gap-1">

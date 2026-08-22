@@ -12,6 +12,7 @@ export default function MetricCard({
   title,
   value,
   description,
+  calculation,
   trend = [],
   mom,
   yoy,
@@ -76,7 +77,12 @@ export default function MetricCard({
             </div>
             <span className="metric-card-value metric-card-value-sm">{value}</span>
           </div>
-          {description && <div className="metric-card-desc">{description}</div>}
+          <div className="metric-card-desc">
+            <strong>Summary:</strong> {description || defaultSummary(title, value)}
+          </div>
+          <div className="metric-card-calc">
+            <strong>Calculation:</strong> {calculation || defaultCalculation(title)}
+          </div>
           {analysis && <div className="metric-card-analysis">{analysis}</div>}
           <div className="metric-card-pills">
             <TrendPill label="MoM" pct={mom} />
@@ -86,6 +92,23 @@ export default function MetricCard({
       </div>
     </button>
   )
+}
+
+function defaultSummary(title, value) {
+  return `${title || 'This metric'} is currently ${value ?? '—'} for the selected scope and period.`
+}
+
+function defaultCalculation(title) {
+  const name = (title || '').toLowerCase()
+  if (name.includes('open lead')) return 'Count of leads where status is open, excluding won and lost records.'
+  if (name.includes('new lead')) return 'Count of leads created during the selected reporting period.'
+  if (name.includes('trial')) return 'Count of leads in trial-booked or trial-completed stages during the selected period.'
+  if (name.includes('won')) return 'Count of closed-won leads using their conversion date when available.'
+  if (name.includes('revenue')) return 'Sum of value estimates for closed-won leads in the selected period.'
+  if (name.includes('follow')) return 'Completed follow-ups divided by total scheduled/logged follow-ups.'
+  if (name.includes('response')) return 'Average elapsed time between logged member touchpoints.'
+  if (name.includes('overdue')) return 'Count of follow-ups with due dates before today and not marked done.'
+  return 'Computed from the filtered lead, associate, studio, and follow-up records in this view.'
 }
 
 function buildAnalysis(title, trend, mom, yoy) {

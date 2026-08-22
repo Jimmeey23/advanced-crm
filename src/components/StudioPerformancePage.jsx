@@ -135,6 +135,11 @@ export default function StudioPerformancePage({ range, title, desc }) {
   }
   const totals = primary?.summary || { newLeads: 0, trials: 0, won: 0, revenue: 0, followUps: 0, missed: 0 }
   const followUpRate = totals.followUps ? Math.round(((totals.followUps - totals.missed) / totals.followUps) * 100) : 0
+  const openLeads = (primary?.funnel?.new || 0) + (primary?.funnel?.trial || 0)
+  const activeAssociates = (primary?.leaderboard || []).filter(a => a.active !== false)
+  const topAssociate = activeAssociates[0] || null
+  const avgAssociateRevenue = activeAssociates.length ? Math.round(activeAssociates.reduce((s, a) => s + (a.revenue || 0), 0) / activeAssociates.length) : 0
+  const sourceCount = primary?.sourceBreakdown?.length || 0
   const prev = primary?.previous || null
   const history = primary?.history || []
 
@@ -295,23 +300,40 @@ export default function StudioPerformancePage({ range, title, desc }) {
 
       {!loading && data && (
         <div className="space-y-5" ref={reportRef}>
-          <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+          <section className="studio-report-section">
+            <ReportHeading number="00" title="Executive scorecard" subtitle="Eight studio and active-associate metrics for the selected reporting period" />
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 p-4">
             <MetricCard icon={Users} title="New leads" value={totals.newLeads} color="#8b5cf6"
               description={`${compareLabel} · ${prev?.newLeads ?? '—'} previous`}
+              calculation="Leads whose created date falls inside the selected studio/reporting period."
               trend={historyTrend(history, 'newLeads')} mom={deltaPct(totals.newLeads, prev?.newLeads)} />
+            <MetricCard icon={Layers} title="Open leads" value={openLeads} color="#3b82f6"
+              description="Open pipeline volume across new and trial funnel stages."
+              calculation="Funnel new count plus trial count for the selected studio scope." />
             <MetricCard icon={Crown} title="Trials" value={totals.trials} color="#06b6d4"
               description={`${compareLabel} · ${prev?.trials ?? '—'} previous`}
+              calculation="Leads in trial-booked or trial-completed movement during the period."
               trend={historyTrend(history, 'trials')} mom={deltaPct(totals.trials, prev?.trials)} />
             <MetricCard icon={Trophy} title="Won deals" value={totals.won} color="#10b981"
               description={`${compareLabel} · ${prev?.won ?? '—'} previous`}
+              calculation="Closed-won leads using convertedAt where available."
               trend={historyTrend(history, 'won')} mom={deltaPct(totals.won, prev?.won)} />
             <MetricCard icon={IndianRupee} title="Revenue" value={money(totals.revenue)} color="#f43f5e"
               description={`${compareLabel} · ${money(prev?.revenue || 0)} previous`}
+              calculation="Sum of valueEstimate for won leads in the selected period."
               trend={historyTrend(history, 'revenue')} mom={deltaPct(totals.revenue, prev?.revenue)} />
             <MetricCard icon={CalendarCheck2} title="Follow-up completion" value={`${followUpRate}%`} color="#fbbf24"
               description={`${totals.missed} missed of ${totals.followUps} · ${compareLabel}`}
+              calculation="Completed follow-ups divided by total follow-ups, shown as a percentage."
               trend={historyTrend(history, 'followUpRate')} mom={deltaPct(followUpRate, prev?.followUpRate)} />
+            <MetricCard icon={Target} title="Active associates" value={activeAssociates.length} color="#14b8a6"
+              description={topAssociate ? `Top active associate: ${topAssociate.name}` : 'No active associate activity in this period.'}
+              calculation="Associates marked active in the selected studio scope; inactive associates are excluded." />
+            <MetricCard icon={IndianRupee} title="Avg associate revenue" value={money(avgAssociateRevenue)} color="#ec4899"
+              description={`${sourceCount} active lead source${sourceCount === 1 ? '' : 's'} contributed to this period.`}
+              calculation="Selected-period revenue divided by active associates in the report scope." />
           </div>
+          </section>
 
           {history.length > 1 && (
             <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">

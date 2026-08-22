@@ -24,8 +24,8 @@ export default function Pipeline() {
     for (const l of data?.items || []) (map[l.stage] = map[l.stage] || []).push(l)
     return stages
       .map(stage => ({ stage, leads: map[stage] || [] }))
-      .filter(c => !hideEmpty || c.leads.length > 0)
-  }, [data, boot, hideEmpty])
+      .filter(c => dragId || !hideEmpty || c.leads.length > 0)
+  }, [data, boot, hideEmpty, dragId])
 
   const moveStage = async (leadId, stage) => {
     setDragId(null)
@@ -69,12 +69,12 @@ export default function Pipeline() {
             return (
               <div
                 key={col.stage}
-                className="flex flex-col w-[292px] shrink-0 rounded-2xl bg-white/[0.028] border border-white/6"
+                className={`pipeline-column flex flex-col w-[306px] shrink-0 rounded-2xl bg-white/[0.028] border border-white/6 ${dragId ? 'is-dragging' : ''}`}
                 onDragOver={e => { e.preventDefault(); e.currentTarget.style.borderColor = 'rgba(244,63,94,.5)' }}
                 onDragLeave={e => { e.currentTarget.style.borderColor = '' }}
                 onDrop={e => { e.preventDefault(); e.currentTarget.style.borderColor = ''; const id = e.dataTransfer.getData('text/lead'); if (id && id !== dragId) moveStage(id, col.stage) }}
               >
-                <div className="px-3.5 py-3 flex items-center gap-2.5">
+                <div className="pipeline-column-head px-3.5 py-3 flex items-center gap-2.5">
                   <span className="w-2 h-2 rounded-full" style={{ background: columnColor(col.stage) }} />
                   <span className="font-display text-[13px] font-semibold text-slate-200">{col.stage}</span>
                   <span className="ml-auto chip bg-white/6 border border-white/10 text-slate-400 mono !py-0.5 !px-2 text-[11px]">{count}</span>
@@ -83,7 +83,7 @@ export default function Pipeline() {
                   {col.leads.map(l => (
                     <LeadCard key={l.id} lead={l} lookup={lookup} openLead={openLead} onDragStart={setDragId} />
                   ))}
-                  {count === 0 && <div className="text-[11.5px] text-slate-600 text-center py-6">Drop leads here</div>}
+                  {count === 0 && <div className="pipeline-drop-empty">Drop member cards here</div>}
                 </div>
               </div>
             )
@@ -115,7 +115,7 @@ function LeadCard({ lead, lookup, openLead, onDragStart }) {
       onDragStart={e => { e.dataTransfer.setData('text/lead', lead.id); e.dataTransfer.effectAllowed = 'move'; onDragStart(lead.id) }}
       onDragEnd={() => onDragStart(null)}
       onClick={() => openLead(lead.id)}
-      className="card card-hover !rounded-xl p-3 cursor-grab active:cursor-grabbing select-none"
+      className="pipeline-lead-card card card-hover !rounded-xl p-3 cursor-grab active:cursor-grabbing select-none"
     >
       <div className="flex items-start gap-2 mb-2">
         <Avatar name={lead.fullName} color={owner?.color} size={30} />

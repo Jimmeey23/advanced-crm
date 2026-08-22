@@ -427,6 +427,9 @@ export default function SettingsPage() {
                     <button className="btn btn-ghost !p-2" onClick={() => setLocations(ls => ls.map(l => l.id === loc.id ? { ...l, active: l.active === false } : l))} title="Toggle active">
                       {loc.active === false ? <Sparkles size={14} className="text-slate-600" /> : <ShieldCheck size={14} className="text-emerald-400" />}
                     </button>
+                    <button className="btn btn-ghost !p-2 text-rose-300" onClick={() => window.confirm(`Delete ${loc.name}? Existing leads keep their stored location id.`) && setLocations(ls => ls.filter(l => l.id !== loc.id))} title="Delete location">
+                      <Trash2 size={14} />
+                    </button>
                   </div>
                 ))}
                 <button className="btn btn-ghost !py-1.5 !text-[12px]" onClick={() => setLocations(ls => [...ls, { id: `loc_${Date.now()}`, name: 'New Studio', city: 'Mumbai', country: 'India', active: true, timeZone: 'Asia/Kolkata', accent: 'rose', address: '', fullAddress: '' }])}><Plus size={13} /> Add location</button>
@@ -444,6 +447,9 @@ export default function SettingsPage() {
                     <input className="input !w-[70px] !py-1.5" type="number" value={a.targetMonthly || 10} onChange={e => setAssociates(as => as.map(x => x.id === a.id ? { ...x, targetMonthly: Number(e.target.value) } : x))} title="Monthly target" />
                     <button className="btn btn-ghost !p-2" onClick={() => setAssociates(as => as.map(x => x.id === a.id ? { ...x, active: x.active === false } : x))} title="Toggle active">
                       {a.active === false ? <Sparkles size={14} className="text-slate-600" /> : <ShieldCheck size={14} className="text-emerald-400" />}
+                    </button>
+                    <button className="btn btn-ghost !p-2 text-rose-300" onClick={() => window.confirm(`Delete ${a.name}? Existing leads keep their stored associate id.`) && setAssociates(as => as.filter(x => x.id !== a.id))} title="Delete associate">
+                      <Trash2 size={14} />
                     </button>
                   </div>
                 ))}
@@ -567,7 +573,7 @@ export default function SettingsPage() {
                     <div className="font-semibold text-white text-[13px]">Approved WABA templates</div>
                     <div className="text-[11.5px] text-slate-500">Linked WABA templates used automatically for first WhatsApp messages and available from the leads table.</div>
                   </div>
-                  <button className="btn btn-ghost !py-1.5 !text-[12px]" onClick={() => setRespTemplates(t => [...t, { id: `tpl_${Date.now().toString(36)}`, label: 'New template', name: '', language: 'en', namespace: '', parameters: [''] }])}>
+                  <button className="btn btn-ghost !py-1.5 !text-[12px]" onClick={() => setWabaTemplates(t => [...t, { id: `tpl_${Date.now().toString(36)}`, label: 'New template', name: '', language: 'en', namespace: '', parameters: [''] }])}>
                     <Plus size={13} /> Add template
                   </button>
                 </div>

@@ -33,110 +33,19 @@ const tooltipStyle = () => ({
 })
 const AXIS = { fill: 'var(--axis)', fontSize: 11 }
 
-function SourceConversionJourney({ data = [] }) {
-  const [active, setActive] = React.useState(0)
-  const max = Math.max(...data.map(d => d.count), 1)
-  const selected = data[active] || data[0]
-  const conversionRate = selected?.count ? Math.round((selected.won / selected.count) * 100) : 0
-
-  return (
-    <div className="pipeline-journey">
-      <div className="pipeline-journey-summary">
-        <div><span>Selected source</span><strong>{selected?.source || 'No sources'}</strong></div>
-        <div className="text-right"><span>Leads / conversions</span><strong className="mono">{selected?.count || 0} / {selected?.won || 0}</strong></div>
-        <div className="text-right"><span>Conversion rate</span><strong className="mono text-emerald-400">{conversionRate}%</strong></div>
-      </div>
-      <div className="pipeline-steps source-conversion-steps" role="list" aria-label="Lead and conversion performance by source">
-        {data.map((item, i) => {
-          const rate = item.count ? Math.round((item.won / item.count) * 100) : 0
-          return (
-            <button key={item.source} type="button" role="listitem"
-              className={`pipeline-step ${active === i ? 'is-active' : ''}`}
-              style={{ '--step-color': DONUT_COLORS[i % DONUT_COLORS.length], '--step-width': `${Math.max(8, (item.count / max) * 100)}%`, '--won-width': `${item.count ? (item.won / item.count) * 100 : 0}%` }}
-              onClick={() => setActive(i)} aria-pressed={active === i}>
-              <span className="pipeline-step-index">{String(i + 1).padStart(2, '0')}</span>
-              <span className="pipeline-step-label">{item.source}</span>
-              <span className="pipeline-step-track source-track"><span className="lead-volume"><i /></span></span>
-              <strong className="mono">{item.count} / <em>{item.won}</em></strong>
-              <small>{rate}%</small>
-            </button>
-          )
-        })}
-      </div>
-    </div>
-  )
-}
-
-function MonthlyPipeline({ stages, data }) {
-  const [range, setRange] = React.useState(6)
-  const [stage, setStage] = React.useState('all')
-  const [selectedMonth, setSelectedMonth] = React.useState(null)
-  const visible = data.slice(-range)
-  const shownStages = stage === 'all' ? stages : stages.filter(s => s === stage)
-  const ranked = visible.map(row => ({
-    ...row,
-    total: shownStages.reduce((sum, s) => sum + (row[s] || 0), 0)
-  })).sort((a, b) => b.total - a.total)
-  const splitAt = Math.ceil(ranked.length / 2)
-  const selected = selectedMonth ? visible.find(row => row.month === selectedMonth) : ranked[0]
-
-  return (
-    <>
-      <div className="pipeline-controls" aria-label="Monthly pipeline chart controls">
-        <div className="pipeline-control-group">
-          {[6, 12].map(n => <button key={n} type="button" className={range === n ? 'is-active' : ''} onClick={() => setRange(n)}>{n}M</button>)}
-        </div>
-        <div className="pipeline-stage-tabs">
-          <button type="button" className={stage === 'all' ? 'is-active' : ''} onClick={() => setStage('all')}>All stages</button>
-          {stages.map((s, i) => <button key={s} type="button" className={stage === s ? 'is-active' : ''} style={{ '--tab-color': DONUT_COLORS[i % DONUT_COLORS.length] }} onClick={() => setStage(s)}>{s}</button>)}
-        </div>
-      </div>
-      <div className="pipeline-ranking-panel">
-        <div className="pipeline-ranking-spotlight">
-          <div><span>Selected period</span><strong>{selected?.month || 'No data'}</strong></div>
-          <div><span>Pipeline volume</span><strong>{selected ? shownStages.reduce((sum, s) => sum + (selected[s] || 0), 0) : 0}</strong></div>
-          <div><span>Stage filter</span><strong>{stage === 'all' ? 'All stages' : stage}</strong></div>
-        </div>
-        <div className="pipeline-ranking-columns">
-          <RankingColumn title="Top periods" tone="top" rows={ranked.slice(0, splitAt)} selected={selected?.month} onSelect={setSelectedMonth} />
-          <RankingColumn title="Bottom periods" tone="bottom" rows={ranked.slice(splitAt)} selected={selected?.month} onSelect={setSelectedMonth} rankOffset={splitAt} />
-        </div>
-      </div>
-    </>
-  )
-}
-
-function RankingColumn({ title, tone, rows, selected, onSelect, rankOffset = 0 }) {
-  return (
-    <div className={`pipeline-ranking-column is-${tone}`}>
-      <div className="pipeline-ranking-heading"><span>{title}</span><small>{rows.length} periods</small></div>
-      <div className="pipeline-ranking-list" role="list">
-        {rows.map((row, i) => (
-          <button key={row.month} type="button" role="listitem" className={selected === row.month ? 'is-active' : ''} onClick={() => onSelect(row.month)}>
-            <span className="pipeline-ranking-position">#{rankOffset + i + 1}</span>
-            <strong>{row.month}</strong>
-            <span className="pipeline-ranking-score">{row.total}</span>
-          </button>
-        ))}
-        {!rows.length && <p>No periods available</p>}
-      </div>
-    </div>
-  )
-}
-
 export default function Dashboard() {
   const { openLead, refreshData, boot, dataVersion } = useApp()
   const { data: ov, loading: l1, error: e1, reload: r1 } = useFetch(() => api.get('/api/analytics/overview'), [])
   const { data: tl, loading: l2 } = useFetch(() => api.get('/api/analytics/timeline'), [])
-  const { data: funnelByMonth } = useFetch(() => api.get('/api/analytics/funnel-by-month'), [])
   const { data: sources, loading: l4 } = useFetch(() => api.get('/api/analytics/sources'), [])
   const { data: team, loading: l5 } = useFetch(() => api.get('/api/analytics/team'), [])
   const { data: hotResp } = useFetch(() => api.get('/api/leads?risk=hot&pageSize=50'), [])
   const { alerts } = useApp()
 
-  const [perfRange, setPerfRange] = React.useState('week')
+  const [perfRange, setPerfRange] = React.useState('month')
   const [compareOpen, setCompareOpen] = React.useState(false)
   const [perfOpen, setPerfOpen] = React.useState(false)
+  const [sourceView, setSourceView] = React.useState('top')
   const { data: perf } = useFetch(() => api.get(`/api/analytics/performance?range=${perfRange}`), [perfRange, dataVersion])
 
   const hot = (hotResp?.items || []).slice().sort((a, b) => b.ai.score - a.ai.score).slice(0, 5)
@@ -151,8 +60,11 @@ export default function Dashboard() {
   const conversionTrend = (tl || []).map(m => ({ label: m.month, value: m.newLeads ? Math.round((m.won / m.newLeads) * 100) : 0 }))
   const avgDealTrend = (tl || []).map(m => ({ label: m.month, value: m.won ? m.revenue / m.won : 0 }))
 
-  const funnelStages = funnelByMonth?.stages || []
-  const funnelMonthData = (funnelByMonth?.months || []).map(m => ({ month: m.month, ...m.stages }))
+  const sourceRanked = (sources || []).slice().sort((a, b) => b.count - a.count)
+  const topSources = sourceRanked.slice(0, 5)
+  const bottomSources = sourceRanked.slice(-5).reverse()
+  const shownSources = sourceView === 'top' ? topSources : bottomSources
+  const shownMax = Math.max(...shownSources.map(s => s.count), 1)
 
   if (l1) return <Loading />
   if (e1 || !ov) {
@@ -179,8 +91,9 @@ export default function Dashboard() {
       <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-6 gap-3">
         <MetricCard icon={Users} title="Total leads" value={ov.totalLeads} color="#8b5cf6"
           description="All-time leads captured across every source." trend={newLeadsTrend} mom={momPct(newLeadsTrend)} />
-        <MetricCard icon={Users} title="Open leads" value={ov.openLeads} color="#06b6d4"
-          description={`${ov.hotLeads} hot right now — active, not yet won or lost.`} />
+        <MetricCard icon={UserPlus} title="Open leads" value={ov.openLeads} color="#0ea5e9"
+          description={`${ov.hotLeads} hot right now. Active leads that are not won or lost.`}
+          calculation="Count of leads where status is open." />
         <MetricCard icon={TrendingUp} title="Conversion" value={`${ov.conversionRate}%`} color="#10b981"
           description={`${ov.won} leads won out of all leads created.`} trend={conversionTrend} mom={momPct(conversionTrend)} />
         <MetricCard icon={Target} title="New this month" value={ov.newThisMonth} color="#f59e0b"
@@ -254,20 +167,8 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* row 3: funnel + AI + alerts */}
+      {/* row 3: AI + source ranking + alerts */}
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
-        <div className="card p-5">
-          <h3 className="font-display font-semibold text-white text-[14px] mb-1">Leads & conversions by source</h3>
-          <p className="text-[11.5px] text-slate-500 mb-4">Select a source to compare lead volume with converted leads</p>
-          <SourceConversionJourney data={sources || []} />
-        </div>
-
-        <div className="card p-5 xl:col-span-2">
-          <h3 className="font-display font-semibold text-white text-[14px] mb-1">Pipeline funnel by month</h3>
-          <p className="text-[11.5px] text-slate-500 mb-3">Compare the last 6 or 12 months, then isolate any pipeline stage</p>
-          <MonthlyPipeline stages={funnelStages} data={funnelMonthData} />
-        </div>
-
         <div className="card p-5">
           <div className="flex items-center gap-2 mb-1">
             <Sparkles size={15} className="text-fuchsia-400" />
@@ -289,6 +190,41 @@ export default function Dashboard() {
               </button>
             ))}
             {!hot.length && <Empty icon={<Sparkles size={20} />} title="No hot leads" subtitle="Leads scoring 70+ will appear here." />}
+          </div>
+        </div>
+
+        <div className="card p-5">
+          <div className="flex items-center justify-between mb-1">
+            <h3 className="font-display font-semibold text-white text-[14px]">Leads by source</h3>
+            <div className="flex rounded-lg overflow-hidden border border-white/10 shrink-0">
+              <button type="button"
+                className={`px-2.5 py-1 text-[11px] font-semibold transition-colors ${sourceView === 'top' ? 'bg-emerald-500/25 text-emerald-300' : 'bg-white/5 text-slate-400 hover:text-white'}`}
+                onClick={() => setSourceView('top')}>Top</button>
+              <button type="button"
+                className={`px-2.5 py-1 text-[11px] font-semibold transition-colors border-l border-white/10 ${sourceView === 'bottom' ? 'bg-rose-500/25 text-rose-300' : 'bg-white/5 text-slate-400 hover:text-white'}`}
+                onClick={() => setSourceView('bottom')}>Bottom</button>
+            </div>
+          </div>
+          <p className="text-[11.5px] text-slate-500 mb-4">{sourceView === 'top' ? 'Highest-volume sources & their conversions' : 'Lowest-volume sources & their conversions'}</p>
+          <div className="space-y-2">
+            {shownSources.map((s, i) => {
+              const rate = s.count ? Math.round((s.won / s.count) * 100) : 0
+              return (
+                <div key={s.source} className="rounded-xl bg-white/[0.03] border border-white/[0.05] p-2.5">
+                  <div className="flex items-center gap-2.5">
+                    <span className={`w-5 h-5 rounded-md flex items-center justify-center text-[10px] font-bold shrink-0 ${sourceView === 'top' ? 'bg-emerald-500/15 text-emerald-300' : 'bg-rose-500/15 text-rose-300'}`}>{i + 1}</span>
+                    <span className="text-[12.5px] font-medium text-white flex-1 truncate">{s.source}</span>
+                    <span className="mono text-slate-400 text-[12px]">{s.count}</span>
+                    <span className="text-emerald-400 text-[10.5px] mono shrink-0">{s.won} won</span>
+                    <span className="text-[10.5px] mono text-slate-500 shrink-0 w-8 text-right">{rate}%</span>
+                  </div>
+                  <div className="mt-1.5 h-1.5 rounded-full bg-white/5 overflow-hidden">
+                    <div className={`h-full rounded-full ${sourceView === 'top' ? 'bg-emerald-400/70' : 'bg-rose-400/70'}`} style={{ width: `${Math.max(4, (s.count / shownMax) * 100)}%` }} />
+                  </div>
+                </div>
+              )
+            })}
+            {!shownSources.length && <p className="text-[11.5px] text-slate-500">No data</p>}
           </div>
         </div>
 

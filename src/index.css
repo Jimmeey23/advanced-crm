@@ -230,6 +230,12 @@ select.input option { background: #141829; color: #e6e8f0; }
 
 .metric-card-v2 { height: 178px; }
 .metric-card-front, .metric-card-back { padding: 14px 16px; gap: 10px; }
+.metric-card-back {
+  justify-content: flex-start;
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+.metric-card-back::-webkit-scrollbar { display: none; }
 
 .metric-card-title { font-size: 10.5px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: #64748b; }
 .metric-card-x {
@@ -248,8 +254,11 @@ select.input option { background: #141829; color: #e6e8f0; }
 
 .metric-card-icon { width: 26px; height: 26px; border-radius: 999px; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
 .metric-card-back-title { font-size: 13px; font-weight: 700; color: #e2e8f0; }
-.metric-card-desc { font-size: 11px; color: #64748b; border-bottom: 1px solid rgba(255,255,255,0.07); padding-bottom: 8px; }
-.metric-card-analysis { font-size: 10.5px; line-height: 1.4; color: #94a3b8; }
+.metric-card-desc { font-size: 10.5px; line-height: 1.3; color: #64748b; border-bottom: 1px solid rgba(255,255,255,0.07); padding-bottom: 6px; }
+.metric-card-desc strong,
+.metric-card-calc strong { color: #cbd5e1; font-weight: 800; }
+.metric-card-calc { font-size: 10px; line-height: 1.3; color: #94a3b8; border-bottom: 1px solid rgba(255,255,255,0.06); padding-bottom: 6px; }
+.metric-card-analysis { font-size: 10px; line-height: 1.3; color: #94a3b8; }
 .metric-card-pills { display: flex; gap: 8px; margin-top: auto; }
 .metric-card-pill { flex: 1; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08); border-radius: 10px; padding: 6px 8px; }
 .metric-card-pill-label { font-size: 9px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: #64748b; margin-bottom: 2px; }
@@ -263,6 +272,9 @@ select.input option { background: #141829; color: #e6e8f0; }
 [data-theme="light"] .metric-card-bar-label { color: #94a3b8; }
 [data-theme="light"] .metric-card-back-title { color: #0f172a; }
 [data-theme="light"] .metric-card-desc { color: #64748b; border-color: rgba(15,23,42,0.07); }
+[data-theme="light"] .metric-card-desc strong,
+[data-theme="light"] .metric-card-calc strong { color: #0f172a; }
+[data-theme="light"] .metric-card-calc { color: #64748b; border-color: rgba(15,23,42,0.07); }
 [data-theme="light"] .metric-card-analysis { color: #64748b; }
 [data-theme="light"] .metric-card-pill { background: rgba(15,23,42,0.03); border-color: rgba(15,23,42,0.08); }
 [data-theme="light"] .metric-card-pill-label { color: #94a3b8; }
@@ -518,6 +530,30 @@ html[data-theme="light"] {
 .data-table tbody tr { transition: background 0.12s ease; }
 .data-table tbody tr:hover { background: var(--tbl-hover); }
 .data-table tbody tr:last-child td { border-bottom: 0; }
+.stage-select { min-width: 170px; text-overflow: ellipsis; }
+.lead-row-flag {
+  width: 22px; height: 22px; display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 8px; border: 1px solid rgba(255,255,255,.1); color: #64748b; background: rgba(255,255,255,.035);
+  transition: color .15s ease, background .15s ease, border-color .15s ease;
+}
+.lead-row-flag:hover,
+.lead-row-flag.is-active { color: #fb7185; border-color: rgba(244,63,94,.38); background: rgba(244,63,94,.12); }
+.followup-date-pill {
+  display: inline-flex; align-items: center; gap: 5px; border-radius: 999px; padding: 4px 8px;
+  border: 1px solid rgba(148,163,184,.2); background: rgba(148,163,184,.08); color: #cbd5e1;
+  font-size: 11.5px; font-weight: 700; font-variant-numeric: tabular-nums;
+}
+.followup-date-pill.is-overdue { color: #fb7185; border-color: rgba(244,63,94,.35); background: rgba(244,63,94,.12); }
+.followup-date-pill.is-today { color: #fbbf24; border-color: rgba(251,191,36,.35); background: rgba(251,191,36,.12); }
+.pipeline-column { position: relative; overflow: hidden; box-shadow: inset 0 1px 0 rgba(255,255,255,.04); transition: border-color .15s ease, background .15s ease, transform .15s ease; }
+.pipeline-column.is-dragging { background: linear-gradient(180deg, rgba(255,255,255,.045), rgba(255,255,255,.02)); }
+.pipeline-column-head { border-bottom: 1px solid rgba(255,255,255,.07); background: rgba(255,255,255,.025); }
+.pipeline-lead-card { border-color: rgba(255,255,255,.09); box-shadow: 0 10px 24px rgba(0,0,0,.18); }
+.pipeline-drop-empty {
+  margin: 8px; min-height: 86px; border: 1px dashed rgba(148,163,184,.28); border-radius: 14px;
+  display: flex; align-items: center; justify-content: center; color: #64748b; font-size: 11.5px; font-weight: 700;
+  background: rgba(255,255,255,.025);
+}
 
 /* ============================================================
    Light theme polish
@@ -570,6 +606,12 @@ html[data-theme="light"] .modal-panel {
     0 1px 2px rgba(15, 23, 42, 0.06),
     0 24px 60px rgba(15, 23, 42, 0.14);
 }
+html[data-theme="light"] .lead-row-flag { background: #f8fafc; border-color: rgba(15,23,42,.12); color: #94a3b8; }
+html[data-theme="light"] .lead-row-flag:hover,
+html[data-theme="light"] .lead-row-flag.is-active { color: #e11d48; border-color: rgba(225,29,72,.28); background: #fff1f2; }
+html[data-theme="light"] .followup-date-pill { background: #f8fafc; border-color: rgba(148,163,184,.25); color: #334155; }
+html[data-theme="light"] .followup-date-pill.is-overdue { color: #be123c; border-color: rgba(225,29,72,.28); background: #fff1f2; }
+html[data-theme="light"] .followup-date-pill.is-today { color: #b45309; border-color: rgba(245,158,11,.3); background: #fffbeb; }
 
 html[data-theme="light"] .modal-panel::before {
   background:
