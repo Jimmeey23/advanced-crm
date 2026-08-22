@@ -887,28 +887,19 @@ app.get('/api/analytics/funnel-by-month', (req, res) => {
     const key = d.toISOString().slice(0, 7)
     const cohort = db.leads.filter(l => (l.createdAt || '').slice(0, 7) === key)
     const stages = {}
-    const stageValues = {}
     db.stages.forEach((stage, idx) => {
-      const filtered = cohort.filter(l => db.stages.indexOf(l.stage) >= idx)
-      stages[stage] = filtered.length
-      stageValues[stage] = filtered.reduce((s, l) => s + (l.valueEstimate || 0), 0)
+      stages[stage] = cohort.filter(l => db.stages.indexOf(l.stage) >= idx).length
     })
-    months.push({ month: d.toLocaleString('en-US', { month: 'short' }), key, total: cohort.length, stages, stageValues, totalValue: cohort.reduce((s, l) => s + (l.valueEstimate || 0), 0) })
+    months.push({ month: d.toLocaleString('en-US', { month: 'short' }), key, total: cohort.length, stages })
   }
   res.json({ stages: db.stages, months })
 })
 
 app.get('/api/analytics/funnel', (req, res) => {
-  const funnel = db.stages.map(stage => {
-    const leads = db.leads.filter(l => l.stage === stage)
-    return {
-      stage,
-      count: leads.length,
-      value: leads.reduce((s, l) => s + (l.valueEstimate || 0), 0),
-      won: leads.filter(l => l.status === 'won').length,
-      open: leads.filter(l => l.status === 'open').length
-    }
-  })
+  const funnel = db.stages.map(stage => ({
+    stage,
+    count: db.leads.filter(l => l.stage === stage).length
+  }))
   res.json(funnel)
 })
 
@@ -916,32 +907,11 @@ app.get('/api/analytics/sources', (req, res) => {
   const map = {}
   for (const l of db.leads) {
     const key = l.sourceName || 'Unknown'
-    if (!map[key]) map[key] = { source: key, count: 0, won: 0, revenue: 0, totalScore: 0, scored: 0, open: 0 }
+    map[key] = map[key] || { source: key, count: 0, won: 0 }
     map[key].count++
-    if (l.status === 'won') {
-      map[key].won++
-      map[key].revenue += l.valueEstimate || 0
-    }
-    if (l.status === 'open') map[key].open++
-    try {
-      const enriched = enrichLead(l, db)
-      if (enriched?.ai?.score != null) {
-        map[key].totalScore += enriched.ai.score
-        map[key].scored++
-      }
-    } catch {}
+    if (l.status === 'won') map[key].won++
   }
-  const result = Object.values(map).map(r => ({
-    source: r.source,
-    count: r.count,
-    won: r.won,
-    open: r.open,
-    revenue: r.revenue,
-    avgDeal: r.won ? Math.round(r.revenue / r.won) : 0,
-    avgScore: r.scored ? Math.round(r.totalScore / r.scored) : 0,
-    winRate: r.count ? Math.round((r.won / r.count) * 100) : 0
-  })).sort((a, b) => b.count - a.count)
-  res.json(result)
+  res.json(Object.values(map).sort((a, b) => b.count - a.count))
 })
 
 app.get('/api/analytics/team', (req, res) => {
