@@ -14,7 +14,7 @@ import * as mailer from './mailer.js'
 import * as supabase from './supabaseStore.js'
 import { runReminderDigest, startReminderScheduler } from './reminders.js'
 import { parseCsv, autoMap, normalizeStage, normalizeStatus, parseFlexibleDate } from './csv.js'
-import { resolveLeadFields, buildLeadPayloadFromResolved } from './leadFieldMapping.js'
+import { resolveLeadFields, buildLeadPayloadFromResolved, suggestMappingFromKeys } from './leadFieldMapping.js'
 import * as googleSheets from './googleSheets.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -769,6 +769,24 @@ app.put('/api/google-sheets/config', (req, res) => {
   save()
   log('settings', 'Google Sheets config updated')
   res.json(googleSheets.sanitizedConfig(db))
+})
+
+// Reads just the sheet's header row and auto-detects which Lead field each
+// column maps to (same alias dictionary the live sync uses), without
+// touching the stored fieldMapping — the settings UI calls this right after
+// a sheet is picked so the mapping table opens pre-filled instead of blank,
+// and merges the suggestion under any mapping the admin already set by hand.
+app.get('/api/google-sheets/detect-mapping', async (req, res) => {
+  try {
+    const { header } = await googleSheets.readSheetRows(db)
+    if (!header.length) return res.json({ header: [], suggested: {} })
+    const existing = db.settings.googleSheets?.fieldMapping || {}
+    const suggested = suggestMappingFromKeys(header)
+    for (const key of Object.keys(existing)) delete suggested[key]
+    res.json({ header, suggested })
+  } catch (e) {
+    res.status(502).json({ error: e.message })
+  }
 })
 
 app.get('/api/google-sheets/oauth/start', (req, res) => {

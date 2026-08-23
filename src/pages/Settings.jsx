@@ -98,11 +98,20 @@ export default function SettingsPage() {
   const [sheetsLogs, setSheetsLogs] = useState(null)
   const [sheetsLogsOpen, setSheetsLogsOpen] = useState(false)
 
+  const [sheetsMappingVersion, setSheetsMappingVersion] = useState(0)
+
   const loadSheetsConfig = () => api.get('/api/google-sheets/config').then(c => {
     setSheetsConfig(c)
     setSheetsClientId(c.clientId || '')
     setSheetsSheetId(c.sheetId || '')
     setSheetsSheetTab(c.sheetTab || '')
+    setSheetsMappingVersion(v => v + 1)
+    // Sheet already configured but never had a mapping detected (e.g. set up
+    // before auto-detect existed) — run it once so the editor doesn't sit
+    // empty forever waiting for someone to click the button.
+    if (c.connected && c.sheetId && c.sheetTab && !Object.keys(c.fieldMapping || {}).length) {
+      detectMapping(true)
+    }
   }).catch(() => {})
 
   useEffect(() => {
@@ -343,11 +352,33 @@ export default function SettingsPage() {
     } catch (e) { toast(e.message, 'error') }
   }
 
+  const [detectingMapping, setDetectingMapping] = useState(false)
+
+  const detectMapping = async (silent) => {
+    setDetectingMapping(true)
+    try {
+      const [{ header, suggested }, current] = await Promise.all([
+        api.get('/api/google-sheets/detect-mapping'),
+        api.get('/api/google-sheets/config')
+      ])
+      if (Object.keys(suggested).length) {
+        const merged = { ...(current?.fieldMapping || {}), ...suggested }
+        await api.put('/api/google-sheets/config', { fieldMapping: merged })
+        loadSheetsConfig()
+        toast(`Auto-detected ${Object.keys(suggested).length} of ${header.length} column${header.length === 1 ? '' : 's'}`)
+      } else if (!silent) {
+        toast(header.length ? 'No new columns matched automatically — map the rest by hand below' : 'Sheet has no header row yet')
+      }
+    } catch (e) { if (!silent) toast(e.message, 'error') }
+    finally { setDetectingMapping(false) }
+  }
+
   const saveSheetTarget = async () => {
     try {
       await api.put('/api/google-sheets/config', { sheetId: sheetsSheetId.trim(), sheetTab: sheetsSheetTab.trim() })
-      loadSheetsConfig()
       toast('Sheet saved')
+      await detectMapping(true)
+      loadSheetsConfig()
     } catch (e) { toast(e.message, 'error') }
   }
 
@@ -844,7 +875,14 @@ export default function SettingsPage() {
                   )}
 
                   <div className="mt-4 space-y-4">
+                    <div className="flex items-center justify-between">
+                      <div className="text-[11px] text-slate-500">Columns are matched to lead fields automatically by name — review and adjust below.</div>
+                      <button className="btn btn-ghost !py-1.5 !text-[12px]" onClick={() => detectMapping(false)} disabled={detectingMapping}>
+                        {detectingMapping ? <Spinner size={12} /> : <Sparkles size={12} />} Re-detect from sheet
+                      </button>
+                    </div>
                     <FieldMappingEditor
+                      key={sheetsMappingVersion}
                       fieldMapping={sheetsConfig.fieldMapping}
                       defaults={sheetsConfig.defaults}
                       onSaveMapping={saveSheetsMapping}

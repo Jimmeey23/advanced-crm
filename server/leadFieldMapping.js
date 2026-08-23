@@ -37,6 +37,23 @@ export const LEAD_FIELD_ALIASES = {
   retentionStatus: ['retention_status', 'retentionstatus']
 }
 
+// Given a sheet's (or any source's) raw header/key list, guesses which Lead
+// field each one maps to by matching against the same alias dictionary the
+// live resolver uses — so "auto-detect" and "what actually happens at
+// receive time" can never drift apart. Only exact alias matches count (no
+// fuzzy scoring) to keep suggestions predictable and reviewable.
+export function suggestMappingFromKeys(keys) {
+  const suggestions = {}
+  for (const key of keys) {
+    const norm = String(key || '').trim().toLowerCase()
+    if (!norm) continue
+    for (const [field, aliases] of Object.entries(LEAD_FIELD_ALIASES)) {
+      if (aliases.includes(norm)) { suggestions[key] = field; break }
+    }
+  }
+  return suggestions
+}
+
 function findByAlias(record, aliases) {
   const keys = Object.keys(record)
   for (const alias of aliases) {
