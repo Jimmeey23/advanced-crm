@@ -10,6 +10,7 @@ import { api } from '../api.js'
 import { Avatar, ScorePill, Spinner } from '../ui.jsx'
 import { fmtDate, fmtDateTime, timeAgo, stageClass, riskClass, money } from '../lib.js'
 import ComposeModal from './ComposeModal.jsx'
+import RespondioTemplateModal from './RespondioTemplateModal.jsx'
 
 const R_CHANNELS = { whatsapp: '#34d399', sms: '#fbbf24', email: '#a78bfa', call: '#38bdf8' }
 
@@ -22,6 +23,7 @@ export default function LeadDrawer() {
   const [manualMemberId, setManualMemberId] = useState('')
   const [remarkDraft, setRemarkDraft] = useState('')
   const [composeOpen, setComposeOpen] = useState(false)
+  const [templateOpen, setTemplateOpen] = useState(false)
   const [enriching, setEnriching] = useState(false)
   const [autoSyncLeadId, setAutoSyncLeadId] = useState('')
   const commentsRef = React.useRef(null)
@@ -190,12 +192,20 @@ export default function LeadDrawer() {
             <span className="ml-auto">{lead.memberId ? `Momence #${lead.memberId}` : 'No member link'}</span>
           </div>
 
-          <button
-            className="btn btn-primary !py-2 !text-[12px] w-full mt-4"
-            onClick={() => setComposeOpen(true)}
-          >
-            <MessageCircle size={13} /> Send message via Respond.io
-          </button>
+          <div className="flex items-center gap-2 mt-4">
+            <button
+              className="btn btn-primary !py-2 !text-[12px] flex-1"
+              onClick={() => setComposeOpen(true)}
+            >
+              <MessageCircle size={13} /> Send message
+            </button>
+            <button
+              className="btn btn-soft !py-2 !text-[12px] flex-1"
+              onClick={() => setTemplateOpen(true)}
+            >
+              <Sparkles size={13} /> Send WhatsApp template
+            </button>
+          </div>
         </div>
 
         {/* cadence deviation banner */}
@@ -524,6 +534,7 @@ export default function LeadDrawer() {
       </aside>
       </div>
       <ComposeModal open={composeOpen} onClose={() => setComposeOpen(false)} lead={lead} />
+      <RespondioTemplateModal open={templateOpen} onClose={() => setTemplateOpen(false)} lead={lead} />
     </>
   )
 }

@@ -18,6 +18,7 @@ import AssociateCompareModal from '../components/AssociateCompareModal.jsx'
 import PerformanceModal from '../components/PerformanceModal.jsx'
 import MetricCard from '../components/MetricCard.jsx'
 import ComposeModal from '../components/ComposeModal.jsx'
+import RespondioTemplateModal from '../components/RespondioTemplateModal.jsx'
 
 const QUICK_ACTIONS = [
   { channel: 'call', icon: Phone, color: '#38bdf8', label: 'Call' },
@@ -57,9 +58,11 @@ export default function Dashboard() {
   const [sourceView, setSourceView] = React.useState('top')
   const [composeLead, setComposeLead] = React.useState(null)
   const [composeChannel, setComposeChannel] = React.useState('whatsapp')
+  const [templateLead, setTemplateLead] = React.useState(null)
 
   const quickContact = (e, lead, channel) => {
     e.stopPropagation()
+    if (channel === 'whatsapp') { setTemplateLead(lead); return }
     setComposeChannel(channel)
     setComposeLead(lead)
     openLead(lead.id)
@@ -197,8 +200,8 @@ export default function Dashboard() {
           <p className="text-[11.5px] text-slate-500 mb-3">Highest-intent leads that need attention</p>
           <div className="space-y-2">
             {hot.map(l => (
-              <div key={l.id} className="group relative">
-                <button className="w-full text-left card card-hover !rounded-xl p-3 flex items-center gap-3" onClick={() => openLead(l.id)}>
+              <div key={l.id} className="group card card-hover !rounded-xl p-3 space-y-2">
+                <button className="w-full text-left flex items-center gap-3" onClick={() => openLead(l.id)}>
                   <Avatar name={l.fullName} color={l.associateColor} size={34} />
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
@@ -209,12 +212,12 @@ export default function Dashboard() {
                   </div>
                   <ScorePill score={l.ai.score} />
                 </button>
-                <div className="absolute inset-y-0 right-2 hidden group-hover:flex items-center gap-1 pl-2 bg-gradient-to-l from-[var(--card-bg,#0f1220)] via-[var(--card-bg,#0f1220)] to-transparent">
+                <div className="hidden group-hover:flex items-center gap-1.5 pt-2 border-t border-white/8">
                   {QUICK_ACTIONS.map(qa => (
                     <button key={qa.channel} title={qa.label}
-                      className="w-7 h-7 rounded-lg flex items-center justify-center border border-white/10 bg-white/5 hover:bg-white/10 transition-colors"
+                      className="flex-1 h-7 rounded-lg flex items-center justify-center gap-1.5 border border-white/10 bg-white/5 hover:bg-white/10 transition-colors text-[10.5px] text-slate-300"
                       onClick={(e) => quickContact(e, l, qa.channel)}>
-                      <qa.icon size={13} style={{ color: qa.color }} />
+                      <qa.icon size={13} style={{ color: qa.color }} /> {qa.label}
                     </button>
                   ))}
                 </div>
@@ -347,6 +350,7 @@ export default function Dashboard() {
       <AssociateCompareModal open={compareOpen} onClose={() => setCompareOpen(false)} />
       <PerformanceModal open={perfOpen} onClose={() => setPerfOpen(false)} range={perfRange} />
       <ComposeModal open={!!composeLead} onClose={() => setComposeLead(null)} lead={composeLead} defaultChannel={composeChannel} />
+      <RespondioTemplateModal open={!!templateLead} onClose={() => setTemplateLead(null)} lead={templateLead} />
     </div>
   )
 }
