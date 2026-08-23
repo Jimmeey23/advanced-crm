@@ -32,6 +32,11 @@ export function isConfigured(db) {
   return Boolean(c.clientId && c.clientSecret && c.username && c.password)
 }
 
+export function isValidMemberId(memberId) {
+  const id = String(memberId || '').trim()
+  return Boolean(id && !['-', 'null', 'undefined', 'nan'].includes(id.toLowerCase()))
+}
+
 export function getCachedToken(db) {
   const c = momenceConfig(db)
   if (c.token && c.token.expiresAt && new Date(c.token.expiresAt).getTime() > Date.now() + 300000) {
@@ -138,7 +143,7 @@ export async function getMember(db, memberId) {
 }
 
 export async function getMemberSessions(db, memberId) {
-  return paginate(db, `/api/v2/host/members/${memberId}/sessions`, { extra: { includeCancelled: true } })
+  return safePaginate(db, `/api/v2/host/members/${memberId}/sessions`, { extra: { includeCancelled: true } }, [])
 }
 
 export async function getMemberMemberships(db, memberId) {
@@ -150,7 +155,7 @@ export async function getMemberNotes(db, memberId) {
 }
 
 export async function getMemberAppointments(db, memberId) {
-  return paginate(db, `/api/v2/host/members/${memberId}/appointments`, { extra: { includeCancelled: true } })
+  return safePaginate(db, `/api/v2/host/members/${memberId}/appointments`, { extra: { includeCancelled: true } }, [])
 }
 
 export async function getSales(db, { memberId } = {}) {
@@ -202,7 +207,8 @@ export function mapClassHistory(sessions) {
       startsAt: s.session?.startsAt,
       endsAt: s.session?.endsAt,
       teacher: s.session?.teacher ? `${s.session.teacher.firstName || ''} ${s.session.teacher.lastName || ''}`.trim() : null,
-      location: s.session?.inPersonLocation?.name || null,
+      locationName: s.session?.inPersonLocation?.name || s.session?.location?.name || null,
+      roomName: s.session?.room?.name || s.session?.space?.name || null,
       checkedIn: s.checkedIn,
       cancelledAt: s.cancelledAt
     }))
@@ -244,7 +250,8 @@ export function mapMemberships(memberships) {
     usedSessions: m.usedSessions,
     combinedUsage: m.combinedUsage,
     combinedUsageLimit: m.combinedUsageLimit,
-    autoRenewing: m.membership?.autoRenewing ?? null
+    autoRenewing: m.membership?.autoRenewing ?? null,
+    locationName: m.location?.name || m.membership?.location?.name || null
   }))
 }
 
@@ -264,14 +271,14 @@ export function mapAppointments(appointments) {
 
 export async function buildProfile(db, memberId) {
   const safeMemberId = String(memberId || '').trim()
-  if (!safeMemberId || safeMemberId === '-' || safeMemberId === 'undefined' || safeMemberId === 'null') {
+  if (!isValidMemberId(safeMemberId)) {
     throw new Error('Momence member ID is missing or invalid.')
   }
-  const [member, sessions, memberships, notes, appointments] = await Promise.all([
-    getMember(db, safeMemberId),
-    getMemberSessions(db, safeMemberId),
-    getMemberMemberships(db, safeMemberId),
-    getMemberNotes(db, safeMemberId),
+  const member = await getMember(db, safeMemberId)
+  const [sessions, memberships, notes, appointments] = await Promise.all([
+    getMemberSessions(db, safeMemberId).catch(() => []),
+    getMemberMemberships(db, safeMemberId).catch(() => []),
+    getMemberNotes(db, safeMemberId).catch(() => []),
     getMemberAppointments(db, safeMemberId).catch(() => [])
   ])
   let salesHistory = []
@@ -286,6 +293,7 @@ export async function buildProfile(db, memberId) {
   } catch (e) {
     salesHistory = []
   }
+  const customFields = member.customFields || member.customFieldValues || {}
   const profile = {
     member: {
       id: member.id,
@@ -296,20 +304,35 @@ export async function buildProfile(db, memberId) {
       firstSeen: member.firstSeen,
       lastSeen: member.lastSeen,
       visits: member.visits,
+      homeLocationName: member.homeLocation?.name || member.homeLocationName || member.location?.name || null,
+      customFields,
       tags: (member.customerTags || []).map(t => t.name)
     },
+    customFields,
     memberships: mapMemberships(memberships),
     classHistory: mapClassHistory(sessions),
     appointments: mapAppointments(appointments),
     salesHistory,
-    notes: (notes || []).slice(0, 10),
+    notes: mapNotes(notes).slice(0, 20),
     syncedAt: nowIso()
   }
   return profile
 }
 
+function mapNotes(notes) {
+  return (notes || [])
+    .map(n => ({
+      id: n.id,
+      note: n.note || n.text || n.content || n.body || '',
+      createdAt: n.createdAt || n.created_at || n.updatedAt,
+      author: n.author ? `${n.author.firstName || ''} ${n.author.lastName || ''}`.trim() : (n.createdBy || n.staffName || null)
+    }))
+    .filter(n => n.note || n.createdAt)
+    .sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0))
+}
+
 export async function syncLeadMomence(db, lead) {
-  if (!String(lead?.memberId || '').trim() || ['-','null','undefined'].includes(String(lead.memberId).trim())) {
+  if (!isValidMemberId(lead?.memberId)) {
     throw new Error('Lead is not linked to a valid Momence member yet.')
   }
   const profile = await buildProfile(db, lead.memberId)
@@ -323,7 +346,8 @@ export async function syncLeadMomence(db, lead) {
 // so future syncs skip the lookup. Throws with a message safe to surface
 // to the UI ('no-match' / 'ambiguous') when the caller needs to branch.
 export async function resolveLeadMember(db, lead) {
-  if (lead.memberId) return { memberId: lead.memberId, candidates: null }
+  if (isValidMemberId(lead.memberId)) return { memberId: String(lead.memberId).trim(), candidates: null }
+  if (lead.memberId) lead.memberId = ''
 
   const candidates = await findMemberCandidates(db, { email: lead.email, phone: lead.phone })
   if (candidates.length === 1) {

@@ -13,6 +13,8 @@ if (typeof globalThis.WebSocket === 'undefined') globalThis.WebSocket = WebSocke
 const LEADS_TABLE = 'leads'
 const META_TABLE = 'app_state'
 const META_KEY = 'app'
+const DELETE_BATCH_SIZE = 50
+const UPSERT_BATCH_SIZE = 500
 
 let client = null
 
@@ -74,9 +76,20 @@ export async function persistState(state, dirtyLeadIds = [], deletedLeadIds = []
   const c = getClient()
   if (!c) return
 
-  if (deletedLeadIds.length) {
-    const { error } = await c.from(LEADS_TABLE).delete().in('id', deletedLeadIds)
-    if (error) throw new Error(`supabase delete leads: ${error.message}`)
+  const idsToDelete = uniqueIds(deletedLeadIds)
+  for (let i = 0; i < idsToDelete.length; i += DELETE_BATCH_SIZE) {
+    const batch = idsToDelete.slice(i, i + DELETE_BATCH_SIZE)
+    const { error } = await c.from(LEADS_TABLE).delete().in('id', batch)
+    if (error) {
+      // PostgREST encodes `in.(...)` into the URL. If an old local queue is
+      // large or contains an awkward imported id, Supabase can reject the path
+      // before the request reaches the table. Retrying one id at a time keeps
+      // the sync moving and preserves the exact failing id in the error.
+      for (const id of batch) {
+        const single = await c.from(LEADS_TABLE).delete().eq('id', id)
+        if (single.error) throw new Error(`supabase delete lead ${id}: ${single.error.message}`)
+      }
+    }
   }
 
   const meta = {
@@ -97,7 +110,7 @@ export async function persistState(state, dirtyLeadIds = [], deletedLeadIds = []
   const { error: metaErr } = await c.from(META_TABLE).upsert({ key: META_KEY, data: meta, updated_at: new Date().toISOString() })
   if (metaErr) throw new Error(`supabase persist meta: ${metaErr.message}`)
 
-  const ids = dirtyLeadIds || []
+  const ids = uniqueIds(dirtyLeadIds)
   if (ids.length) {
     const now = new Date().toISOString()
     const rows = []
@@ -105,12 +118,16 @@ export async function persistState(state, dirtyLeadIds = [], deletedLeadIds = []
       const lead = state.leads.find(l => l.id === id)
       if (lead) rows.push({ id: lead.id, data: lead, updated_at: now })
     }
-    for (let i = 0; i < rows.length; i += 500) {
-      const batch = rows.slice(i, i + 500)
+    for (let i = 0; i < rows.length; i += UPSERT_BATCH_SIZE) {
+      const batch = rows.slice(i, i + UPSERT_BATCH_SIZE)
       const { error } = await c.from(LEADS_TABLE).upsert(batch)
       if (error) throw new Error(`supabase persist leads: ${error.message}`)
     }
   }
+}
+
+function uniqueIds(ids) {
+  return [...new Set((ids || []).map(id => String(id || '').trim()).filter(Boolean))]
 }
 
 // Subscribes to Postgres changes on both tables and calls `onChange` (debounced)

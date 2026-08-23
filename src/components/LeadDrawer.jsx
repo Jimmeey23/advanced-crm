@@ -23,6 +23,7 @@ export default function LeadDrawer() {
   const [remarkDraft, setRemarkDraft] = useState('')
   const [composeOpen, setComposeOpen] = useState(false)
   const [enriching, setEnriching] = useState(false)
+  const [autoSyncLeadId, setAutoSyncLeadId] = useState('')
   const commentsRef = React.useRef(null)
 
   const fillSuggestion = (s) => {
@@ -42,7 +43,7 @@ export default function LeadDrawer() {
   )
 
   useEffect(() => { if (lead) setRemarkDraft(lead.remarks || '') }, [lead?.id])
-  useEffect(() => { setSyncError(''); setCandidates(null); setManualLink(false); setManualMemberId('') }, [drawerLeadId])
+  useEffect(() => { setSyncError(''); setCandidates(null); setManualLink(false); setManualMemberId(''); setAutoSyncLeadId('') }, [drawerLeadId])
 
   const doEnrich = async () => {
     setEnriching(true)
@@ -112,7 +113,7 @@ export default function LeadDrawer() {
       if (e.status === 300 && e.data?.candidates) {
         setCandidates(e.data.candidates)
       } else {
-        setSyncError(e.message); toast(e.message, 'error')
+        setSyncError(humanMomenceError(e.message)); toast(humanMomenceError(e.message), 'error')
       }
     }
     finally { setSyncing(false) }
@@ -125,9 +126,17 @@ export default function LeadDrawer() {
       toast('Momence profile linked and synced')
       setCandidates(null); setManualLink(false); setManualMemberId('')
       refreshData(); reload()
-    } catch (e) { setSyncError(e.message); toast(e.message, 'error') }
+    } catch (e) { const msg = humanMomenceError(e.message); setSyncError(msg); toast(msg, 'error') }
     finally { setSyncing(false) }
   }
+
+  useEffect(() => {
+    if (!lead || !boot?.settings?.momence?.configured || lead.momence || syncing || candidates || autoSyncLeadId === lead.id) return
+    if (!lead.email && !lead.phone && !lead.memberId) return
+    setAutoSyncLeadId(lead.id)
+    doSync()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lead?.id, lead?.momence, boot?.settings?.momence?.configured])
 
   const m = lead.momence
   const classesAttended = m?.classHistory?.filter(c => c.checkedIn).length || 0
@@ -347,6 +356,11 @@ export default function LeadDrawer() {
               <div>
                 {!candidates ? (
                   <div>
+                    {syncing && (
+                      <div className="rounded-xl bg-emerald-500/10 border border-emerald-400/20 px-3 py-2 mb-2 text-[12px] text-emerald-300 flex items-center gap-2">
+                        <Spinner size={13} /> Enriching this profile from Momence…
+                      </div>
+                    )}
                     <div className="flex items-center gap-2 mb-2">
                       <button className="btn btn-soft !py-2 flex-1" onClick={doSync} disabled={syncing}>
                         {syncing ? <Spinner size={14} /> : <RefreshCw size={14} />} Find &amp; sync from Momence
@@ -548,6 +562,16 @@ function Row({ icon, title, sub, right, meta }) {
 
 function EmptyNote({ text }) {
   return <p className="text-[12px] text-slate-500 py-2">{text}</p>
+}
+
+function humanMomenceError(message) {
+  const text = String(message || '')
+  if (/member ID is missing|not linked to a valid|members\/-/i.test(text)) return 'This lead is not linked to a valid Momence member yet. Use Find & sync or link the member ID manually.'
+  if (/No Momence member found/i.test(text)) return text
+  if (/Multiple Momence members/i.test(text)) return text
+  if (/Momence API 404/i.test(text)) return 'Momence could not find that member record for this host. Relink the member or sync by email/phone.'
+  if (/Momence is not configured/i.test(text)) return 'Momence is not configured. Add credentials in Settings first.'
+  return text || 'Momence sync failed. Please try again.'
 }
 
 function Tabbed({ tabs, children }) {

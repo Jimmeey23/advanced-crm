@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react'
+import React, { useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Settings2, Eye, EyeOff, ArrowUp, ArrowDown, Plus, Trash2, X, Sigma, Link2 } from 'lucide-react'
 
@@ -33,24 +33,6 @@ const newId = () => `col_${Date.now().toString(36)}_${(uidSeq++).toString(36)}`
 export default function ColumnManager({ columns, setColumns }) {
   const [open, setOpen] = useState(false)
   const [adding, setAdding] = useState(null) // 'formula' | 'lookup' | null
-  const [position, setPosition] = useState({ top: 90, left: 24, width: 380 })
-  const triggerRef = useRef(null)
-
-  const toggleOpen = () => {
-    if (open) {
-      setOpen(false)
-      return
-    }
-    const rect = triggerRef.current?.getBoundingClientRect()
-    if (rect) {
-      const width = Math.min(380, window.innerWidth - 24)
-      const panelHeight = Math.min(488, window.innerHeight - 24)
-      const top = Math.max(12, Math.min(rect.bottom + 8, window.innerHeight - panelHeight - 12))
-      const left = Math.max(12, Math.min(rect.right - width, window.innerWidth - width - 12))
-      setPosition({ top, left, width })
-    }
-    setOpen(true)
-  }
 
   const move = (idx, dir) => setColumns(cols => {
     const next = [...cols]
@@ -74,24 +56,27 @@ export default function ColumnManager({ columns, setColumns }) {
 
   return (
     <div className="relative inline-block">
-      <button ref={triggerRef} className={`btn ${open ? 'btn-soft' : 'btn-ghost'} !py-2`} onClick={toggleOpen} aria-expanded={open} aria-haspopup="dialog">
+      <button className={`btn ${open ? 'btn-soft' : 'btn-ghost'} !py-2`} onClick={() => setOpen(true)} aria-expanded={open} aria-haspopup="dialog">
         <Settings2 size={14} /> Columns
       </button>
       {open && createPortal(
-        <>
-          <div className="fixed inset-0 z-[95]" onClick={() => setOpen(false)} />
-          <div className="fixed card z-[96] shadow-2xl overflow-hidden" role="dialog" aria-label="Manage table columns" style={{ ...position, maxHeight: 'calc(100vh - 24px)', background: 'var(--tt-bg)', animation: 'fadeIn .12s ease' }}>
-            <div className="flex items-center justify-between px-4 py-3 border-b border-white/8">
-              <div className="font-display font-semibold text-white text-[13.5px]">Manage columns</div>
-              <button className="btn btn-ghost !p-1.5" onClick={() => setOpen(false)}><X size={14} /></button>
+        <div className="fixed inset-0 z-[95] flex items-center justify-center p-4" role="dialog" aria-label="Manage table columns">
+          <div className="absolute inset-0 modal-backdrop" onClick={() => setOpen(false)} />
+          <div className="relative card modal-panel column-manager-modal w-full max-w-[520px] shadow-2xl overflow-hidden" style={{ animation: 'fadeIn .12s ease' }}>
+            <div className="modal-header flex items-start justify-between px-5 pt-5 pb-3 !mb-0">
+              <div>
+                <div className="font-display font-semibold text-white text-[15px]">Manage columns</div>
+                <p className="text-[11.5px] text-slate-500 mt-0.5">Show, hide, reorder, format, and add lead table columns.</p>
+              </div>
+              <button className="btn btn-ghost modal-close !p-1.5" onClick={() => setOpen(false)}><X size={14} /></button>
             </div>
-            <div className="max-h-[380px] overflow-y-auto scrollbar-thin p-2 space-y-1">
+            <div className="max-h-[48vh] overflow-y-auto scrollbar-thin p-3 space-y-1.5">
               {columns.map((c, idx) => (
                 <ColumnRow key={c.id} col={c} idx={idx} last={idx === columns.length - 1}
                   move={move} toggleHidden={toggleHidden} removeCol={removeCol} patchCol={patchCol} />
               ))}
             </div>
-            <div className="p-3 border-t border-white/8 space-y-2">
+            <div className="p-4 border-t border-white/8 space-y-2 bg-white/[0.02]">
               {!adding && (
                 <div className="flex gap-2">
                   <button className="btn btn-ghost flex-1 !py-1.5 !text-[12px]" onClick={() => setAdding('formula')}><Sigma size={13} /> Formula column</button>
@@ -102,7 +87,7 @@ export default function ColumnManager({ columns, setColumns }) {
               {adding === 'lookup' && <LookupForm onAdd={addLookup} onCancel={() => setAdding(null)} />}
             </div>
           </div>
-        </>,
+        </div>,
         document.body
       )}
     </div>
