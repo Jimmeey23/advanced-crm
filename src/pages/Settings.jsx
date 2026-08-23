@@ -865,7 +865,9 @@ export default function SettingsPage() {
                   </div>
                   {sheetsSyncResult && (
                     sheetsSyncResult.ok
-                      ? <p className="mt-3 text-[12.5px] text-emerald-400">✓ {sheetsSyncResult.created} created · {sheetsSyncResult.duplicates} duplicate · {sheetsSyncResult.skipped} skipped</p>
+                      ? <p className="mt-3 text-[12.5px] text-emerald-400">✓ {sheetsSyncResult.created} created · {sheetsSyncResult.duplicates} duplicate · {sheetsSyncResult.skipped} skipped
+                          {sheetsSyncResult.skipped > 0 && <span className="text-slate-500"> ({sheetsSyncResult.alreadyImported || 0} already imported, {sheetsSyncResult.blankRows || 0} blank, {sheetsSyncResult.missingFields || 0} missing name/contact)</span>}
+                        </p>
                       : <p className="mt-3 text-[12.5px] text-rose-400">✕ {sheetsSyncResult.error}</p>
                   )}
                   {sheetsConfig?.lastSyncAt && (

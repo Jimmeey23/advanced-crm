@@ -219,23 +219,29 @@ export async function runSync(db, { createLeadFrom, findDuplicateLead, assignLea
   if (needsStatusHeader) statusColIndex = header.length
 
   let created = 0, duplicates = 0, skipped = 0
+  let alreadyImported = 0, blankRows = 0, missingFields = 0
   const toMarkImported = []
 
   for (let i = 0; i < rows.length; i++) {
     const row = rows[i]
     const sheetRowNumber = i + 2 // +1 for 0-index, +1 for header row
     const existingStatus = statusColIndex < row.length ? String(row[statusColIndex] || '').trim() : ''
-    if (existingStatus) { skipped++; continue }
+    // Only treat OUR OWN marker as "already imported" — a "Sync Status"
+    // column that pre-existed in the sheet (common: this app didn't create
+    // it) can already be full of unrelated values, and skipping every row
+    // that merely has *something* in that column was skipping the entire
+    // sheet on the very first sync.
+    if (existingStatus.startsWith(IMPORTED_MARK)) { alreadyImported++; skipped++; continue }
 
     const record = {}
     header.forEach((h, idx) => { if (h) record[String(h).trim()] = row[idx] })
-    if (!Object.values(record).some(v => String(v || '').trim())) { skipped++; continue }
+    if (!Object.values(record).some(v => String(v || '').trim())) { blankRows++; skipped++; continue }
 
     const resolved = resolveLeadFields(record, c)
     const name = resolved.fullName ? String(resolved.fullName).trim() : ''
     const email = resolved.email ? String(resolved.email).trim() : ''
     const phone = resolved.phone ? String(resolved.phone).trim() : ''
-    if (!name || (!email && !phone)) { skipped++; continue }
+    if (!name || (!email && !phone)) { missingFields++; skipped++; continue }
 
     const dup = findDuplicateLead(email, phone)
     if (dup) { duplicates++; toMarkImported.push({ sheetRowNumber }); continue }
@@ -258,9 +264,9 @@ export async function runSync(db, { createLeadFrom, findDuplicateLead, assignLea
   }
   await writeStatusColumn(db, statusColIndex, toMarkImported)
 
-  const counts = { created, duplicates, skipped }
+  const counts = { created, duplicates, skipped, alreadyImported, blankRows, missingFields }
   db.settings.googleSheets.lastSyncAt = nowIso()
   db.settings.googleSheets.lastSyncCounts = counts
-  logSync('synced', `${created} created, ${duplicates} duplicate, ${skipped} skipped`)
+  logSync('synced', `${created} created, ${duplicates} duplicate, ${skipped} skipped (${alreadyImported} already imported, ${blankRows} blank, ${missingFields} missing name/contact)`)
   return counts
 }
