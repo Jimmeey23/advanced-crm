@@ -66,6 +66,18 @@ export function suggestMappingFromKeys(keys) {
   return suggestions
 }
 
+// A non-empty value isn't the same as a usable one — "N/A", a stray note, or
+// a malformed address/number should never create a lead nobody can actually
+// contact. Used at import time (webhooks, Google Sheets) to reject rows with
+// neither, rather than silently creating unreachable leads.
+export function isValidEmail(v) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(v || '').trim())
+}
+export function isValidPhone(v) {
+  const digits = String(v || '').replace(/\D/g, '')
+  return digits.length >= 7 && digits.length <= 15
+}
+
 function findByAlias(record, field) {
   const aliases = NORMALIZED_ALIASES[field]
   for (const key of Object.keys(record)) {
@@ -113,14 +125,36 @@ export function resolveLeadFields(record, integ) {
 // field, so it can't go through the alias dictionary above (that's one
 // column -> one field). Pulled straight off the raw record by column-name
 // pattern instead, grouped by their shared index, in index order.
-function extractFollowUps(record) {
+const FOLLOWUP_DATE_PATTERNS = [
+  /^followup(\d+)date$/,        // "Follow Up 1 Date"
+  /^(\d+)followupdate$/,        // "1 Follow Up Date"
+  /^fu(\d+)date$/,               // "FU1 Date"
+  /^followupdate(\d+)$/          // "Follow Up Date 1"
+]
+const FOLLOWUP_COMMENT_PATTERNS = [
+  /^followupcomments?(\d+)$/,    // "Follow Up Comments (1)"
+  /^(\d+)followupcomments?$/,    // "1 Follow Up Comments"
+  /^fu(\d+)comments?$/,          // "FU1 Comments"
+  /^followupcomments?note(s?)(\d+)$/, // fallback, rarely hit
+  /^followupnotes?(\d+)$/        // "Follow Up Notes (1)"
+]
+
+function matchFirst(patterns, norm) {
+  for (const re of patterns) {
+    const m = norm.match(re)
+    if (m) return m[m.length - 1]
+  }
+  return null
+}
+
+export function extractFollowUps(record) {
   const byIndex = {}
   for (const [key, value] of Object.entries(record || {})) {
     const norm = normalizeKey(key)
-    let m = norm.match(/^followup(\d+)date$/)
-    if (m) { (byIndex[m[1]] ||= {}).date = value; continue }
-    m = norm.match(/^followupcomments?(\d+)$/)
-    if (m) { (byIndex[m[1]] ||= {}).comments = value; continue }
+    const dateIdx = matchFirst(FOLLOWUP_DATE_PATTERNS, norm)
+    if (dateIdx) { (byIndex[dateIdx] ||= {}).date = value; continue }
+    const commentIdx = matchFirst(FOLLOWUP_COMMENT_PATTERNS, norm)
+    if (commentIdx) { (byIndex[commentIdx] ||= {}).comments = value; continue }
   }
   return Object.keys(byIndex)
     .sort((a, b) => Number(a) - Number(b))

@@ -4,7 +4,7 @@
 // login system, so there is no per-user identity to attach an OAuth grant
 // to — same model as every other integration here).
 import { nowIso } from './db.js'
-import { resolveLeadFields, buildLeadPayloadFromResolved } from './leadFieldMapping.js'
+import { resolveLeadFields, buildLeadPayloadFromResolved, isValidEmail, isValidPhone } from './leadFieldMapping.js'
 
 const OAUTH_BASE = 'https://accounts.google.com/o/oauth2/v2/auth'
 const TOKEN_URL = 'https://oauth2.googleapis.com/token'
@@ -245,7 +245,10 @@ export async function runSync(db, { createLeadFrom, findDuplicateLead, assignLea
     const name = resolved.fullName ? String(resolved.fullName).trim() : ''
     const email = resolved.email ? String(resolved.email).trim() : ''
     const phone = resolved.phone ? String(resolved.phone).trim() : ''
-    if (!name || (!email && !phone)) { missingFields++; skipped++; continue }
+    // A non-empty email/phone cell isn't necessarily usable — "N/A", a typo,
+    // a stray note — so this checks actual format validity, not just
+    // presence, and rejects the row rather than creating an unreachable lead.
+    if (!name || (!isValidEmail(email) && !isValidPhone(phone))) { missingFields++; skipped++; continue }
 
     const dup = findDuplicateLead(email, phone)
     if (dup) { duplicates++; toMarkImported.push({ sheetRowNumber }); continue }

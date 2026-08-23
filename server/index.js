@@ -14,7 +14,7 @@ import * as mailer from './mailer.js'
 import * as supabase from './supabaseStore.js'
 import { runReminderDigest, startReminderScheduler } from './reminders.js'
 import { parseCsv, autoMap, normalizeStage, normalizeStatus, parseFlexibleDate } from './csv.js'
-import { resolveLeadFields, buildLeadPayloadFromResolved, suggestMappingFromKeys } from './leadFieldMapping.js'
+import { resolveLeadFields, buildLeadPayloadFromResolved, suggestMappingFromKeys, isValidEmail, isValidPhone } from './leadFieldMapping.js'
 import * as googleSheets from './googleSheets.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -639,7 +639,7 @@ app.post('/api/webhooks/:id/test', (req, res) => {
   const resolved = resolveWebhookLeadFields(payload, w)
   const missing = []
   if (!resolved.fullName) missing.push('name')
-  if (!resolved.email && !resolved.phone) missing.push('email or phone')
+  if (!isValidEmail(resolved.email) && !isValidPhone(resolved.phone)) missing.push('a valid email or phone number')
   const preview = missing.length ? null : buildWebhookLeadPayload(resolved, w, payload)
   res.json({ resolved, preview, missing })
 })
@@ -719,7 +719,10 @@ app.all('/api/webhooks/leads/:key', (req, res) => {
 
   const missing = []
   if (!name) missing.push('name')
-  if (!email && !phone) missing.push('email or phone')
+  // A non-empty email/phone isn't necessarily a usable one — reject "N/A",
+  // stray notes, or malformed values rather than creating an unreachable
+  // lead nobody can actually contact.
+  if (!isValidEmail(email) && !isValidPhone(phone)) missing.push('a valid email or phone number')
   if (missing.length) {
     logWebhookCall(integ.id, 'validation_failed', `Missing: ${missing.join(', ')}`)
     return res.status(400).json({ error: `Missing required field(s): ${missing.join(', ')}` })
