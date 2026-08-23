@@ -563,7 +563,7 @@ function TableGrid({ items, boot, lookup, openLead, changeStage, toggleManualFla
             <SortHead label="Created" field="createdAt" className="px-4 py-3 font-semibold w-[190px]" sortBy={sortBy} sortDir={sortDir} setSortBy={setSortBy} setSortDir={setSortDir} />
             {visibleCols.map(c => <SortHead key={c.id} label={c.label} field={c.field || c.id} className="px-4 py-3 font-semibold" sortBy={sortBy} sortDir={sortDir} setSortBy={setSortBy} setSortDir={setSortDir} />)}
             <th className="px-4 py-3 font-semibold min-w-[190px]">Next follow-up</th>
-            {Object.entries(CHANNELS).map(([ch, c]) => <th key={ch} className="px-2 py-3 font-semibold text-center min-w-[48px]" title={`${c.label} follow-up status`}>{c.label}</th>)}
+            {Object.entries(CHANNELS).map(([ch, c], i) => <th key={ch} className="px-2 py-3 font-semibold text-center min-w-[48px]" title={`${c.label} follow-up status`}>FU{i + 1}</th>)}
             <th className="px-4 py-3 font-semibold text-right">Message</th>
           </tr>
         </thead>
@@ -585,17 +585,14 @@ function TableGrid({ items, boot, lookup, openLead, changeStage, toggleManualFla
                   </div>
                 </td>
                 <td className={`px-4 ${py} w-[260px] ${pinnedCols.includes('lead') ? 'sticky left-[76px] z-20 table-sticky-surface' : ''}`}>
-                  <div className="flex items-center gap-2.5">
-                    <Avatar name={l.fullName} color={owner?.color} size={density === 'compact' ? 24 : 34} />
-                    <div className="min-w-0">
-                      <div className="text-[13px] font-semibold text-white truncate max-w-[160px] flex items-center gap-1.5">
-                        {l.fullName}
-                        {[...(l.manualFlags || []), ...(l.flags || [])].map(f => (
-                          <span key={f.id} title={f.name} className="chip !px-1.5 !py-0 text-[9px]" style={{ background: `${f.color}22`, color: f.color, border: `1px solid ${f.color}44` }}>{f.label}</span>
-                        ))}
-                      </div>
-                      {density !== 'compact' && <div className="text-[11px] text-slate-500 truncate max-w-[160px]">{l.email}</div>}
+                  <div className="min-w-0">
+                    <div className="text-[13px] font-semibold text-white truncate max-w-[220px] flex items-center gap-1.5">
+                      {l.fullName}
+                      {[...(l.manualFlags || []), ...(l.flags || [])].map(f => (
+                        <span key={f.id} title={f.name} className="chip !px-1.5 !py-0 text-[9px]" style={{ background: `${f.color}22`, color: f.color, border: `1px solid ${f.color}44` }}>{f.label}</span>
+                      ))}
                     </div>
+                    {density !== 'compact' && <div className="text-[11px] text-slate-500 truncate max-w-[220px]">{l.email}</div>}
                   </div>
                 </td>
                 <td className={`px-4 ${py} min-w-[190px] ${pinnedCols.includes('stage') ? 'sticky left-[336px] z-20 table-sticky-surface' : ''}`}>
@@ -741,7 +738,9 @@ function FuCell({ lead, ch }) {
           className={`inline-flex w-6 h-6 rounded-lg items-center justify-center border transition-colors cursor-pointer hover:brightness-125 ${boxClass}`}
           title={title}
         >
-          <Icon size={12} style={{ color: iconColor }} />
+          {!filled && !hasOverduePending
+            ? <span className="text-[11px] grayscale opacity-40">🚫</span>
+            : <Icon size={12} style={{ color: iconColor }} />}
         </span>
       </Tip>
       {popOpen && pos && createPortal(

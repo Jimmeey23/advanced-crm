@@ -1078,7 +1078,7 @@ app.get('/api/analytics/team', (req, res) => {
     const won = owned.filter(l => l.status === 'won')
     const revenue = won.reduce((s, l) => s + (l.valueEstimate || 0), 0)
     return {
-      associateId: a.id, name: a.name, locationId: a.locationId,
+      associateId: a.id, name: a.name, locationId: a.locationId, color: a.color, photoUrl: a.photoUrl,
       open: owned.filter(l => l.status === 'open').length,
       won: won.length,
       revenue,
@@ -2174,7 +2174,7 @@ app.get('/api/analytics/associate/:id/scorecard', (req, res) => {
 
   res.json({
     associate: {
-      id: associate.id, name: associate.name, color: associate.color,
+      id: associate.id, name: associate.name, color: associate.color, photoUrl: associate.photoUrl,
       locationId: associate.locationId, locationName: loc?.name || '',
       active: associate.active !== false, targetMonthly: target
     },
@@ -2532,6 +2532,27 @@ const PORT = process.env.PORT || 3001
 
 // One-time backfill: older CSV imports created follow-ups without an id,
 // channel or done flag, which silently breaks the per-channel outreach
+// One-time: point specific named associates at their real headshot instead
+// of initials, once the corresponding file exists in public/avatars/ (copied
+// into the build's static root by Vite) — see that folder for the exact
+// filenames expected. Only sets photoUrl if not already set, so it never
+// overwrites a photo someone picked via Settings.
+const ASSOCIATE_PHOTOS = {
+  'nadiya shaikh': '/avatars/nadiya-shaikh.jpg',
+  'shipra bhika': '/avatars/shipra-bhika.jpg',
+  'imran shaikh': '/avatars/imran-shaikh.jpg',
+  'deesha changwani': '/avatars/deesha-changwani.jpg'
+}
+function backfillAssociatePhotos(db) {
+  let changed = false
+  for (const a of db.associates) {
+    if (a.photoUrl) continue
+    const photo = ASSOCIATE_PHOTOS[String(a.name || '').trim().toLowerCase()]
+    if (photo) { a.photoUrl = photo; changed = true }
+  }
+  if (changed) save()
+}
+
 // columns (they only match followUps with a recognized `channel`) and the
 // timeline's done/overdue badges (`!f.done` treats undefined as pending).
 function backfillFollowUps(db) {
@@ -2562,6 +2583,7 @@ async function start() {
   if (!Array.isArray(db.webhookIntegrations)) db.webhookIntegrations = []
   if (!Array.isArray(db.webhookLogs)) db.webhookLogs = []
   backfillFollowUps(db)
+  backfillAssociatePhotos(db)
   startReminderScheduler(db)
   app.listen(PORT, () => {
     console.log(`[physique57-leads] server listening on http://localhost:${PORT}`)

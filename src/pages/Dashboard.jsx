@@ -335,7 +335,7 @@ export default function Dashboard() {
           {(team || []).map((t, i) => (
             <button key={t.associateId} className="card card-hover !rounded-xl p-3.5 flex items-center gap-3 text-left" onClick={() => setScorecardId(t.associateId)}>
               <span className="font-display text-[13px] font-bold text-slate-600 w-5">{i + 1}</span>
-              <Avatar name={t.name} size={34} />
+              <Avatar name={t.name} color={t.color} photoUrl={t.photoUrl} size={34} />
               <div className="flex-1 min-w-0">
                 <div className="text-[12.5px] font-semibold text-white truncate">{t.name}</div>
                 <div className="text-[11px] text-slate-500 truncate">{boot?.locations.find(l => l.id === t.locationId)?.name?.split(',')[0] || ''}</div>

@@ -12,6 +12,7 @@ export default function Team() {
   const [locModal, setLocModal] = useState(false)
   const [asnModal, setAsnModal] = useState({ open: false, locationId: '' })
   const [faceoffOpen, setFaceoffOpen] = useState(false)
+  const [editAsn, setEditAsn] = useState(null)
   const { data: team } = useFetch(() => api.get('/api/analytics/team'), [dataVersion])
   const { data: leadsResp } = useFetch(() => api.get('/api/leads?pageSize=1000'), [dataVersion])
 
@@ -61,8 +62,8 @@ export default function Team() {
                 {locTeam.map(a => {
                   const stats = team?.find(t => t.associateId === a.id)
                   return (
-                    <div key={a.id} className="flex items-center gap-2.5 rounded-xl bg-white/[0.03] border border-white/6 px-3 py-2">
-                      <Avatar name={a.name} color={a.color} size={26} />
+                    <button key={a.id} type="button" className="w-full text-left flex items-center gap-2.5 rounded-xl bg-white/[0.03] border border-white/6 px-3 py-2 hover:bg-white/[0.06] transition-colors" onClick={() => setEditAsn(a)}>
+                      <Avatar name={a.name} color={a.color} photoUrl={a.photoUrl} size={26} />
                       <div className="flex-1 min-w-0">
                         <div className="text-[12.5px] font-semibold text-slate-200 truncate">{a.name}</div>
                         <div className="text-[10.5px] text-slate-500">{a.role}</div>
@@ -71,7 +72,7 @@ export default function Team() {
                         <div className="text-[11.5px] text-emerald-400 mono">{money(stats?.revenue || 0)}</div>
                         <div className="text-[10px] text-slate-500">{stats?.won || 0} won</div>
                       </div>
-                    </div>
+                    </button>
                   )
                 })}
                 {!locTeam.length && <p className="text-[11.5px] text-slate-600">No associates yet.</p>}
@@ -87,6 +88,7 @@ export default function Team() {
 
       <LocationModal open={locModal} onClose={() => setLocModal(false)} onSaved={() => { refreshData(); toast('Location added') }} />
       <AssociateModal modal={asnModal} onClose={() => setAsnModal(m => ({ ...m, open: false }))} onSaved={() => { refreshData(); toast('Associate added') }} />
+      <EditAssociateModal associate={editAsn} onClose={() => setEditAsn(null)} onSaved={() => { refreshData(); toast('Associate updated') }} />
       <AssociateCompareModal open={faceoffOpen} onClose={() => setFaceoffOpen(false)} />
     </div>
   )
@@ -172,6 +174,47 @@ function AssociateModal({ modal, onClose, onSaved }) {
         <div className="flex justify-end gap-2 pt-1">
           <button type="button" className="btn btn-ghost" onClick={onClose}>Cancel</button>
           <button className="btn btn-primary" disabled={saving}>{saving ? 'Saving…' : 'Add associate'}</button>
+        </div>
+      </form>
+      <style>{`.label{display:block;font-size:11px;font-weight:600;color:#94a3b8;margin-bottom:4px}`}</style>
+    </Modal>
+  )
+}
+
+function EditAssociateModal({ associate, onClose, onSaved }) {
+  const [photoUrl, setPhotoUrl] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [err, setErr] = useState('')
+
+  React.useEffect(() => { if (associate) setPhotoUrl(associate.photoUrl || '') }, [associate])
+
+  if (!associate) return null
+  const submit = async (e) => {
+    e.preventDefault()
+    setSaving(true); setErr('')
+    try {
+      await api.patch(`/api/associates/${associate.id}`, { photoUrl: photoUrl.trim() || null })
+      onSaved()
+      onClose()
+    } catch (x) { setErr(x.message) }
+    finally { setSaving(false) }
+  }
+  return (
+    <Modal open={!!associate} onClose={onClose} width={420}>
+      <ModalHeader title={associate.name} subtitle="Edit thumbnail" onClose={onClose} />
+      <form onSubmit={submit} className="space-y-3">
+        <div className="flex items-center gap-3">
+          <Avatar name={associate.name} color={associate.color} photoUrl={photoUrl} size={48} />
+          <div className="flex-1">
+            <label className="label">Photo URL</label>
+            <input className="input" value={photoUrl} onChange={e => setPhotoUrl(e.target.value)} placeholder="/avatars/name.jpg or https://…" />
+          </div>
+        </div>
+        <p className="text-[11px] text-slate-500">A file under <code>public/avatars/</code> (e.g. <code>/avatars/jane.jpg</code>) or any hosted image URL. Leave blank to use initials.</p>
+        {err && <p className="text-[12px] text-rose-400">{err}</p>}
+        <div className="flex justify-end gap-2 pt-1">
+          <button type="button" className="btn btn-ghost" onClick={onClose}>Cancel</button>
+          <button className="btn btn-primary" disabled={saving}>{saving ? 'Saving…' : 'Save'}</button>
         </div>
       </form>
       <style>{`.label{display:block;font-size:11px;font-weight:600;color:#94a3b8;margin-bottom:4px}`}</style>

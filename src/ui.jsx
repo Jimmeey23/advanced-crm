@@ -1,9 +1,22 @@
-import React, { useEffect } from 'react'
+import React, { useEffect, useState } from 'react'
 import { X } from 'lucide-react'
 import { AVATAR_COLORS, initials } from './lib.js'
 
-export function Avatar({ name, color, size = 30, className = '' }) {
+export function Avatar({ name, color, size = 30, className = '', photoUrl }) {
   const c = color || AVATAR_COLORS[(name || '').length % AVATAR_COLORS.length]
+  const [broken, setBroken] = useState(false)
+  if (photoUrl && !broken) {
+    return (
+      <img
+        src={photoUrl}
+        alt={name}
+        title={name}
+        className={`inline-block rounded-full object-cover shrink-0 ${className}`}
+        style={{ width: size, height: size, border: `1px solid ${c}55` }}
+        onError={() => setBroken(true)}
+      />
+    )
+  }
   return (
     <span
       className={`inline-flex items-center justify-center rounded-full font-bold shrink-0 ${className}`}

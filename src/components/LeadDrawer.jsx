@@ -219,7 +219,7 @@ export default function LeadDrawer() {
 
           <div className="flex items-center gap-3 mt-3 text-[11.5px] text-slate-500">
             <span className="flex items-center gap-1"><MapPin size={11} />{loc?.name || lead.center || '—'}</span>
-            {owner && <span className="flex items-center gap-1"><Avatar name={owner.name} color={owner.color} size={14} /> {owner.name}</span>}
+            {owner && <span className="flex items-center gap-1"><Avatar name={owner.name} color={owner.color} photoUrl={owner.photoUrl} size={14} /> {owner.name}</span>}
             <span className="ml-auto">{lead.memberId ? `Momence #${lead.memberId}` : 'No member link'}</span>
           </div>
 

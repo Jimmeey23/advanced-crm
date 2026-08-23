@@ -560,6 +560,11 @@ html[data-theme="light"] {
 .lead-table-scroll { border-radius: 14px; border: 1px solid var(--tbl-border); }
 .data-table td, .data-table th { border-color: var(--tbl-border); }
 .stage-select { min-width: 170px; text-overflow: ellipsis; }
+/* Stage badge colors are set per-row via inline style (JS-computed hue),
+   tuned for a dark background — against light mode's white surface the same
+   pastel alpha reads as washed-out and low-contrast, so darken/saturate it
+   rather than trying to keep two separate color tables in sync. */
+html[data-theme="light"] .stage-select { filter: brightness(0.72) saturate(1.35) contrast(1.1); }
 .lead-row-flag {
   width: 22px; height: 22px; display: inline-flex; align-items: center; justify-content: center;
   border-radius: 8px; border: 1px solid rgba(255,255,255,.1); color: #64748b; background: rgba(255,255,255,.035);

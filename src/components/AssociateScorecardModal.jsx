@@ -37,7 +37,7 @@ export default function AssociateScorecardModal({ associateId, onClose, openLead
           />
 
           <div className="flex items-center gap-3 mb-4">
-            <Avatar name={data.associate.name} color={data.associate.color} size={44} />
+            <Avatar name={data.associate.name} color={data.associate.color} photoUrl={data.associate.photoUrl} size={44} />
             <div className="flex-1 grid grid-cols-3 gap-2">
               <MiniStat label="This month" value={`${data.thisMonth.won} / ${data.thisMonth.target}`} sub="won vs target" color={attainmentColor(data.thisMonth.attainmentPct)} />
               <MiniStat label="Attainment" value={`${data.thisMonth.attainmentPct}%`} sub={`${data.thisMonth.newLeads} new this month`} color={attainmentColor(data.thisMonth.attainmentPct)} />
