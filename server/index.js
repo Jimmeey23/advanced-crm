@@ -1327,6 +1327,11 @@ function periodBounds(range, offset, now) {
     start = new Date(thisWeekStart.getTime() - offset * 7 * 86400000)
     end = new Date(start.getTime() + 7 * 86400000)
     label = `Week of ${start.toISOString().slice(0, 10)}`
+  } else if (range === 'year') {
+    const y = now.getFullYear() - offset
+    start = new Date(y, 0, 1)
+    end = new Date(y + 1, 0, 1)
+    label = String(y)
   } else {
     const y = now.getFullYear(), m = now.getMonth() - offset
     start = new Date(y, m, 1)
@@ -1334,6 +1339,124 @@ function periodBounds(range, offset, now) {
     label = start.toLocaleString('en-US', { month: 'long', year: 'numeric' })
   }
   return { start, end, label }
+}
+
+// Named period presets for the Associate/Studio overview reports — each
+// maps to a {range, offset} periodBounds() already knows how to bound,
+// except custom which the caller resolves from &from=&to= directly. Default
+// is 'prev_week' per the report spec (previous Monday-to-Sunday week).
+const REPORT_PRESETS = {
+  prev_week: { range: 'week', offset: 1 },
+  this_week: { range: 'week', offset: 0 },
+  this_month: { range: 'month', offset: 0 },
+  last_month: { range: 'month', offset: 1 },
+  this_year: { range: 'year', offset: 0 },
+  last_year: { range: 'year', offset: 1 }
+}
+
+function resolveReportPeriod(req, now) {
+  const fromQ = req.query.from ? new Date(`${req.query.from}T00:00:00`) : null
+  const toQ = req.query.to ? new Date(`${req.query.to}T00:00:00`) : null
+  const customRange = !!(fromQ && toQ && !isNaN(fromQ.getTime()) && !isNaN(toQ.getTime()) && fromQ <= toQ)
+  if (customRange) {
+    const start = fromQ
+    const end = new Date(toQ.getTime() + 86400000)
+    return {
+      range: 'custom', customRange: true, start, end,
+      label: `${start.toISOString().slice(0, 10)} to ${toQ.toISOString().slice(0, 10)}`
+    }
+  }
+  const preset = REPORT_PRESETS[req.query.preset] ? req.query.preset : 'prev_week'
+  const { range, offset } = REPORT_PRESETS[preset]
+  const { start, end, label } = periodBounds(range, offset, now)
+  return { range, customRange: false, start, end, label, preset }
+}
+
+// A period immediately preceding `start`, of the same length — used as one
+// of the two standing comparisons (the other being the same window a year
+// earlier, computed separately since it isn't just "shift back by length").
+function precedingPeriod(start, end) {
+  const days = Math.max(1, Math.round((end - start) / 86400000))
+  return { start: new Date(start.getTime() - days * 86400000), end: start }
+}
+function yearAgoPeriod(start, end) {
+  return {
+    start: new Date(start.getFullYear() - 1, start.getMonth(), start.getDate()),
+    end: new Date(end.getFullYear() - 1, end.getMonth(), end.getDate())
+  }
+}
+
+// Distinct from the generic isTrialStage() below — these split "in a trial
+// stage" into scheduled-but-not-done vs completed, matching real stage names
+// like "Trial Completed - Unresponsive" (still counts as completed) without
+// needing every variant enumerated.
+const isTrialScheduledStage = (s) => /trial.*schedul/i.test(s || '') || /schedul.*trial/i.test(s || '')
+const isTrialCompletedStage = (s) => /trial.*complet/i.test(s || '')
+
+function scopedLeads(scope, entityId) {
+  if (!entityId) return db.leads
+  return scope === 'associate'
+    ? db.leads.filter(l => l.associateId === entityId)
+    : db.leads.filter(l => l.locationId === entityId)
+}
+
+// The core metric set for the Associate/Studio overview reports — leads
+// received, trial funnel split, conversion, and LTV (avg value of a won
+// lead — the same number the sheet-import "LTV" column feeds into
+// valueEstimate), for one [start,end) window scoped to a studio or associate.
+function reportMetrics(scope, entityId, start, end) {
+  const inRange = periodInRangeFn(start, end)
+  const leads = scopedLeads(scope, entityId)
+  const received = leads.filter(l => inRange(l.createdAt))
+  const trialsScheduled = leads.filter(l => isTrialScheduledStage(l.stage) && inRange(l.createdAt))
+  const trialsCompleted = leads.filter(l => isTrialCompletedStage(l.stage) && inRange(l.createdAt))
+  const converted = leads.filter(l => l.status === 'won' && inRange(l.convertedAt))
+  const revenue = converted.reduce((s, l) => s + (l.valueEstimate || 0), 0)
+  let followUps = 0, missed = 0
+  for (const l of leads) {
+    for (const f of l.followUps || []) {
+      if (!inRange(f.date)) continue
+      followUps++
+      if (f.done === false) missed++
+    }
+  }
+  return {
+    leadsReceived: received.length,
+    trialsScheduled: trialsScheduled.length,
+    trialsCompleted: trialsCompleted.length,
+    converted: converted.length,
+    conversionRate: received.length ? Math.round((converted.length / received.length) * 100) : 0,
+    revenue,
+    ltv: converted.length ? Math.round(revenue / converted.length) : 0,
+    followUps, missed,
+    followUpRate: followUps ? Math.round(((followUps - missed) / followUps) * 100) : 0
+  }
+}
+
+// Stage / source breakdowns for the period, each with a totals row baked in
+// (`__isTotal: true`) so the frontend doesn't need to recompute the sums —
+// the same numbers that produced the row totals.
+function reportBreakdown(scope, entityId, start, end, groupField) {
+  const inRange = periodInRangeFn(start, end)
+  const leads = scopedLeads(scope, entityId).filter(l => inRange(l.createdAt))
+  const map = {}
+  for (const l of leads) {
+    const key = (groupField === 'stage' ? l.stage : l.source) || 'Unspecified'
+    const row = map[key] = map[key] || { key, leadsReceived: 0, trialsScheduled: 0, trialsCompleted: 0, converted: 0 }
+    row.leadsReceived++
+    if (isTrialScheduledStage(l.stage)) row.trialsScheduled++
+    if (isTrialCompletedStage(l.stage)) row.trialsCompleted++
+    if (l.status === 'won') row.converted++
+  }
+  const rows = Object.values(map)
+    .map(r => ({ ...r, conversionRate: r.leadsReceived ? Math.round((r.converted / r.leadsReceived) * 100) : 0 }))
+    .sort((a, b) => b.leadsReceived - a.leadsReceived)
+  const totals = rows.reduce((t, r) => ({
+    key: 'Total', leadsReceived: t.leadsReceived + r.leadsReceived, trialsScheduled: t.trialsScheduled + r.trialsScheduled,
+    trialsCompleted: t.trialsCompleted + r.trialsCompleted, converted: t.converted + r.converted
+  }), { key: 'Total', leadsReceived: 0, trialsScheduled: 0, trialsCompleted: 0, converted: 0 })
+  totals.conversionRate = totals.leadsReceived ? Math.round((totals.converted / totals.leadsReceived) * 100) : 0
+  return { rows, totals }
 }
 
 function periodInRangeFn(start, end) {
@@ -1410,9 +1533,9 @@ function periodSummary(start, end, locationId) {
 }
 
 // Mutually-exclusive funnel stage counts (new/trial/won/lost) for leads created in the period.
-function periodFunnel(start, end, locationId) {
+function periodFunnel(start, end, locationId, associateId) {
   const inRange = periodInRangeFn(start, end)
-  const leads = (locationId ? db.leads.filter(l => l.locationId === locationId) : db.leads)
+  const leads = (associateId ? db.leads.filter(l => l.associateId === associateId) : locationId ? db.leads.filter(l => l.locationId === locationId) : db.leads)
     .filter(l => inRange(l.createdAt))
   const counts = { new: 0, trial: 0, won: 0, lost: 0 }
   for (const l of leads) {
@@ -1468,9 +1591,9 @@ function periodSourceBreakdown(start, end, locationId) {
 }
 
 function periodLabelFor(range, start) {
-  return range === 'week'
-    ? start.toLocaleString('en-US', { month: 'short', day: 'numeric' })
-    : start.toLocaleString('en-US', { month: 'short', year: '2-digit' })
+  if (range === 'week') return start.toLocaleString('en-US', { month: 'short', day: 'numeric' })
+  if (range === 'year') return String(start.getFullYear())
+  return start.toLocaleString('en-US', { month: 'short', year: '2-digit' })
 }
 
 const validPeriodDate = (v) => v && v !== '-' && !isNaN(new Date(v).getTime())
@@ -1479,9 +1602,9 @@ const validPeriodDate = (v) => v && v !== '-' && !isNaN(new Date(v).getTime())
 // The lead schema has no explicit "response" signal, only `done` (the
 // follow-up was carried out) vs `done: false` (missed/pending) — so
 // `responded` is a proxy: follow-ups actually completed on that channel.
-function periodChannelPerformance(start, end, locationId) {
+function periodChannelPerformance(start, end, locationId, associateId) {
   const inRange = periodInRangeFn(start, end)
-  const leads = locationId ? db.leads.filter(l => l.locationId === locationId) : db.leads
+  const leads = associateId ? db.leads.filter(l => l.associateId === associateId) : locationId ? db.leads.filter(l => l.locationId === locationId) : db.leads
   const map = {}
   for (const l of leads) {
     for (const f of l.followUps || []) {
@@ -1556,9 +1679,9 @@ function periodFollowUpAnalytics(start, end, locationId) {
 // Leads grouped by class/membership type (`classType` — confirmed the actual
 // field name via grep of seed data and Leads/Import/Settings pages; there is
 // no separate "membershipType" field) for leads created within [start, end).
-function periodRevenueMix(start, end, locationId) {
+function periodRevenueMix(start, end, locationId, associateId) {
   const inRange = periodInRangeFn(start, end)
-  const leads = (locationId ? db.leads.filter(l => l.locationId === locationId) : db.leads)
+  const leads = (associateId ? db.leads.filter(l => l.associateId === associateId) : locationId ? db.leads.filter(l => l.locationId === locationId) : db.leads)
     .filter(l => inRange(l.createdAt))
   const map = {}
   for (const l of leads) {
@@ -1580,8 +1703,8 @@ function periodRevenueMix(start, end, locationId) {
 // back further would mean re-running the full leads scan per extra cohort.
 // `offset` is the currently-viewed period; cohorts run from 5-periods-back
 // through the current period, oldest first.
-function periodCohortConversion(range, offset, now, locationId) {
-  const leads = locationId ? db.leads.filter(l => l.locationId === locationId) : db.leads
+function periodCohortConversion(range, offset, now, locationId, associateId) {
+  const leads = associateId ? db.leads.filter(l => l.associateId === associateId) : locationId ? db.leads.filter(l => l.locationId === locationId) : db.leads
   const cohorts = []
   for (let k = 5; k >= 0; k--) {
     const co = offset + k
@@ -1682,6 +1805,85 @@ function periodLostBySource(start, end, locationId) {
   }
   return Object.values(map).sort((a, b) => b.count - a.count)
 }
+
+// Associate Overview / Studio Overview reports — a single endpoint for both,
+// switched by `scope`. Always returns three comparison columns (selected
+// period, immediately preceding period, same period last year) rather than
+// the single either/or `compare` mode the older by-location endpoint uses.
+app.get('/api/analytics/report', (req, res) => {
+  const scope = req.query.scope === 'associate' ? 'associate' : 'studio'
+  const entityId = req.query.entityId || null
+  const now = new Date()
+  const period = resolveReportPeriod(req, now)
+  const { start, end } = period
+  const prev = precedingPeriod(start, end)
+  const yoy = yearAgoPeriod(start, end)
+
+  const entities = scope === 'associate'
+    ? db.associates.filter(a => a.active !== false).map(a => ({ id: a.id, name: a.name, locationId: a.locationId }))
+    : db.locations.map(l => ({ id: l.id, name: l.name }))
+  const entityName = entityId
+    ? (entities.find(e => e.id === entityId)?.name || 'Unknown')
+    : (scope === 'associate' ? 'All associates' : 'All studios')
+
+  // A handful of recent same-length buckets for the trend chart — 6 for
+  // week/month, 5 years back for year, skipped entirely for a custom range
+  // (arbitrary custom windows don't tile into a meaningful trend series).
+  const trend = []
+  if (!period.customRange) {
+    const bucketRange = period.range
+    const baseOffset = REPORT_PRESETS[period.preset]?.offset ?? 0
+    const count = bucketRange === 'year' ? 5 : 6
+    for (let i = count - 1; i >= 0; i--) {
+      const { start: s, end: e, label } = periodBounds(bucketRange, baseOffset + i, now)
+      trend.push({ periodLabel: periodLabelFor(bucketRange, s), ...reportMetrics(scope, entityId, s, e) })
+    }
+  }
+
+  const locationArg = scope === 'studio' ? entityId : null
+  const associateArg = scope === 'associate' ? entityId : null
+  const cohortBucketRange = period.customRange ? 'week' : period.range === 'year' ? 'month' : period.range
+  const cohortOffset = period.customRange ? 0 : (REPORT_PRESETS[period.preset]?.offset ?? 0)
+
+  res.json({
+    scope, entityId, entityName,
+    entities,
+    period: { label: period.label, start: start.toISOString().slice(0, 10), end: new Date(end.getTime() - 86400000).toISOString().slice(0, 10), preset: period.preset || 'custom' },
+    comparisons: {
+      current: { label: period.label, ...reportMetrics(scope, entityId, start, end) },
+      previousPeriod: { label: `${prev.start.toISOString().slice(0, 10)} to ${new Date(prev.end.getTime() - 86400000).toISOString().slice(0, 10)}`, ...reportMetrics(scope, entityId, prev.start, prev.end) },
+      yoy: { label: `${yoy.start.toISOString().slice(0, 10)} to ${new Date(yoy.end.getTime() - 86400000).toISOString().slice(0, 10)}`, ...reportMetrics(scope, entityId, yoy.start, yoy.end) }
+    },
+    trend,
+    stageBreakdown: reportBreakdown(scope, entityId, start, end, 'stage'),
+    sourceBreakdown: reportBreakdown(scope, entityId, start, end, 'source'),
+    funnel: periodFunnel(start, end, locationArg, associateArg),
+    channelPerformance: periodChannelPerformance(start, end, locationArg, associateArg),
+    revenueMix: periodRevenueMix(start, end, locationArg, associateArg),
+    cohortConversion: periodCohortConversion(cohortBucketRange, cohortOffset, now, locationArg, associateArg),
+    // Only meaningful when looking at one studio (who's driving its numbers) —
+    // a single associate has no peers to rank against here.
+    leaderboard: scope === 'studio' ? periodLeaderboard(start, end, entityId || null) : []
+  })
+})
+
+// Drill-down for a single stage/source row on the report above — the exact
+// same period/scope filters, narrowed to one group value, returning enough
+// per-lead detail to list and open each one.
+app.get('/api/analytics/report/drill', (req, res) => {
+  const scope = req.query.scope === 'associate' ? 'associate' : 'studio'
+  const entityId = req.query.entityId || null
+  const period = resolveReportPeriod(req, new Date())
+  const inRange = periodInRangeFn(period.start, period.end)
+  const groupField = req.query.stage !== undefined ? 'stage' : 'source'
+  const groupValue = req.query.stage !== undefined ? req.query.stage : req.query.source
+  const leads = scopedLeads(scope, entityId)
+    .filter(l => inRange(l.createdAt))
+    .filter(l => ((groupField === 'stage' ? l.stage : l.source) || 'Unspecified') === groupValue)
+    .slice(0, 100)
+    .map(l => ({ id: l.id, fullName: l.fullName, stage: l.stage, status: l.status, source: l.source, revenue: l.valueEstimate || 0, createdAt: l.createdAt }))
+  res.json({ leads })
+})
 
 app.get('/api/analytics/performance/by-location', (req, res) => {
   const range = req.query.range === 'month' ? 'month' : 'week'

@@ -1,12 +1,11 @@
 import React from 'react'
-import StudioPerformancePage from '../components/StudioPerformancePage.jsx'
+import ReportOverview from '../components/ReportOverview.jsx'
 
 export default function StudioWeekly() {
   return (
-    <StudioPerformancePage
-      range="week"
-      title="Weekly studio performance"
-      desc="Detailed week-by-week breakdown per studio — leads, trials, wins, revenue and follow-up discipline."
+    <ReportOverview
+      title="Weekly performance overview"
+      desc="Studio or associate performance for any period — leads, trials, conversion and LTV, compared against the prior period and the same period last year."
     />
   )
 }
