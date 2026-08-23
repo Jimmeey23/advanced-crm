@@ -4,11 +4,12 @@ import {
   Users, CalendarCheck2, Crown, TrendingDown,
   ArrowUp, ArrowDown, Filter, ListFilter, Tags, Download, CalendarRange,
   GitCompareArrows, X, Radio, Clock3, AlertTriangle, PieChart as PieChartIcon,
-  Target, Layers, MapPin, FileDown, Check, ChevronDown as ChevronDownIcon
+  Target, Layers, MapPin, FileDown, Check, ChevronDown as ChevronDownIcon,
+  UserCircle2, Hourglass, ThumbsDown
 } from 'lucide-react'
 import {
   ResponsiveContainer, LineChart, Line, BarChart, Bar, XAxis, YAxis,
-  CartesianGrid, Tooltip, Cell, PieChart, Pie
+  CartesianGrid, Tooltip, Cell, PieChart, Pie, ScatterChart, Scatter, ZAxis
 } from 'recharts'
 import { useApp } from '../store.jsx'
 import { api } from '../api.js'
@@ -38,7 +39,7 @@ function deltaPct(curr, prev) {
 }
 
 export default function StudioPerformancePage({ range, title, desc }) {
-  const { openLead, dataVersion } = useApp()
+  const { openLead, dataVersion, boot } = useApp()
   const [offset, setOffset] = useState(range === 'week' ? 1 : 0)
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(false)
@@ -49,7 +50,20 @@ export default function StudioPerformancePage({ range, title, desc }) {
   const [selectedLocationIds, setSelectedLocationIds] = useState([])
   const [studioPickerOpen, setStudioPickerOpen] = useState(false)
   const [exporting, setExporting] = useState(false)
+  const [viewAsId, setViewAsId] = useState(() => {
+    try { return localStorage.getItem('p57_view_as_associate') || '' } catch (e) { return '' }
+  })
   const reportRef = useRef(null)
+
+  const setViewAs = (id) => {
+    setViewAsId(id)
+    try {
+      if (id) localStorage.setItem('p57_view_as_associate', id)
+      else localStorage.removeItem('p57_view_as_associate')
+    } catch (e) { /* ignore */ }
+  }
+  const viewAsAssociate = viewAsId ? (boot?.associates || []).find(a => a.id === viewAsId) : null
+  const sortedAssociates = useMemo(() => [...(boot?.associates || [])].sort((a, b) => a.name.localeCompare(b.name)), [boot])
 
   const customRange = Boolean(dateFrom && dateTo)
 
@@ -140,6 +154,8 @@ export default function StudioPerformancePage({ range, title, desc }) {
   const topAssociate = activeAssociates[0] || null
   const avgAssociateRevenue = activeAssociates.length ? Math.round(activeAssociates.reduce((s, a) => s + (a.revenue || 0), 0) / activeAssociates.length) : 0
   const sourceCount = primary?.sourceBreakdown?.length || 0
+  const revenuePerLead = totals.newLeads ? Math.round(totals.revenue / totals.newLeads) : 0
+  const avgDealSize = totals.won ? Math.round(totals.revenue / totals.won) : 0
   const prev = primary?.previous || null
   const history = primary?.history || []
 
@@ -204,6 +220,36 @@ export default function StudioPerformancePage({ range, title, desc }) {
 
   const compareLabel = data?.compare === 'yoy' ? 'vs same period last year' : 'vs previous period'
 
+  // "View as associate" narrows the per-studio report to just one associate's
+  // slice — leaderboard row, their own new/won leads, their goal-tracking
+  // line — and hides studio-wide sections (channel mix, revenue mix, cohort,
+  // funnel) that can't be meaningfully attributed to a single person with the
+  // data the server currently returns.
+  const perLocationView = useMemo(() => {
+    if (!viewAsId) return perLocation
+    return perLocation.map(loc => ({
+      ...loc,
+      leaderboard: (loc.leaderboard || []).filter(a => a.associateId === viewAsId),
+      goalTracking: {
+        perStudio: [],
+        perAssociate: (loc.goalTracking?.perAssociate || []).filter(a => a.associateId === viewAsId)
+      }
+    }))
+  }, [perLocation, viewAsId])
+
+  const asRow = (row) => {
+    if (!viewAsId) return row
+    const wonDetails = (row.wonDetails || []).filter(d => d.associateId === viewAsId)
+    const revenue = wonDetails.reduce((s, d) => s + (d.revenue || 0), 0)
+    return {
+      ...row,
+      newLeadDetails: (row.newLeadDetails || []).filter(d => d.associateId === viewAsId),
+      wonDetails,
+      topAssociate: wonDetails.length ? { name: viewAsAssociate?.name || 'You', revenue } : null,
+      bottomAssociate: null
+    }
+  }
+
   return (
     <div className="p-6 space-y-5">
       <div className="flex flex-wrap items-center gap-3">
@@ -211,7 +257,10 @@ export default function StudioPerformancePage({ range, title, desc }) {
           <h2 className="font-display text-[18px] font-bold text-white flex items-center gap-2">
             <Building2 size={18} className="text-rose-400" /> {title}
           </h2>
-          <p className="text-[12px] text-slate-500 mt-0.5">{desc}</p>
+          <p className="text-[12px] text-slate-500 mt-0.5">
+            {desc}
+            {viewAsAssociate && <span className="chip !ml-2 !px-2 !py-0.5 text-[10px] bg-violet-500/15 border border-violet-400/25 text-violet-300">viewing as {viewAsAssociate.name}</span>}
+          </p>
         </div>
         <div className="ml-auto flex flex-wrap items-center gap-2">
           <div className={`flex items-center gap-2 rounded-xl bg-white/5 border border-white/10 p-1 ${customRange ? 'opacity-40' : ''}`}>
@@ -287,6 +336,14 @@ export default function StudioPerformancePage({ range, title, desc }) {
             )}
           </div>
 
+          <div className="flex items-center gap-1.5 rounded-xl bg-white/5 border border-white/10 px-2 py-1.5">
+            <UserCircle2 size={13} className="text-slate-500 shrink-0" />
+            <select className="input !w-auto !py-0 !text-[11.5px] !border-0 !bg-transparent" value={viewAsId} onChange={e => setViewAs(e.target.value)}>
+              <option value="">All associates</option>
+              {sortedAssociates.map(a => <option key={a.id} value={a.id}>View as {a.name}</option>)}
+            </select>
+          </div>
+
           <button className="btn btn-ghost !py-2 !px-3 !text-[12px] flex items-center gap-1.5" onClick={exportCsv} disabled={!data}>
             <Download size={13} /> Export CSV
           </button>
@@ -332,6 +389,12 @@ export default function StudioPerformancePage({ range, title, desc }) {
             <MetricCard icon={IndianRupee} title="Avg associate revenue" value={money(avgAssociateRevenue)} color="#ec4899"
               description={`${sourceCount} active lead source${sourceCount === 1 ? '' : 's'} contributed to this period.`}
               calculation="Selected-period revenue divided by active associates in the report scope." />
+            <MetricCard icon={IndianRupee} title="Revenue per lead" value={money(revenuePerLead)} color="#8b5cf6"
+              description="Revenue efficiency across every lead created, won or not."
+              calculation="Total revenue divided by total new leads for the selected period." />
+            <MetricCard icon={Trophy} title="Avg deal size" value={money(avgDealSize)} color="#10b981"
+              description="Average value of a won deal in this period."
+              calculation="Total revenue divided by won deals for the selected period." />
           </div>
           </section>
 
@@ -349,7 +412,7 @@ export default function StudioPerformancePage({ range, title, desc }) {
               <div className="flex flex-wrap items-center gap-3 mb-3">
                 <div className="flex items-center gap-2">
                   <Filter size={14} className="text-cyan-400" />
-                  <h3 className="font-display font-semibold text-white text-[13.5px]">Pipeline funnel</h3>
+                  <h3 className="font-display font-semibold text-white text-[15px]">Pipeline funnel</h3>
                 </div>
                 <div className="flex items-center gap-1.5 rounded-xl bg-white/5 border border-white/10 p-1">
                   <button type="button" className={`px-3 py-1.5 rounded-lg text-[11.5px] font-semibold ${funnelStage === 'all' ? 'bg-rose-500/25 text-white' : 'text-slate-400 hover:text-white'}`} onClick={() => setFunnelStage('all')}>All</button>
@@ -402,12 +465,12 @@ export default function StudioPerformancePage({ range, title, desc }) {
           <section className="studio-report-section">
             <ReportHeading number="02" title="Studio performance briefs" subtitle={comparedLocations.length ? 'Complete studio detail, shown together for direct comparison' : 'Complete detail for the selected studio'} />
             <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 p-4">
-              {selectedRows.map(r => <StudioBrief key={r.locationId} row={r} openLead={openLead} />)}
+              {selectedRows.map(r => <StudioBrief key={r.locationId} row={asRow(r)} openLead={openLead} />)}
               {!selectedRows.length && <div className="col-span-full text-center text-slate-500 py-10 text-[12.5px]">No studios found.</div>}
             </div>
           </section>
 
-          {perLocation.map((loc, i) => (
+          {perLocationView.map((loc, i) => (
             <div key={loc.locationId} className="space-y-5">
               {perLocation.length > 1 && (
                 <div className="flex items-center gap-2 pt-1">
@@ -421,11 +484,14 @@ export default function StudioPerformancePage({ range, title, desc }) {
                 </div>
               )}
               <LeaderboardSection leaderboard={loc.leaderboard || []} />
-              <SourceBreakdownSection sourceBreakdown={loc.sourceBreakdown || []} />
-              <ChannelPerformanceSection channelPerformance={loc.channelPerformance || []} />
+              <StageAgingSection stageBreakdown={loc.stageBreakdown || []} />
+              {!viewAsId && <SourceBreakdownSection sourceBreakdown={loc.sourceBreakdown || []} />}
+              {!viewAsId && <ChannelPerformanceSection channelPerformance={loc.channelPerformance || []} />}
+              {!viewAsId && <AssociateComparisonChart leaderboard={loc.leaderboard || []} />}
+              {!viewAsId && <LostBySourceSection lostBySource={loc.lostBySource || []} />}
               <FollowUpAnalyticsSection data={loc.followUpAnalytics} />
-              <RevenueMixSection revenueMix={loc.revenueMix || []} />
-              <CohortConversionSection cohortConversion={loc.cohortConversion || []} />
+              {!viewAsId && <RevenueMixSection revenueMix={loc.revenueMix || []} />}
+              {!viewAsId && <CohortConversionSection cohortConversion={loc.cohortConversion || []} />}
               <GoalTrackingSection goalTracking={loc.goalTracking} />
             </div>
           ))}
@@ -653,6 +719,109 @@ function SourceBreakdownSection({ sourceBreakdown }) {
             ))}
           </tbody>
         </table>
+      </div>
+    </div>
+  )
+}
+
+function StageAgingSection({ stageBreakdown }) {
+  if (!stageBreakdown.length) return null
+  return (
+    <div className="card overflow-hidden">
+      <div className="px-5 py-3 border-b border-white/8 flex items-center gap-2 text-[12.5px] font-semibold text-slate-200">
+        <Hourglass size={13} className="text-amber-400" /> Pipeline stage aging
+        <span className="ml-auto text-[11px] font-normal text-slate-500">open leads by stage, as of now</span>
+      </div>
+      <div className="overflow-x-auto scrollbar-thin">
+        <table className="w-full text-left">
+          <thead>
+            <tr className="text-[10.5px] uppercase tracking-wider text-slate-500 border-b border-white/8">
+              <th className="px-4 py-2.5 font-semibold">Stage</th>
+              <th className="px-3 py-2.5 font-semibold text-center">Open leads</th>
+              <th className="px-3 py-2.5 font-semibold text-center">Avg age</th>
+            </tr>
+          </thead>
+          <tbody>
+            {stageBreakdown.map(s => (
+              <tr key={s.stage} className="border-b border-white/5 last:border-0 hover:bg-white/[0.03] transition-colors">
+                <td className="px-4 py-2.5 text-[12.5px] font-semibold text-white">{s.stage}</td>
+                <td className="px-3 py-2.5 text-[12px] text-slate-300 text-center mono">{s.count}</td>
+                <td className={`px-3 py-2.5 text-[12px] text-center mono ${s.avgAgeDays > 14 ? 'text-rose-400' : 'text-slate-300'}`}>{s.avgAgeDays}d</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
+function LostBySourceSection({ lostBySource }) {
+  if (!lostBySource.length) return null
+  return (
+    <div className="card overflow-hidden">
+      <div className="px-5 py-3 border-b border-white/8 flex items-center gap-2 text-[12.5px] font-semibold text-slate-200">
+        <ThumbsDown size={13} className="text-rose-400" /> Lost leads by source
+      </div>
+      <div className="overflow-x-auto scrollbar-thin">
+        <table className="w-full text-left">
+          <thead>
+            <tr className="text-[10.5px] uppercase tracking-wider text-slate-500 border-b border-white/8">
+              <th className="px-4 py-2.5 font-semibold">Source</th>
+              <th className="px-3 py-2.5 font-semibold text-center">Lost leads</th>
+              <th className="px-3 py-2.5 font-semibold text-center">Lost value</th>
+            </tr>
+          </thead>
+          <tbody>
+            {lostBySource.map(s => (
+              <tr key={s.source} className="border-b border-white/5 last:border-0 hover:bg-white/[0.03] transition-colors">
+                <td className="px-4 py-2.5 text-[12.5px] font-semibold text-white">{s.source}</td>
+                <td className="px-3 py-2.5 text-[12px] text-rose-400 text-center mono">{s.count}</td>
+                <td className="px-3 py-2.5 text-[12px] text-slate-300 text-center mono">{money(s.lostValue)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
+function AssociateComparisonChart({ leaderboard }) {
+  if (!leaderboard.length) return null
+  const chartData = leaderboard.map(a => ({
+    name: a.name, conversion: a.newLeads ? Math.round((a.won / a.newLeads) * 100) : 0,
+    revenue: a.revenue, won: a.won
+  }))
+  return (
+    <div className="card overflow-hidden">
+      <div className="px-5 py-3 border-b border-white/8 flex items-center gap-2 text-[12.5px] font-semibold text-slate-200">
+        <Target size={13} className="text-cyan-400" /> Associate comparison — conversion vs revenue
+        <span className="ml-auto text-[11px] font-normal text-slate-500">bubble size = deals won</span>
+      </div>
+      <div className="h-[220px] p-3">
+        <ResponsiveContainer width="100%" height="100%">
+          <ScatterChart margin={{ top: 10, right: 20, bottom: 5, left: -10 }}>
+            <CartesianGrid stroke="rgba(255,255,255,0.06)" />
+            <XAxis type="number" dataKey="conversion" name="Conversion" unit="%" tick={AXIS} axisLine={false} tickLine={false} />
+            <YAxis type="number" dataKey="revenue" name="Revenue" tick={AXIS} axisLine={false} tickLine={false} tickFormatter={v => money(v)} />
+            <ZAxis type="number" dataKey="won" range={[60, 400]} />
+            <Tooltip contentStyle={tooltipStyle()} cursor={{ strokeDasharray: '3 3' }}
+              formatter={(v, n) => n === 'Revenue' ? money(v) : n === 'Conversion' ? `${v}%` : v}
+              labelFormatter={() => ''}
+              content={({ active, payload }) => {
+                if (!active || !payload?.length) return null
+                const d = payload[0].payload
+                return (
+                  <div style={tooltipStyle()} className="px-3 py-2">
+                    <div className="font-semibold text-white text-[12px] mb-1">{d.name}</div>
+                    <div className="text-[11px]">{d.conversion}% conversion · {money(d.revenue)} · {d.won} won</div>
+                  </div>
+                )
+              }} />
+            <Scatter data={chartData} fill="#8b5cf6" fillOpacity={0.75} />
+          </ScatterChart>
+        </ResponsiveContainer>
       </div>
     </div>
   )

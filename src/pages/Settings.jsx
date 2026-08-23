@@ -253,6 +253,24 @@ export default function SettingsPage() {
     } catch (e) { toast(e.message, 'error') }
   }
 
+  const updateWebhookDefaults = async (id, defaults) => {
+    try {
+      await api.patch(`/api/webhooks/${id}`, { defaults })
+      loadWebhooks()
+      toast('Defaults saved')
+    } catch (e) { toast(e.message, 'error') }
+  }
+
+  const updateWebhookMethod = async (id, method) => {
+    try {
+      await api.patch(`/api/webhooks/${id}`, { method })
+      loadWebhooks()
+      toast(`Webhook now accepts ${method} requests`)
+    } catch (e) { toast(e.message, 'error') }
+  }
+
+  const testWebhook = async (id, payload) => api.post(`/api/webhooks/${id}/test`, { payload })
+
   const renameWebhook = async (id, name) => {
     try { await api.patch(`/api/webhooks/${id}`, { name }); loadWebhooks() }
     catch (e) { toast(e.message, 'error') }
@@ -665,7 +683,7 @@ export default function SettingsPage() {
               )}
             </Section>
 
-            <Section icon={<Webhook size={15} className="text-emerald-400" />} title="Lead webhooks" desc="Let signup forms, landing pages or no-code tools (Zapier, Typeform, etc.) create leads automatically via a POST URL.">
+            <Section icon={<Webhook size={15} className="text-emerald-400" />} title="Lead webhooks" desc="Let signup forms, landing pages or no-code tools (Zapier, Typeform, etc.) create leads automatically — pick GET, POST or PUT per integration.">
               <div className="flex items-center gap-2 mb-4">
                 <input className="input flex-1" placeholder="Integration name, e.g. Landing Page Signup Form" value={newWebhookName} onChange={e => setNewWebhookName(e.target.value)} onKeyDown={e => e.key === 'Enter' && createWebhook()} />
                 <button className="btn btn-primary" onClick={createWebhook} disabled={creatingWebhook}>{creatingWebhook ? <Spinner size={14} /> : <Plus size={14} />} Create webhook</button>
@@ -679,6 +697,9 @@ export default function SettingsPage() {
                     onToggleLogs={() => toggleWebhookLogs(w.id)}
                     onRename={(name) => renameWebhook(w.id, name)}
                     onSaveMapping={(m) => updateWebhookMapping(w.id, m)}
+                    onSaveDefaults={(d) => updateWebhookDefaults(w.id, d)}
+                    onSaveMethod={(m) => updateWebhookMethod(w.id, m)}
+                    onTest={(payload) => testWebhook(w.id, payload)}
                     onRegenerate={() => regenerateWebhook(w.id)}
                     onDelete={() => deleteWebhook(w.id)}
                     onCopy={() => copyWebhookUrl(w.url)}
@@ -911,21 +932,47 @@ function ThemeCard({ active, onClick, title, sub, swatch }) {
 }
 
 const LEAD_FIELD_OPTIONS = [
-  { id: 'name', label: 'Name' },
+  { id: 'fullName', label: 'Full name' },
+  { id: 'firstName', label: 'First name' },
+  { id: 'lastName', label: 'Last name' },
   { id: 'email', label: 'Email' },
   { id: 'phone', label: 'Phone' },
   { id: 'source', label: 'Source' },
   { id: 'notes', label: 'Notes' },
   { id: 'classType', label: 'Class type' },
-  { id: 'channel', label: 'Channel' }
+  { id: 'channel', label: 'Channel' },
+  { id: 'stage', label: 'Stage' },
+  { id: 'status', label: 'Status' },
+  { id: 'valueEstimate', label: 'Value estimate' },
+  { id: 'associateId', label: 'Associate ID' },
+  { id: 'associateName', label: 'Associate name' },
+  { id: 'locationId', label: 'Location ID' },
+  { id: 'center', label: 'Center' },
+  { id: 'memberId', label: 'Member ID' },
+  { id: 'hostId', label: 'Host ID' },
+  { id: 'period', label: 'Period' },
+  { id: 'purchasesMade', label: 'Purchases made' },
+  { id: 'visits', label: 'Visits' },
+  { id: 'trialStatus', label: 'Trial status' },
+  { id: 'conversionStatus', label: 'Conversion status' },
+  { id: 'retentionStatus', label: 'Retention status' }
 ]
 
-function WebhookRow({ webhook, logs, logsOpen, onToggleLogs, onRename, onSaveMapping, onRegenerate, onDelete, onCopy }) {
+const WEBHOOK_METHODS = ['POST', 'PUT', 'GET']
+
+function WebhookRow({ webhook, logs, logsOpen, onToggleLogs, onRename, onSaveMapping, onSaveDefaults, onSaveMethod, onTest, onRegenerate, onDelete, onCopy }) {
   const [nameDraft, setNameDraft] = useState(webhook.name)
   const [mapping, setMapping] = useState(() => Object.entries(webhook.fieldMapping || {}).map(([k, v]) => ({ key: k, field: v })))
   const [mappingDirty, setMappingDirty] = useState(false)
+  const [defaults, setDefaults] = useState(() => Object.entries(webhook.defaults || {}).map(([k, v]) => ({ field: k, value: v })))
+  const [defaultsDirty, setDefaultsDirty] = useState(false)
+  const [testOpen, setTestOpen] = useState(false)
+  const [testPayload, setTestPayload] = useState('{\n  "name": "Jane Doe",\n  "phone_number": "9876543210",\n  "email": "jane@example.com"\n}')
+  const [testResult, setTestResult] = useState(null)
+  const [testError, setTestError] = useState('')
+  const [testing, setTesting] = useState(false)
 
-  const addRow = () => { setMapping(m => [...m, { key: '', field: 'name' }]); setMappingDirty(true) }
+  const addRow = () => { setMapping(m => [...m, { key: '', field: 'fullName' }]); setMappingDirty(true) }
   const updateRow = (i, patch) => { setMapping(m => m.map((r, idx) => idx === i ? { ...r, ...patch } : r)); setMappingDirty(true) }
   const removeRow = (i) => { setMapping(m => m.filter((_, idx) => idx !== i)); setMappingDirty(true) }
   const saveMapping = () => {
@@ -935,11 +982,35 @@ function WebhookRow({ webhook, logs, logsOpen, onToggleLogs, onRename, onSaveMap
     setMappingDirty(false)
   }
 
+  const addDefault = () => { setDefaults(d => [...d, { field: 'source', value: '' }]); setDefaultsDirty(true) }
+  const updateDefault = (i, patch) => { setDefaults(d => d.map((r, idx) => idx === i ? { ...r, ...patch } : r)); setDefaultsDirty(true) }
+  const removeDefault = (i) => { setDefaults(d => d.filter((_, idx) => idx !== i)); setDefaultsDirty(true) }
+  const saveDefaults = () => {
+    const obj = {}
+    for (const r of defaults) if (r.field && String(r.value).trim()) obj[r.field] = r.value
+    onSaveDefaults(obj)
+    setDefaultsDirty(false)
+  }
+
+  const runTest = async () => {
+    setTesting(true); setTestError(''); setTestResult(null)
+    try {
+      const parsed = JSON.parse(testPayload)
+      const result = await onTest(parsed)
+      setTestResult(result)
+    } catch (e) {
+      setTestError(e instanceof SyntaxError ? 'Sample payload is not valid JSON' : e.message)
+    } finally { setTesting(false) }
+  }
+
   return (
     <div className="rounded-xl border border-white/8 bg-white/[0.02] p-3.5 space-y-3">
       <div className="flex items-center gap-2 flex-wrap">
         <input className="input !py-1.5 flex-1 min-w-[160px] font-semibold" value={nameDraft} onChange={e => setNameDraft(e.target.value)}
           onBlur={() => nameDraft.trim() && nameDraft !== webhook.name && onRename(nameDraft.trim())} />
+        <select className="input !py-1.5 !text-[12px] !w-auto" value={webhook.method || 'POST'} onChange={e => onSaveMethod(e.target.value)} title="Request method this webhook accepts">
+          {WEBHOOK_METHODS.map(m => <option key={m} value={m}>{m}</option>)}
+        </select>
         <span className="text-[11px] text-slate-500">Created {new Date(webhook.createdAt).toLocaleDateString()}</span>
         <span className="text-[11px] text-slate-500">· Last used {webhook.lastUsedAt ? new Date(webhook.lastUsedAt).toLocaleString() : 'never'}</span>
         <button className="btn btn-ghost !p-2" onClick={onToggleLogs} title="View call log"><ScrollText size={14} /></button>
@@ -950,6 +1021,7 @@ function WebhookRow({ webhook, logs, logsOpen, onToggleLogs, onRename, onSaveMap
         <code className="input !py-1.5 flex-1 !text-[11.5px] overflow-x-auto whitespace-nowrap">{webhook.url}</code>
         <button className="btn btn-ghost !py-1.5" onClick={onCopy}><Copy size={13} /> Copy</button>
       </div>
+      {webhook.method === 'GET' && <p className="text-[11px] text-amber-400/90">GET mode — send lead fields as query params on this URL, not a body.</p>}
 
       <div>
         <div className="text-[10.5px] uppercase tracking-wider text-slate-500 font-semibold mb-1.5">Field mapping — incoming payload key → lead field</div>
@@ -964,12 +1036,59 @@ function WebhookRow({ webhook, logs, logsOpen, onToggleLogs, onRename, onSaveMap
               <button className="btn btn-ghost !p-1.5 text-rose-400" onClick={() => removeRow(i)}><X size={12} /></button>
             </div>
           ))}
-          {!mapping.length && <p className="text-[11px] text-slate-600">No mapping configured — incoming keys named name/email/phone/source/notes are used as-is.</p>}
+          {!mapping.length && <p className="text-[11px] text-slate-600">No manual mapping — common key spellings (name/full_name, phone/mobile, email, etc.) are auto-detected.</p>}
         </div>
         <div className="flex items-center gap-2 mt-2">
           <button className="btn btn-ghost !py-1.5 !text-[12px]" onClick={addRow}><Plus size={12} /> Add field</button>
           {mappingDirty && <button className="btn btn-soft !py-1.5 !text-[12px]" onClick={saveMapping}><Save size={12} /> Save mapping</button>}
         </div>
+      </div>
+
+      <div>
+        <div className="text-[10.5px] uppercase tracking-wider text-slate-500 font-semibold mb-1.5">Default values — used when the payload omits a field</div>
+        <div className="space-y-1.5">
+          {defaults.map((r, i) => (
+            <div key={i} className="flex items-center gap-2">
+              <select className="input !py-1.5 !text-[12px] !w-auto" value={r.field} onChange={e => updateDefault(i, { field: e.target.value })}>
+                {LEAD_FIELD_OPTIONS.map(f => <option key={f.id} value={f.id}>{f.label}</option>)}
+              </select>
+              <span className="text-slate-600 text-[11px]">=</span>
+              <input className="input !py-1.5 !text-[12px] flex-1" placeholder="fixed value" value={r.value} onChange={e => updateDefault(i, { value: e.target.value })} />
+              <button className="btn btn-ghost !p-1.5 text-rose-400" onClick={() => removeDefault(i)}><X size={12} /></button>
+            </div>
+          ))}
+          {!defaults.length && <p className="text-[11px] text-slate-600">No defaults set.</p>}
+        </div>
+        <div className="flex items-center gap-2 mt-2">
+          <button className="btn btn-ghost !py-1.5 !text-[12px]" onClick={addDefault}><Plus size={12} /> Add default</button>
+          {defaultsDirty && <button className="btn btn-soft !py-1.5 !text-[12px]" onClick={saveDefaults}><Save size={12} /> Save defaults</button>}
+        </div>
+      </div>
+
+      <div>
+        <button className="btn btn-ghost !py-1.5 !text-[12px]" onClick={() => setTestOpen(o => !o)}><TestTube2 size={12} /> {testOpen ? 'Hide test tool' : 'Test this webhook'}</button>
+        {testOpen && (
+          <div className="mt-2 space-y-2 rounded-lg bg-black/20 border border-white/6 p-2.5">
+            <p className="text-[11px] text-slate-500">Paste a sample payload to preview the lead it would create — nothing is saved.</p>
+            <textarea className="input !text-[12px] font-mono resize-none" rows={5} value={testPayload} onChange={e => setTestPayload(e.target.value)} />
+            <button className="btn btn-soft !py-1.5 !text-[12px]" onClick={runTest} disabled={testing}>{testing ? <Spinner size={12} /> : <Zap size={12} />} Preview</button>
+            {testError && <p className="text-[11.5px] text-rose-400">{testError}</p>}
+            {testResult && (
+              testResult.missing?.length ? (
+                <p className="text-[11.5px] text-rose-400">Missing required field(s): {testResult.missing.join(', ')}</p>
+              ) : (
+                <div className="rounded-lg bg-white/[0.03] border border-white/8 p-2 space-y-1">
+                  {Object.entries(testResult.preview || {}).filter(([, v]) => v !== undefined && v !== '').map(([k, v]) => (
+                    <div key={k} className="flex items-center gap-2 text-[11.5px]">
+                      <span className="text-slate-500 w-28 shrink-0">{k}</span>
+                      <span className="text-slate-200 truncate">{String(v)}</span>
+                    </div>
+                  ))}
+                </div>
+              )
+            )}
+          </div>
+        )}
       </div>
 
       {logsOpen && (

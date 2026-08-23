@@ -27,7 +27,12 @@ export function isEnabled() {
 function getClient() {
   if (!isEnabled()) return null
   if (!client) {
-    client = createClient(process.env.USER_SUPABASE_URL, process.env.USER_SUPABASE_ANON_KEY, {
+    // Trim here too — isEnabled() only checks the trimmed value, so a
+    // trailing newline/space from a copy-pasted env var (common) would
+    // otherwise reach createClient() raw and corrupt every request URL.
+    const url = process.env.USER_SUPABASE_URL.trim()
+    const key = process.env.USER_SUPABASE_ANON_KEY.trim()
+    client = createClient(url, key, {
       auth: { persistSession: false, autoRefreshToken: false }
     })
   }

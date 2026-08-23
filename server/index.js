@@ -538,20 +538,111 @@ function serializeWebhook(w, req) {
   return { ...w, url: webhookUrlForReq(req, w.key) }
 }
 
-// Applies an integration's field_mapping (incoming payload key -> lead field)
-// to a received JSON body. If no mapping is configured yet, fall back to
-// treating the body's own keys as if they already matched our field names,
-// so a webhook works out of the box before anyone visits the mapping editor.
-function applyFieldMapping(body, mapping) {
-  const map = mapping && Object.keys(mapping).length
-    ? mapping
-    : { name: 'name', fullName: 'name', email: 'email', phone: 'phone', source: 'source', notes: 'notes' }
+// Every Lead field a webhook is allowed to populate, and the common
+// third-party key spellings that map to it automatically. This alias
+// dictionary is a standing fallback under any explicit mapping — it fires
+// whenever the payload has a recognizable key that isn't already claimed by
+// the integration's own fieldMapping, so a brand-new webhook produces sane
+// leads immediately, before anyone visits the mapping editor.
+const WEBHOOK_FIELD_ALIASES = {
+  fullName: ['name', 'fullname', 'full_name', 'customer_name', 'contact_name', 'lead_name'],
+  firstName: ['first_name', 'firstname', 'fname', 'given_name'],
+  lastName: ['last_name', 'lastname', 'lname', 'surname', 'family_name'],
+  email: ['email', 'email_address', 'emailaddress'],
+  phone: ['phone', 'phone_number', 'phonenumber', 'mobile', 'contact_number', 'whatsapp'],
+  source: ['source', 'lead_source', 'utm_source', 'sourcename'],
+  notes: ['notes', 'note', 'message', 'comments', 'remarks'],
+  classType: ['class_type', 'classtype', 'service', 'interest', 'program'],
+  channel: ['channel', 'medium', 'utm_medium'],
+  stage: ['stage', 'pipeline_stage'],
+  status: ['status', 'lead_status'],
+  valueEstimate: ['value', 'value_estimate', 'amount', 'price', 'deal_value'],
+  associateId: ['associate_id', 'associateid', 'owner_id', 'assigned_to'],
+  associateName: ['associate_name', 'associatename', 'owner_name', 'assigned_to_name', 'sales_rep'],
+  locationId: ['location_id', 'locationid', 'studio_id', 'center_id'],
+  center: ['center', 'centre', 'studio', 'location'],
+  memberId: ['member_id', 'memberid'],
+  hostId: ['host_id', 'hostid'],
+  period: ['period', 'time_period'],
+  purchasesMade: ['purchases_made', 'purchasesmade', 'purchases'],
+  visits: ['visits', 'visit_count'],
+  trialStatus: ['trial_status', 'trialstatus'],
+  conversionStatus: ['conversion_status', 'conversionstatus'],
+  retentionStatus: ['retention_status', 'retentionstatus']
+}
+
+function findByAlias(body, aliases) {
+  const keys = Object.keys(body)
+  for (const alias of aliases) {
+    const hit = keys.find(k => k.toLowerCase() === alias)
+    if (hit) return body[hit]
+  }
+  return undefined
+}
+
+// Resolves every webhook-eligible Lead field from a received payload, in
+// priority order: (1) integration's own explicit fieldMapping, (2) the
+// built-in alias dictionary above, (3) the integration's configured static
+// defaults. Returns only the fields that resolved to a non-empty value.
+function resolveWebhookLeadFields(body, integ) {
+  const mapping = integ.fieldMapping || {}
+  const defaults = integ.defaults || {}
+  const reverseMapping = {}
+  for (const [incomingKey, targetField] of Object.entries(mapping)) {
+    if (!reverseMapping[targetField]) reverseMapping[targetField] = incomingKey
+  }
   const out = {}
-  for (const [incomingKey, targetField] of Object.entries(map)) {
-    const val = body[incomingKey]
-    if (val !== undefined && val !== null && String(val).trim() !== '') out[targetField] = val
+  for (const field of Object.keys(WEBHOOK_FIELD_ALIASES)) {
+    let val
+    const mappedKey = reverseMapping[field]
+    if (mappedKey !== undefined) val = body[mappedKey]
+    if (val === undefined || val === null || String(val).trim() === '') {
+      val = findByAlias(body, WEBHOOK_FIELD_ALIASES[field])
+    }
+    if (val === undefined || val === null || String(val).trim() === '') {
+      val = defaults[field]
+    }
+    if (val !== undefined && val !== null && String(val).trim() !== '') out[field] = val
+  }
+  // firstName/lastName aren't real Lead fields — they only exist to build
+  // fullName when a form sends split name fields instead of one combined one.
+  if (!out.fullName && (out.firstName || out.lastName)) {
+    out.fullName = [out.firstName, out.lastName].filter(Boolean).join(' ').trim()
   }
   return out
+}
+
+// Turns a resolveWebhookLeadFields() result into the payload shape
+// createLeadFrom() expects, dropping associateId/locationId if they don't
+// match a real record rather than silently creating a lead pointed at a
+// non-existent associate or studio.
+function buildLeadPayloadFromResolved(resolved, integ) {
+  const associateId = resolved.associateId && db.associates.some(a => a.id === resolved.associateId) ? resolved.associateId : undefined
+  const locationId = resolved.locationId && db.locations.some(l => l.id === resolved.locationId) ? resolved.locationId : undefined
+  return {
+    fullName: resolved.fullName ? String(resolved.fullName).trim() : '',
+    email: resolved.email ? String(resolved.email).trim() : '-',
+    phone: resolved.phone ? String(resolved.phone).trim() : '',
+    sourceName: resolved.source ? String(resolved.source).trim() : integ.name,
+    remarks: resolved.notes ? String(resolved.notes) : '',
+    classType: resolved.classType ? String(resolved.classType).trim() : undefined,
+    channel: resolved.channel ? String(resolved.channel).trim() : undefined,
+    stage: resolved.stage ? String(resolved.stage).trim() : undefined,
+    status: resolved.status ? String(resolved.status).trim() : undefined,
+    valueEstimate: resolved.valueEstimate !== undefined ? Number(resolved.valueEstimate) : undefined,
+    center: resolved.center ? String(resolved.center).trim() : undefined,
+    memberId: resolved.memberId ? String(resolved.memberId).trim() : undefined,
+    hostId: resolved.hostId ? String(resolved.hostId).trim() : undefined,
+    period: resolved.period ? String(resolved.period).trim() : undefined,
+    purchasesMade: resolved.purchasesMade !== undefined ? Number(resolved.purchasesMade) : undefined,
+    visits: resolved.visits !== undefined ? Number(resolved.visits) : undefined,
+    trialStatus: resolved.trialStatus ? String(resolved.trialStatus).trim() : undefined,
+    conversionStatus: resolved.conversionStatus ? String(resolved.conversionStatus).trim() : undefined,
+    retentionStatus: resolved.retentionStatus ? String(resolved.retentionStatus).trim() : undefined,
+    associateName: resolved.associateName ? String(resolved.associateName).trim() : undefined,
+    associateId,
+    locationId
+  }
 }
 
 function findDuplicateLead(email, phone) {
@@ -594,7 +685,9 @@ app.post('/api/webhooks', (req, res) => {
     id: uid('wh'),
     name,
     key: genWebhookKey(),
+    method: ['GET', 'POST', 'PUT'].includes(req.body?.method) ? req.body.method : 'POST',
     fieldMapping: req.body?.fieldMapping && typeof req.body.fieldMapping === 'object' ? req.body.fieldMapping : {},
+    defaults: req.body?.defaults && typeof req.body.defaults === 'object' ? req.body.defaults : {},
     createdAt: nowIso(),
     lastUsedAt: null
   }
@@ -611,8 +704,33 @@ app.patch('/api/webhooks/:id', (req, res) => {
   if ('fieldMapping' in req.body && req.body.fieldMapping && typeof req.body.fieldMapping === 'object') {
     w.fieldMapping = req.body.fieldMapping
   }
+  if ('defaults' in req.body && req.body.defaults && typeof req.body.defaults === 'object') {
+    w.defaults = req.body.defaults
+  }
+  if ('method' in req.body && ['GET', 'POST', 'PUT'].includes(req.body.method)) {
+    w.method = req.body.method
+  }
   save()
   res.json(serializeWebhook(w, req))
+})
+
+// Dry-run: resolves a sample payload through the integration's mapping,
+// aliases and defaults and returns the Lead record that would be created,
+// without touching db.leads — lets an admin sanity-check a mapping before
+// pointing a real form/tool at the live URL.
+app.post('/api/webhooks/:id/test', (req, res) => {
+  const w = db.webhookIntegrations.find(x => x.id === req.params.id)
+  if (!w) return res.status(404).json({ error: 'Webhook integration not found' })
+  const payload = req.body?.payload
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    return res.status(400).json({ error: 'Provide a sample JSON object as "payload"' })
+  }
+  const resolved = resolveWebhookLeadFields(payload, w)
+  const missing = []
+  if (!resolved.fullName) missing.push('name')
+  if (!resolved.email && !resolved.phone) missing.push('email or phone')
+  const preview = missing.length ? null : buildLeadPayloadFromResolved(resolved, w)
+  res.json({ resolved, preview, missing })
 })
 
 app.post('/api/webhooks/:id/regenerate', (req, res) => {
@@ -639,28 +757,36 @@ app.get('/api/webhooks/:id/logs', (req, res) => {
   res.json(logs)
 })
 
-// Public inbound endpoint external forms/tools POST leads to. The key in the
-// URL is the sole auth factor (long + random) — see design spec for why no
-// HMAC signing is required.
-app.post('/api/webhooks/leads/:key', (req, res) => {
+// Public inbound endpoint external forms/tools call to create leads. The key
+// in the URL is the sole auth factor (long + random) — see design spec for
+// why no HMAC signing is required. Registered on app.all so a single
+// integration can be switched between GET/POST/PUT (per-integration
+// `method`, default POST) without separate route handlers; GET reads the
+// lead fields from the query string since a GET request has no body.
+app.all('/api/webhooks/leads/:key', (req, res) => {
   const integ = db.webhookIntegrations.find(w => w.key === req.params.key)
   if (!integ) return res.status(404).json({ error: 'Unknown webhook' })
+
+  const expectedMethod = integ.method || 'POST'
+  if (req.method !== expectedMethod) {
+    return res.status(405).json({ error: `This webhook is configured for ${expectedMethod} requests` })
+  }
 
   if (!checkRateLimit(integ.key)) {
     logWebhookCall(integ.id, 'rate_limited')
     return res.status(429).json({ error: 'Rate limit exceeded, try again shortly' })
   }
 
-  const body = req.body
+  const body = expectedMethod === 'GET' ? req.query : req.body
   if (!body || typeof body !== 'object' || Array.isArray(body)) {
-    logWebhookCall(integ.id, 'invalid_body', 'Body was not a JSON object')
-    return res.status(400).json({ error: 'Request body must be a JSON object' })
+    logWebhookCall(integ.id, 'invalid_body', expectedMethod === 'GET' ? 'No query params received' : 'Body was not a JSON object')
+    return res.status(400).json({ error: expectedMethod === 'GET' ? 'Provide lead fields as query params' : 'Request body must be a JSON object' })
   }
 
-  const mapped = applyFieldMapping(body, integ.fieldMapping)
-  const name = mapped.name ? String(mapped.name).trim() : ''
-  const email = mapped.email ? String(mapped.email).trim() : ''
-  const phone = mapped.phone ? String(mapped.phone).trim() : ''
+  const resolved = resolveWebhookLeadFields(body, integ)
+  const name = resolved.fullName ? String(resolved.fullName).trim() : ''
+  const email = resolved.email ? String(resolved.email).trim() : ''
+  const phone = resolved.phone ? String(resolved.phone).trim() : ''
 
   const missing = []
   if (!name) missing.push('name')
@@ -690,15 +816,7 @@ app.post('/api/webhooks/leads/:key', (req, res) => {
     return res.json({ status: 'duplicate', leadId: dup.id })
   }
 
-  const lead = createLeadFrom({
-    fullName: name,
-    email: email || '-',
-    phone: phone || '',
-    sourceName: mapped.source ? String(mapped.source).trim() : integ.name,
-    remarks: mapped.notes ? String(mapped.notes) : '',
-    classType: mapped.classType ? String(mapped.classType).trim() : undefined,
-    channel: mapped.channel ? String(mapped.channel).trim() : undefined
-  })
+  const lead = createLeadFrom(buildLeadPayloadFromResolved(resolved, integ))
   if (!lead.associateId && db.settings.roundRobin.enabled) assignLead(db, lead)
   db.leads.push(lead)
   markDirty(lead.id)
@@ -868,11 +986,13 @@ app.get('/api/analytics/timeline', (req, res) => {
     const key = d.toISOString().slice(0, 7)
     const leads = db.leads.filter(l => (l.createdAt || '').slice(0, 7) === key)
     const won = db.leads.filter(l => (l.convertedAt || '').slice(0, 7) === key)
+    const open = leads.filter(l => l.status === 'open')
     months.push({
       month: d.toLocaleString('en-US', { month: 'short' }),
       key,
       newLeads: leads.length,
       won: won.length,
+      openLeads: open.length,
       revenue: won.reduce((s, l) => s + (l.valueEstimate || 0), 0)
     })
   }
@@ -1490,6 +1610,42 @@ function periodGoalTracking(range, start, end, customRange, locationId) {
   return { perAssociate, perStudio }
 }
 
+// Currently-open leads grouped by pipeline stage, scoped to a location —
+// shows where the live pipeline is bunching up, independent of the
+// period filter (stage is a point-in-time property, not a period event).
+function currentStageBreakdown(locationId) {
+  const leads = (locationId ? db.leads.filter(l => l.locationId === locationId) : db.leads)
+    .filter(l => l.status === 'open')
+  const map = {}
+  const now = Date.now()
+  for (const l of leads) {
+    const key = l.stage || 'Unspecified'
+    map[key] = map[key] || { stage: key, count: 0, ageSum: 0 }
+    map[key].count++
+    map[key].ageSum += Math.max(0, Math.round((now - new Date(l.createdAt).getTime()) / 86400000))
+  }
+  return Object.values(map)
+    .map(m => ({ stage: m.stage, count: m.count, avgAgeDays: m.count ? Math.round(m.ageSum / m.count) : 0 }))
+    .sort((a, b) => b.count - a.count)
+}
+
+// Lost leads within [start, end) grouped by source — highlights which
+// channels convert badly rather than just which channels bring volume
+// (that's `periodSourceBreakdown`, which counts all leads, not just lost).
+function periodLostBySource(start, end, locationId) {
+  const inRange = periodInRangeFn(start, end)
+  const leads = (locationId ? db.leads.filter(l => l.locationId === locationId) : db.leads)
+    .filter(l => l.status === 'lost' && inRange(l.createdAt))
+  const map = {}
+  for (const l of leads) {
+    const key = l.source || 'Unspecified'
+    map[key] = map[key] || { source: key, count: 0, lostValue: 0 }
+    map[key].count++
+    map[key].lostValue += l.valueEstimate || 0
+  }
+  return Object.values(map).sort((a, b) => b.count - a.count)
+}
+
 app.get('/api/analytics/performance/by-location', (req, res) => {
   const range = req.query.range === 'month' ? 'month' : 'week'
   const offset = Math.max(0, Number(req.query.offset) || 0)
@@ -1606,7 +1762,9 @@ app.get('/api/analytics/performance/by-location', (req, res) => {
       followUpAnalytics: periodFollowUpAnalytics(start, end, id),
       revenueMix: periodRevenueMix(start, end, id),
       cohortConversion: periodCohortConversion(range, customRange ? 0 : offset, now, id),
-      goalTracking: periodGoalTracking(range, start, end, customRange, id)
+      goalTracking: periodGoalTracking(range, start, end, customRange, id),
+      stageBreakdown: currentStageBreakdown(id),
+      lostBySource: periodLostBySource(start, end, id)
     }
   })
 
@@ -1624,6 +1782,8 @@ app.get('/api/analytics/performance/by-location', (req, res) => {
     revenueMix,
     cohortConversion,
     goalTracking,
+    stageBreakdown: currentStageBreakdown(),
+    lostBySource: periodLostBySource(start, end),
     selectedLocationIds: selectedIds,
     perLocation
   })

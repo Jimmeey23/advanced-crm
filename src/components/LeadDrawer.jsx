@@ -62,6 +62,14 @@ export default function LeadDrawer() {
     [boot, lead]
   )
 
+  useEffect(() => {
+    if (!lead || !boot?.settings?.momence?.configured || lead.momence || syncing || candidates || autoSyncLeadId === lead.id) return
+    if (!lead.email && !lead.phone && !lead.memberId) return
+    setAutoSyncLeadId(lead.id)
+    doSync()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lead?.id, lead?.momence, boot?.settings?.momence?.configured])
+
   if (!drawerLeadId) return null
 
   if (!lead) {
@@ -129,14 +137,6 @@ export default function LeadDrawer() {
     } catch (e) { const msg = humanMomenceError(e.message); setSyncError(msg); toast(msg, 'error') }
     finally { setSyncing(false) }
   }
-
-  useEffect(() => {
-    if (!lead || !boot?.settings?.momence?.configured || lead.momence || syncing || candidates || autoSyncLeadId === lead.id) return
-    if (!lead.email && !lead.phone && !lead.memberId) return
-    setAutoSyncLeadId(lead.id)
-    doSync()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lead?.id, lead?.momence, boot?.settings?.momence?.configured])
 
   const m = lead.momence
   const classesAttended = m?.classHistory?.filter(c => c.checkedIn).length || 0

@@ -1,8 +1,8 @@
 @import "tailwindcss";
 
 @theme {
-  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
-  --font-display: "Space Grotesk", "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: "Outfit", "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Instrument Serif", "Outfit", ui-serif, Georgia, serif;
   --color-ink-950: #080a12;
   --color-ink-900: #0b0e1a;
   --color-ink-850: #0f1220;
@@ -284,6 +284,24 @@ select.input option { background: #141829; color: #e6e8f0; }
   to { opacity: 1; transform: translateY(0); }
 }
 
+@keyframes soft-rise {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* Athena-style glass ticket surface for lightweight rows/pills in light mode */
+[data-theme="light"] .ticket {
+  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid rgba(255, 255, 255, 0.64);
+  box-shadow: 0 12px 32px -24px rgba(14, 23, 41, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.82);
+  backdrop-filter: blur(16px);
+  transition: transform .15s ease, box-shadow .15s ease;
+}
+[data-theme="light"] .ticket:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 20px 40px -24px rgba(0, 94, 237, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.9);
+}
+
 @keyframes slideIn {
   from { transform: translateX(30px); opacity: 0; }
   to { transform: translateX(0); opacity: 1; }
@@ -292,7 +310,7 @@ select.input option { background: #141829; color: #e6e8f0; }
 /* ---------- accent theming ---------- */
 
 :root { --accent: #2563eb; --accent-strong: #1d4ed8; --accent-soft: rgba(37,99,235,.12); --accent-glow: rgba(37,99,235,.2); --accent-border: rgba(148,163,184,.34); --accent-ink: #1e40af; --brand-start: #2563eb; --brand-end: #1d4ed8; --brand-glow: rgba(37,99,235,.24); }
-html[data-accent="blue"] { --brand-start: #2563eb; --brand-end: #1d4ed8; --brand-glow: rgba(37,99,235,.24); }
+html[data-accent="blue"] { --brand-start: #005eed; --brand-end: #0047b8; --brand-glow: rgba(0,94,237,.24); }
 html[data-accent="emerald"] { --brand-start: #10b981; --brand-end: #059669; --brand-glow: rgba(16,185,129,.24); }
 
 .btn-primary {
@@ -304,18 +322,17 @@ html[data-accent="emerald"] { --brand-start: #10b981; --brand-end: #059669; --br
 /* ---------- light / glossy white theme ---------- */
 
 [data-theme="light"] body {
-  background: #eef1f8;
-  color: #0f172a;
-  background-image:
-    radial-gradient(1100px 500px at 85% -10%, rgba(244, 63, 94, 0.07), transparent 60%),
-    radial-gradient(900px 420px at 5% 0%, rgba(139, 92, 246, 0.06), transparent 55%);
+  background: #ffffff;
+  color: #0e1729;
+  background-image: none;
 }
 
 [data-theme="light"] .card {
-  background: linear-gradient(180deg, #ffffff, #f8f9fe);
-  border-color: rgba(15, 23, 42, 0.08);
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04), 0 12px 32px rgba(15, 23, 42, 0.06);
+  background: #ffffff;
+  border-color: #efefef;
+  box-shadow: 0 12px 32px -26px rgba(14, 23, 41, 0.28);
   position: relative;
+  animation: soft-rise .32s ease both;
 }
 [data-theme="light"] .card::before {
   content: ""; position: absolute; top: 0; left: 12px; right: 12px; height: 1px;
@@ -324,32 +341,33 @@ html[data-accent="emerald"] { --brand-start: #10b981; --brand-end: #059669; --br
   z-index: 1;
 }
 [data-theme="light"] .card-hover:hover {
-  border-color: rgba(15, 23, 42, 0.14);
-  box-shadow: 0 2px 4px rgba(15, 23, 42, 0.05), 0 18px 40px rgba(15, 23, 42, 0.1);
+  border-color: rgba(0, 94, 237, 0.22);
+  box-shadow: 0 20px 40px -24px rgba(0, 94, 237, 0.3);
+  transform: translateY(-1px);
 }
 
-[data-theme="light"] .btn-ghost { background: rgba(15,23,42,0.045); border-color: rgba(15,23,42,0.1); color: #0b1220; }
-[data-theme="light"] .btn-ghost:hover:not(:disabled) { background: rgba(15,23,42,0.08); border-color: rgba(15,23,42,0.18); }
-[data-theme="light"] .btn-soft { background: rgba(37,99,235,0.08); border-color: rgba(37,99,235,0.2); color: #1d4ed8; }
-[data-theme="light"] .btn-soft:hover:not(:disabled) { background: rgba(37,99,235,0.12); }
-/* White-first primary with a refined blue edge */
+[data-theme="light"] .btn-ghost { background: #ffffff; border-color: #efefef; color: #0e1729; }
+[data-theme="light"] .btn-ghost:hover:not(:disabled) { background: #efefef; border-color: rgba(0,94,237,0.25); }
+[data-theme="light"] .btn-soft { background: rgba(0,94,237,0.08); border-color: rgba(0,94,237,0.2); color: #005eed; }
+[data-theme="light"] .btn-soft:hover:not(:disabled) { background: rgba(0,94,237,0.12); }
+/* Solid blue primary, matching Athena's brand blue */
 [data-theme="light"] .btn-primary {
-  background: linear-gradient(135deg, #ffffff, #f8fbff);
-  color: #0f172a;
-  border-color: rgba(37,99,235,0.18);
-  box-shadow: 0 8px 20px rgba(15,23,42,0.06), inset 0 1px 0 rgba(255,255,255,0.8);
+  background: linear-gradient(135deg, #005eed, #0047b8);
+  color: #ffffff;
+  border-color: transparent;
+  box-shadow: 0 8px 20px rgba(0,94,237,0.24);
 }
 [data-theme="light"] .btn-primary:hover:not(:disabled) {
-  box-shadow: 0 12px 28px rgba(15,23,42,0.08), inset 0 1px 0 rgba(255,255,255,0.8);
-  border-color: rgba(37,99,235,0.28);
+  box-shadow: 0 12px 28px rgba(0,94,237,0.32);
+  transform: translateY(-1px);
 }
 
 [data-theme="light"] .input, [data-theme="light"] select.input, [data-theme="light"] textarea.input {
-  background: #ffffff; border-color: rgba(15,23,42,0.14); color: #0f172a;
+  background: #ffffff; border-color: #efefef; color: #0e1729;
 }
-[data-theme="light"] .input:focus { border-color: rgba(244,63,94,0.6); box-shadow: 0 0 0 3px rgba(244,63,94,0.14); }
-[data-theme="light"] .input::placeholder { color: #94a3b8; }
-[data-theme="light"] select.input option { background: #ffffff; color: #0f172a; }
+[data-theme="light"] .input:focus { border-color: rgba(0,94,237,0.5); box-shadow: 0 0 0 3px rgba(0,94,237,0.14); }
+[data-theme="light"] .input::placeholder { color: #5c6578; }
+[data-theme="light"] select.input option { background: #ffffff; color: #0e1729; }
 
 [data-theme="light"] .scrollbar-thin { scrollbar-color: rgba(15,23,42,0.22) transparent; }
 [data-theme="light"] .scrollbar-thin::-webkit-scrollbar-thumb { background: rgba(15,23,42,0.22); }
@@ -703,7 +721,7 @@ html[data-theme="light"] ::selection { background: rgba(244, 63, 94, 0.22); }
 /* Session accent system. Rose utility classes remain compatible with older
    markup, but resolve to the selected session theme instead of a fixed hue. */
 html[data-accent="crimson"] { --accent: #be123c; --accent-strong: #9f1239; --accent-soft: rgba(190,18,60,.12); --accent-glow: rgba(190,18,60,.2); --accent-border: rgba(148,163,184,.34); --accent-ink: #881337; }
-html[data-accent="blue"] { --accent: #2563eb; --accent-strong: #1d4ed8; --accent-soft: rgba(37,99,235,.12); --accent-glow: rgba(37,99,235,.2); --accent-border: rgba(148,163,184,.34); --accent-ink: #1e40af; }
+html[data-accent="blue"] { --accent: #005eed; --accent-strong: #0047b8; --accent-soft: rgba(0,94,237,.12); --accent-glow: rgba(0,94,237,.2); --accent-border: rgba(148,163,184,.34); --accent-ink: #0047b8; }
 html[data-accent="purple"] { --accent: #7c3aed; --accent-strong: #6d28d9; --accent-soft: rgba(124,58,237,.12); --accent-glow: rgba(124,58,237,.2); --accent-border: rgba(148,163,184,.34); --accent-ink: #5b21b6; }
 html[data-accent="rani"] { --accent: #db2777; --accent-strong: #be185d; --accent-soft: rgba(219,39,119,.12); --accent-glow: rgba(219,39,119,.2); --accent-border: rgba(148,163,184,.34); --accent-ink: #9d174d; }
 html[data-accent="bottle"] { --accent: #059669; --accent-strong: #047857; --accent-soft: rgba(5,150,105,.12); --accent-glow: rgba(5,150,105,.2); --accent-border: rgba(148,163,184,.34); --accent-ink: #047857; }
@@ -913,7 +931,7 @@ html[data-theme="light"] .pipeline-ranking-score { background:#e2e8f0; }
 .studio-report-section { overflow:hidden; border:1px solid rgba(255,255,255,.08); border-radius:18px; background:linear-gradient(160deg,rgba(255,255,255,.042),rgba(255,255,255,.012)); box-shadow:0 16px 38px rgba(0,0,0,.15); }
 .studio-report-heading { display:flex; align-items:center; gap:13px; padding:15px 18px; border-bottom:1px solid rgba(255,255,255,.075); background:linear-gradient(90deg,var(--accent-soft),transparent 65%); }
 .studio-report-heading > span { display:grid; place-items:center; width:34px; height:34px; flex:none; border:1px solid var(--accent-border); border-radius:10px; color:var(--accent); background:rgba(255,255,255,.035); font-family:var(--font-display); font-size:11px; font-weight:850; }
-.studio-report-heading h3 { margin:0; color:var(--text); font-family:var(--font-display); font-size:13.5px; font-weight:800; letter-spacing:.01em; text-transform:uppercase; }
+.studio-report-heading h3 { margin:0; color:var(--text); font-family:var(--font-display); font-size:15px; font-weight:800; letter-spacing:.01em; text-transform:uppercase; }
 .studio-report-heading p { margin:2px 0 0; color:var(--axis); font-size:10.5px; }
 .studio-report-table { width:100%; border-collapse:collapse; text-align:left; }
 .studio-report-table th { padding:11px 15px; border-bottom:1px solid rgba(255,255,255,.075); color:var(--axis); background:rgba(255,255,255,.018); font-size:9px; font-weight:800; letter-spacing:.09em; text-align:center; text-transform:uppercase; }

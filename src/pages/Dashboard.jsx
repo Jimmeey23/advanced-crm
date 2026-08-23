@@ -2,7 +2,8 @@ import React from 'react'
 import {
   Users, Trophy, TrendingUp, IndianRupee, Target, Flame, UserPlus,
   Sparkles, ChevronRight, ShieldAlert,
-  BarChart3, Award, CalendarRange
+  BarChart3, Award, CalendarRange,
+  Phone, MessageCircle, MessageSquareText, Mail
 } from 'lucide-react'
 import {
   ResponsiveContainer, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -16,6 +17,14 @@ import { Avatar, ScorePill, Empty } from '../ui.jsx'
 import AssociateCompareModal from '../components/AssociateCompareModal.jsx'
 import PerformanceModal from '../components/PerformanceModal.jsx'
 import MetricCard from '../components/MetricCard.jsx'
+import ComposeModal from '../components/ComposeModal.jsx'
+
+const QUICK_ACTIONS = [
+  { channel: 'call', icon: Phone, color: '#38bdf8', label: 'Call' },
+  { channel: 'whatsapp', icon: MessageCircle, color: '#34d399', label: 'WhatsApp' },
+  { channel: 'sms', icon: MessageSquareText, color: '#fbbf24', label: 'SMS' },
+  { channel: 'email', icon: Mail, color: '#a78bfa', label: 'Email' }
+]
 
 const DONUT_COLORS = ['#f43f5e', '#8b5cf6', '#06b6d4', '#f59e0b', '#10b981', '#6366f1', '#ec4899', '#14b8a6']
 
@@ -46,6 +55,15 @@ export default function Dashboard() {
   const [compareOpen, setCompareOpen] = React.useState(false)
   const [perfOpen, setPerfOpen] = React.useState(false)
   const [sourceView, setSourceView] = React.useState('top')
+  const [composeLead, setComposeLead] = React.useState(null)
+  const [composeChannel, setComposeChannel] = React.useState('whatsapp')
+
+  const quickContact = (e, lead, channel) => {
+    e.stopPropagation()
+    setComposeChannel(channel)
+    setComposeLead(lead)
+    openLead(lead.id)
+  }
   const { data: perf } = useFetch(() => api.get(`/api/analytics/performance?range=${perfRange}`), [perfRange, dataVersion])
 
   const hot = (hotResp?.items || []).slice().sort((a, b) => b.ai.score - a.ai.score).slice(0, 5)
@@ -59,6 +77,7 @@ export default function Dashboard() {
   const revenueTrend = (tl || []).map(m => ({ label: m.month, value: m.revenue }))
   const conversionTrend = (tl || []).map(m => ({ label: m.month, value: m.newLeads ? Math.round((m.won / m.newLeads) * 100) : 0 }))
   const avgDealTrend = (tl || []).map(m => ({ label: m.month, value: m.won ? m.revenue / m.won : 0 }))
+  const openLeadsTrend = (tl || []).map(m => ({ label: m.month, value: m.openLeads }))
 
   const sourceRanked = (sources || []).slice().sort((a, b) => b.count - a.count)
   const topSources = sourceRanked.slice(0, 5)
@@ -93,7 +112,8 @@ export default function Dashboard() {
           description="All-time leads captured across every source." trend={newLeadsTrend} mom={momPct(newLeadsTrend)} />
         <MetricCard icon={UserPlus} title="Open leads" value={ov.openLeads} color="#0ea5e9"
           description={`${ov.hotLeads} hot right now. Active leads that are not won or lost.`}
-          calculation="Count of leads where status is open." />
+          calculation="Count of leads where status is open."
+          trend={openLeadsTrend} mom={momPct(openLeadsTrend)} />
         <MetricCard icon={TrendingUp} title="Conversion" value={`${ov.conversionRate}%`} color="#10b981"
           description={`${ov.won} leads won out of all leads created.`} trend={conversionTrend} mom={momPct(conversionTrend)} />
         <MetricCard icon={Target} title="New this month" value={ov.newThisMonth} color="#f59e0b"
@@ -109,7 +129,7 @@ export default function Dashboard() {
         <div className="card p-5 xl:col-span-2">
           <div className="flex items-center justify-between mb-4">
             <div>
-              <h3 className="font-display font-semibold text-white text-[14px]">Lead volume & wins</h3>
+              <h3 className="font-display font-semibold text-white text-[15px]">Lead volume & wins</h3>
               <p className="text-[11.5px] text-slate-500 mt-0.5">Last 12 months</p>
             </div>
             <div className="flex items-center gap-4 text-[11px] text-slate-400">
@@ -142,7 +162,7 @@ export default function Dashboard() {
         </div>
 
         <div className="card p-5">
-          <h3 className="font-display font-semibold text-white text-[14px] mb-1">Leads by source</h3>
+          <h3 className="font-display font-semibold text-white text-[15px] mb-1">Leads by source</h3>
           <p className="text-[11.5px] text-slate-500 mb-3">Where leads are coming from</p>
           <div className="chart-3d h-[190px]">
             <ResponsiveContainer width="100%" height="100%">
@@ -172,22 +192,33 @@ export default function Dashboard() {
         <div className="card p-5">
           <div className="flex items-center gap-2 mb-1">
             <Sparkles size={15} className="text-fuchsia-400" />
-            <h3 className="font-display font-semibold text-white text-[14px]">AI recommended actions</h3>
+            <h3 className="font-display font-semibold text-white text-[15px]">AI recommended actions</h3>
           </div>
           <p className="text-[11.5px] text-slate-500 mb-3">Highest-intent leads that need attention</p>
           <div className="space-y-2">
             {hot.map(l => (
-              <button key={l.id} className="w-full text-left card card-hover !rounded-xl p-3 flex items-center gap-3" onClick={() => openLead(l.id)}>
-                <Avatar name={l.fullName} color={l.associateColor} size={34} />
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span className="text-[13px] font-semibold text-white truncate">{l.fullName}</span>
-                    <span className={`chip !px-1.5 !py-0.5 text-[9.5px] uppercase ${riskClass(l.ai.risk)}`}>{l.ai.risk}</span>
+              <div key={l.id} className="group relative">
+                <button className="w-full text-left card card-hover !rounded-xl p-3 flex items-center gap-3" onClick={() => openLead(l.id)}>
+                  <Avatar name={l.fullName} color={l.associateColor} size={34} />
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="text-[13px] font-semibold text-white truncate">{l.fullName}</span>
+                      <span className={`chip !px-1.5 !py-0.5 text-[9.5px] uppercase ${riskClass(l.ai.risk)}`}>{l.ai.risk}</span>
+                    </div>
+                    <div className="text-[11.5px] text-slate-400 truncate mt-0.5">{l.ai.nextAction?.text}</div>
                   </div>
-                  <div className="text-[11.5px] text-slate-400 truncate mt-0.5">{l.ai.nextAction?.text}</div>
+                  <ScorePill score={l.ai.score} />
+                </button>
+                <div className="absolute inset-y-0 right-2 hidden group-hover:flex items-center gap-1 pl-2 bg-gradient-to-l from-[var(--card-bg,#0f1220)] via-[var(--card-bg,#0f1220)] to-transparent">
+                  {QUICK_ACTIONS.map(qa => (
+                    <button key={qa.channel} title={qa.label}
+                      className="w-7 h-7 rounded-lg flex items-center justify-center border border-white/10 bg-white/5 hover:bg-white/10 transition-colors"
+                      onClick={(e) => quickContact(e, l, qa.channel)}>
+                      <qa.icon size={13} style={{ color: qa.color }} />
+                    </button>
+                  ))}
                 </div>
-                <ScorePill score={l.ai.score} />
-              </button>
+              </div>
             ))}
             {!hot.length && <Empty icon={<Sparkles size={20} />} title="No hot leads" subtitle="Leads scoring 70+ will appear here." />}
           </div>
@@ -195,7 +226,7 @@ export default function Dashboard() {
 
         <div className="card p-5">
           <div className="flex items-center justify-between mb-1">
-            <h3 className="font-display font-semibold text-white text-[14px]">Leads by source</h3>
+            <h3 className="font-display font-semibold text-white text-[15px]">Leads by source</h3>
             <div className="flex rounded-lg overflow-hidden border border-white/10 shrink-0">
               <button type="button"
                 className={`px-2.5 py-1 text-[11px] font-semibold transition-colors ${sourceView === 'top' ? 'bg-emerald-500/25 text-emerald-300' : 'bg-white/5 text-slate-400 hover:text-white'}`}
@@ -231,7 +262,7 @@ export default function Dashboard() {
         <div className="card p-5">
           <div className="flex items-center gap-2 mb-1">
             <ShieldAlert size={15} className="text-amber-400" />
-            <h3 className="font-display font-semibold text-white text-[14px]">Priority alerts</h3>
+            <h3 className="font-display font-semibold text-white text-[15px]">Priority alerts</h3>
           </div>
           <p className="text-[11.5px] text-slate-500 mb-3">Follow-ups, idle high-value leads & unassigned</p>
           <div className="space-y-2 max-h-[280px] overflow-y-auto scrollbar-thin pr-1">
@@ -255,7 +286,7 @@ export default function Dashboard() {
         <div className="flex flex-wrap items-center gap-3 mb-4">
           <div className="flex items-center gap-2">
             <BarChart3 size={15} className="text-cyan-400" />
-            <h3 className="font-display font-semibold text-white text-[14px]">Lead performance</h3>
+            <h3 className="font-display font-semibold text-white text-[15px]">Lead performance</h3>
           </div>
           <div className="flex rounded-lg overflow-hidden border border-white/10">
             <button className={`px-3 py-1.5 text-[12px] font-semibold transition-colors ${perfRange === 'week' ? 'bg-rose-500/25 text-white' : 'bg-white/5 text-slate-400 hover:text-white'}`} onClick={() => setPerfRange('week')}>Weekly</button>
@@ -294,7 +325,7 @@ export default function Dashboard() {
 
       {/* row 4: team leaderboard */}
       <div className="card p-5">
-        <h3 className="font-display font-semibold text-white text-[14px] mb-4">Associate leaderboard</h3>
+        <h3 className="font-display font-semibold text-white text-[15px] mb-4">Associate leaderboard</h3>
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
           {(team || []).map((t, i) => (
             <div key={t.associateId} className="card !rounded-xl p-3.5 flex items-center gap-3">
@@ -315,6 +346,7 @@ export default function Dashboard() {
 
       <AssociateCompareModal open={compareOpen} onClose={() => setCompareOpen(false)} />
       <PerformanceModal open={perfOpen} onClose={() => setPerfOpen(false)} range={perfRange} />
+      <ComposeModal open={!!composeLead} onClose={() => setComposeLead(null)} lead={composeLead} defaultChannel={composeChannel} />
     </div>
   )
 }

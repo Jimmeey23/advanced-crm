@@ -4,7 +4,7 @@ import { api, API_BASE } from './api.js'
 const Ctx = createContext(null)
 
 const SESSION_ACCENTS = ['crimson', 'blue', 'purple', 'rani', 'bottle', 'ash', 'blood', 'deep']
-const randomAccent = () => SESSION_ACCENTS[Math.floor(Math.random() * SESSION_ACCENTS.length)]
+const randomAccent = () => 'blue'
 
 export function useApp() {
   return useContext(Ctx)
@@ -21,7 +21,7 @@ export function AppProvider({ children }) {
   const toastId = useRef(0)
 
   const [theme, setThemeState] = useState(() => {
-    try { return localStorage.getItem('p57_theme') || 'dark' } catch (e) { return 'dark' }
+    try { return localStorage.getItem('p57_theme') || 'light' } catch (e) { return 'light' }
   })
 
   const [accent, setAccentState] = useState(() => {
