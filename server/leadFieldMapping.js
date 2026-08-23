@@ -2,6 +2,7 @@
 // a flat {key: value} record — inbound webhooks and Google Sheets rows both
 // go through this. Keeping it in one module means both features get the
 // same alias dictionary and manual-mapping/defaults precedence for free.
+import { parseFlexibleDate } from './csv.js'
 
 // Every Lead field an external source is allowed to populate, and the
 // common third-party key spellings that map to it automatically. This
@@ -160,13 +161,22 @@ export function extractFollowUps(record) {
     .sort((a, b) => Number(a) - Number(b))
     .map(i => byIndex[i])
     .filter(f => String(f.date || '').trim() || String(f.comments || '').trim())
-    .map((f, i) => ({
-      id: `fu_import_${Date.now().toString(36)}_${i}`,
-      date: f.date ? String(f.date).trim() : '',
-      comments: f.comments ? String(f.comments).trim() : '',
-      channel: null,
-      done: true
-    }))
+    .map((f, i) => {
+      // A date in the past means this follow-up already happened; a future
+      // date means it's still pending — hardcoding "done" regardless of the
+      // date was the bug (every imported follow-up showed as done even when
+      // scheduled ahead). No date at all means it's a plain historical note,
+      // which is done by definition (nothing left to do on it).
+      const normalizedDate = f.date ? parseFlexibleDate(f.date) : null
+      const todayKey = new Date().toISOString().slice(0, 10)
+      return {
+        id: `fu_import_${Date.now().toString(36)}_${i}`,
+        date: normalizedDate || (f.date ? String(f.date).trim() : ''),
+        comments: f.comments ? String(f.comments).trim() : '',
+        channel: null,
+        done: normalizedDate ? normalizedDate <= todayKey : true
+      }
+    })
 }
 
 // Turns a resolveLeadFields() result into the payload shape
