@@ -1858,6 +1858,106 @@ app.get('/api/analytics/associate-compare', (req, res) => {
   res.json(rows.sort((a, b) => b.revenue - a.revenue))
 })
 
+// Full single-associate deep dive for the leaderboard's "click a row" detail
+// view — everything associate-compare shows plus a 6-month trend, source/
+// stage breakdown, follow-up health and recent activity lists, all scoped to
+// this one person's owned leads.
+app.get('/api/analytics/associate/:id/scorecard', (req, res) => {
+  const associate = db.associates.find(a => a.id === req.params.id)
+  if (!associate) return res.status(404).json({ error: 'Associate not found' })
+
+  const owned = db.leads.filter(l => l.associateId === associate.id)
+  const open = owned.filter(l => l.status === 'open')
+  const won = owned.filter(l => l.status === 'won')
+  const lost = owned.filter(l => l.status === 'lost')
+  const revenue = won.reduce((s, l) => s + (l.valueEstimate || 0), 0)
+  const enriched = owned.map(l => enrichLead(l, db))
+  const avgScore = enriched.length ? Math.round(enriched.reduce((s, l) => s + l.ai.score, 0) / enriched.length) : 0
+  const hot = enriched.filter(l => l.ai.risk === 'hot').length
+
+  let followUps = 0, missed = 0, overdueCount = 0
+  const todayStr = new Date().toISOString().slice(0, 10)
+  for (const l of owned) {
+    for (const f of l.followUps || []) {
+      followUps++
+      if (f.done === false) {
+        missed++
+        if (f.date && f.date < todayStr) overdueCount++
+      }
+    }
+  }
+  const followUpRate = followUps ? Math.round(((followUps - missed) / followUps) * 100) : 0
+
+  const now = new Date()
+  const history = []
+  for (let i = 5; i >= 0; i--) {
+    const y = now.getFullYear(), m = now.getMonth() - i
+    const start = new Date(y, m, 1), end = new Date(y, m + 1, 1)
+    const inRange = periodInRangeFn(start, end)
+    const periodLeads = owned.filter(l => inRange(l.createdAt))
+    const periodWon = owned.filter(l => l.status === 'won' && inRange(l.convertedAt))
+    history.push({
+      periodLabel: start.toLocaleString('en-US', { month: 'short', year: '2-digit' }),
+      newLeads: periodLeads.length,
+      won: periodWon.length,
+      revenue: periodWon.reduce((s, l) => s + (l.valueEstimate || 0), 0)
+    })
+  }
+
+  const thisMonthKey = now.toISOString().slice(0, 7)
+  const lastMonthKey = new Date(now.getFullYear(), now.getMonth() - 1, 1).toISOString().slice(0, 7)
+  const newThisMonth = owned.filter(l => (l.createdAt || '').slice(0, 7) === thisMonthKey).length
+  const wonThisMonth = owned.filter(l => l.status === 'won' && (l.convertedAt || l.createdAt || '').slice(0, 7) === thisMonthKey).length
+  const wonLastMonth = owned.filter(l => l.status === 'won' && (l.convertedAt || l.createdAt || '').slice(0, 7) === lastMonthKey).length
+  const target = associate.targetMonthly || 10
+
+  const sourceMap = {}
+  for (const l of owned) {
+    const key = l.sourceName || 'Unspecified'
+    sourceMap[key] = sourceMap[key] || { source: key, count: 0, wonCount: 0 }
+    sourceMap[key].count++
+    if (l.status === 'won') sourceMap[key].wonCount++
+  }
+  const sourceBreakdown = Object.values(sourceMap)
+    .map(s => ({ ...s, wonRate: s.count ? Math.round((s.wonCount / s.count) * 100) : 0 }))
+    .sort((a, b) => b.count - a.count)
+
+  const stageMap = {}
+  for (const l of open) {
+    const key = l.stage || 'Unspecified'
+    stageMap[key] = (stageMap[key] || 0) + 1
+  }
+  const stageBreakdown = Object.entries(stageMap).map(([stage, count]) => ({ stage, count })).sort((a, b) => b.count - a.count)
+
+  const loc = db.locations.find(l => l.id === associate.locationId)
+
+  res.json({
+    associate: {
+      id: associate.id, name: associate.name, color: associate.color,
+      locationId: associate.locationId, locationName: loc?.name || '',
+      active: associate.active !== false, targetMonthly: target
+    },
+    totals: {
+      total: owned.length, open: open.length, won: won.length, lost: lost.length,
+      revenue, avgDealValue: won.length ? Math.round(revenue / won.length) : 0,
+      conversion: owned.length ? Math.round((won.length / owned.length) * 100) : 0,
+      avgScore, hot
+    },
+    thisMonth: {
+      newLeads: newThisMonth, won: wonThisMonth, wonLastMonth,
+      target, attainmentPct: target ? Math.min(999, Math.round((wonThisMonth / target) * 100)) : 0
+    },
+    followUpHealth: { total: followUps, missed, overdueCount, completionRate: followUpRate },
+    history,
+    sourceBreakdown,
+    stageBreakdown,
+    recentNew: owned.slice().sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt))).slice(0, 8)
+      .map(l => ({ id: l.id, fullName: l.fullName, stage: l.stage, createdAt: l.createdAt })),
+    recentWon: won.slice().sort((a, b) => String(b.convertedAt || b.createdAt).localeCompare(String(a.convertedAt || a.createdAt))).slice(0, 8)
+      .map(l => ({ id: l.id, fullName: l.fullName, revenue: l.valueEstimate || 0, convertedAt: l.convertedAt || l.createdAt }))
+  })
+})
+
 app.get('/api/activity', (req, res) => res.json(db.activity.slice(0, 40)))
 
 app.get('/api/imports', (req, res) => res.json(db.importHistory))

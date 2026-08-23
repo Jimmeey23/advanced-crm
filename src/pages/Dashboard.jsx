@@ -15,6 +15,7 @@ import { api } from '../api.js'
 import { money, stageClass, riskClass, fmtDate, timeAgo } from '../lib.js'
 import { Avatar, ScorePill, Empty } from '../ui.jsx'
 import AssociateCompareModal from '../components/AssociateCompareModal.jsx'
+import AssociateScorecardModal from '../components/AssociateScorecardModal.jsx'
 import PerformanceModal from '../components/PerformanceModal.jsx'
 import MetricCard from '../components/MetricCard.jsx'
 import ComposeModal from '../components/ComposeModal.jsx'
@@ -59,6 +60,7 @@ export default function Dashboard() {
   const [composeLead, setComposeLead] = React.useState(null)
   const [composeChannel, setComposeChannel] = React.useState('whatsapp')
   const [templateLead, setTemplateLead] = React.useState(null)
+  const [scorecardId, setScorecardId] = React.useState(null)
 
   const quickContact = (e, lead, channel) => {
     e.stopPropagation()
@@ -331,7 +333,7 @@ export default function Dashboard() {
         <h3 className="font-display font-semibold text-white text-[15px] mb-4">Associate leaderboard</h3>
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
           {(team || []).map((t, i) => (
-            <div key={t.associateId} className="card !rounded-xl p-3.5 flex items-center gap-3">
+            <button key={t.associateId} className="card card-hover !rounded-xl p-3.5 flex items-center gap-3 text-left" onClick={() => setScorecardId(t.associateId)}>
               <span className="font-display text-[13px] font-bold text-slate-600 w-5">{i + 1}</span>
               <Avatar name={t.name} size={34} />
               <div className="flex-1 min-w-0">
@@ -342,13 +344,14 @@ export default function Dashboard() {
                 <div className="text-[12.5px] font-semibold text-emerald-400 mono">{money(t.revenue)}</div>
                 <div className="text-[10.5px] text-slate-500">{t.won} won · {t.conversion}%</div>
               </div>
-            </div>
+            </button>
           ))}
         </div>
       </div>
 
       <AssociateCompareModal open={compareOpen} onClose={() => setCompareOpen(false)} />
       <PerformanceModal open={perfOpen} onClose={() => setPerfOpen(false)} range={perfRange} />
+      <AssociateScorecardModal associateId={scorecardId} onClose={() => setScorecardId(null)} openLead={openLead} />
       <ComposeModal open={!!composeLead} onClose={() => setComposeLead(null)} lead={composeLead} defaultChannel={composeChannel} />
       <RespondioTemplateModal open={!!templateLead} onClose={() => setTemplateLead(null)} lead={templateLead} />
     </div>
