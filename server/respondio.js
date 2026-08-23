@@ -38,6 +38,19 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms))
 // retry a 429 after the `retryAfter` (seconds) it reports instead of failing
 // the whole request — a transient rate limit shouldn't drop every template
 // already fetched in this call.
+// Thrown when Respond.io rejects a contact identifier (email/phone) because
+// that phone/email is already attached to a *different* contact than the one
+// we resolved — happens when a lead's contact got merged/recreated on
+// Respond.io's side after we cached `respondId`. The response body names the
+// real contact to use, so callers can retry against it instead of failing.
+class RespondioContactConflictError extends Error {
+  constructor(contactId, message) {
+    super(message)
+    this.name = 'RespondioContactConflictError'
+    this.contactId = contactId
+  }
+}
+
 async function api(db, path, { method = 'GET', body } = {}, attempt = 0) {
   if (!isConfigured(db)) throw new Error('Respond.io is not configured. Add your API key in Settings > Integrations.')
   const headers = { Authorization: `Bearer ${apiKey(db)}`, Accept: 'application/json' }
@@ -52,9 +65,37 @@ async function api(db, path, { method = 'GET', body } = {}, attempt = 0) {
       await sleep(Math.min(retryAfter, 5) * 1000 + 100)
       return api(db, path, { method, body }, attempt + 1)
     }
+    if (res.status === 400) {
+      let parsed
+      try { parsed = JSON.parse(text) } catch { /* non-JSON body */ }
+      const conflictContactId = parsed?.message?.contactId
+      const conflictMessage = parsed?.message?.message || parsed?.message
+      if (conflictContactId && /already connected to a contact/i.test(String(conflictMessage || ''))) {
+        throw new RespondioContactConflictError(conflictContactId, String(conflictMessage))
+      }
+    }
     throw new Error(`Respond.io ${res.status} ${path}: ${text.slice(0, 300)}`)
   }
   return res.json()
+}
+
+// Runs a contact-scoped call (message send, conversation status, etc.)
+// against the lead's resolved identifier, and if Respond.io reports that
+// identifier now belongs to a different contact, retries once against the
+// contact id it names — persisting the correction onto `lead.respondId` so
+// every call after this one uses the right contact straight away.
+async function withContactRetry(db, lead, run) {
+  const identifier = leadIdentifier(db, lead)
+  if (!identifier) throw new Error('Lead has no email or phone to use as a Respond.io identifier.')
+  try {
+    return await run(identifier)
+  } catch (e) {
+    if (e instanceof RespondioContactConflictError) {
+      lead.respondId = e.contactId
+      return await run(`id:${e.contactId}`)
+    }
+    throw e
+  }
 }
 
 function digits(v) {
@@ -213,43 +254,35 @@ export async function findContact(db, { email, phone, lead } = {}) {
 
 // Create or update the lead's contact and return the contact object (with id).
 export async function getOrCreateContact(db, lead) {
-  const identifier = leadIdentifier(db, lead)
-  if (!identifier) throw new Error('Lead has no email or phone to use as a Respond.io identifier.')
   const { firstName, lastName } = splitName(lead.fullName || lead.name)
   const payload = { firstName, lastName }
   const mail = String(lead.email || '').trim().toLowerCase()
   const ph = normalizedPhone(db, lead.phone)
   if (mail && mail !== '-' && mail.includes('@')) payload.email = mail
   if (ph) payload.phone = `+${ph}`
-  const data = await api(db, `/contact/create_or_update/${identifier}`, {
-    method: 'POST',
-    body: payload
-  })
+  const data = await withContactRetry(db, lead, (identifier) =>
+    api(db, `/contact/create_or_update/${identifier}`, { method: 'POST', body: payload })
+  )
   const contact = pickContact(data)
-  if (!contact) throw new Error(`Respond.io did not return a usable contact for identifier "${identifier}". Response: ${JSON.stringify(data).slice(0, 300)}`)
+  if (!contact) throw new Error(`Respond.io did not return a usable contact for this lead. Response: ${JSON.stringify(data).slice(0, 300)}`)
   return contact
 }
 
 // Open / close the lead's conversation (sending also opens it implicitly).
 export async function setConversationStatus(db, lead, status) {
-  const identifier = leadIdentifier(db, lead)
-  if (!identifier) return null
-  const data = await api(db, `/contact/${identifier}/conversation/status`, {
-    method: 'POST',
-    body: { status }
-  })
+  if (!leadIdentifier(db, lead)) return null
+  const data = await withContactRetry(db, lead, (identifier) =>
+    api(db, `/contact/${identifier}/conversation/status`, { method: 'POST', body: { status } })
+  )
   return pickContact(data)
 }
 
 // Send a text message to the lead's contact.
 export async function sendMessage(db, lead, text, channel) {
-  const identifier = leadIdentifier(db, lead)
-  if (!identifier) throw new Error('Lead has no email or phone to use as a Respond.io identifier.')
   const channelId = await resolveChannelId(db, channel)
-  const data = await api(db, `/contact/${identifier}/message`, {
-    method: 'POST',
-    body: { channelId, message: { type: 'text', text } }
-  })
+  const data = await withContactRetry(db, lead, (identifier) =>
+    api(db, `/contact/${identifier}/message`, { method: 'POST', body: { channelId, message: { type: 'text', text } } })
+  )
   return pickContact(data) || data
 }
 
@@ -297,8 +330,6 @@ function buildTemplateComponents(rawComponents, values) {
 }
 
 export async function sendTemplateMessage(db, lead, template) {
-  const identifier = leadIdentifier(db, lead)
-  if (!identifier) throw new Error('Lead has no email or phone to use as a Respond.io identifier.')
   // Never silently substitute a blank template — a missing name/selection
   // used to fall back to `{ name: '', ... }` upstream, which sent a message
   // with no template name and no components and showed up as an empty chat
@@ -339,10 +370,9 @@ export async function sendTemplateMessage(db, lead, template) {
     }
   }
 
-  const data = await api(db, `/contact/${identifier}/message`, {
-    method: 'POST',
-    body
-  })
+  const data = await withContactRetry(db, lead, (identifier) =>
+    api(db, `/contact/${identifier}/message`, { method: 'POST', body })
+  )
   return pickContact(data) || data
 }
 

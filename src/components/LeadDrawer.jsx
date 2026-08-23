@@ -24,6 +24,9 @@ export default function LeadDrawer() {
   const [remarkDraft, setRemarkDraft] = useState('')
   const [composeOpen, setComposeOpen] = useState(false)
   const [templateOpen, setTemplateOpen] = useState(false)
+  const [replyDrafts, setReplyDrafts] = useState({})
+  const [replySending, setReplySending] = useState({})
+  const [replyError, setReplyError] = useState({})
   const [enriching, setEnriching] = useState(false)
   const [autoSyncLeadId, setAutoSyncLeadId] = useState('')
   const commentsRef = React.useRef(null)
@@ -55,6 +58,28 @@ export default function LeadDrawer() {
       refreshData(); reload()
     } catch (e) { toast(e.message, 'error') }
     finally { setEnriching(false) }
+  }
+
+  // Quick same-channel reply straight from the conversation thread — the
+  // point of showing history in-app is being able to act on it without a
+  // trip to Respond.io. WhatsApp's first-contact-must-be-a-template rule
+  // still applies server-side; this just surfaces that error inline rather
+  // than requiring the separate template picker for every reply.
+  const sendInlineReply = async (c) => {
+    const text = (replyDrafts[c.id] || '').trim()
+    if (!text) return
+    setReplySending(s => ({ ...s, [c.id]: true }))
+    setReplyError(e => ({ ...e, [c.id]: '' }))
+    try {
+      await api.post('/api/respondio/send', { leadId: lead.id, channel: c.channel, message: text, logFollowUp: true })
+      setReplyDrafts(d => ({ ...d, [c.id]: '' }))
+      reloadConv()
+      refreshData()
+    } catch (err) {
+      setReplyError(e => ({ ...e, [c.id]: err.message }))
+    } finally {
+      setReplySending(s => ({ ...s, [c.id]: false }))
+    }
   }
 
   const loc = lead ? lookup.locById[lead.locationId] : null
@@ -336,7 +361,7 @@ export default function LeadDrawer() {
                     <div className="flex items-center gap-2 px-3 py-2 border-b border-white/6 bg-white/[0.03]">
                       <span className="chip !py-0.5 !px-2 text-[9.5px] uppercase" style={{ background: `${R_CHANNELS[c.channel] || '#888'}1c`, color: R_CHANNELS[c.channel] || '#fff', border: `1px solid ${(R_CHANNELS[c.channel] || '#888')}33` }}>{c.channel}</span>
                       <span className="text-[10.5px] text-slate-500">{c.status || ''}</span>
-                      <button className="ml-auto btn btn-ghost !p-1.5 !text-[11px]" onClick={() => setComposeOpen(true)}><Send size={11} /> Reply</button>
+                      <button className="ml-auto btn btn-ghost !p-1.5 !text-[11px]" onClick={() => setComposeOpen(true)} title="Open full composer (switch channel, use AI suggestions)"><Send size={11} /> More</button>
                     </div>
                     <div className="max-h-[240px] overflow-y-auto scrollbar-thin p-2.5 space-y-1.5">
                       {(c.messages || []).slice().reverse().map(m => (
@@ -347,6 +372,19 @@ export default function LeadDrawer() {
                       ))}
                       {!c.messages?.length && <p className="text-[11px] text-slate-600 text-center py-2">No messages in this thread.</p>}
                     </div>
+                    <div className="p-2.5 border-t border-white/6 flex items-center gap-2">
+                      <input
+                        className="input !py-1.5 !text-[12px] flex-1"
+                        placeholder={`Reply via ${c.channel}…`}
+                        value={replyDrafts[c.id] || ''}
+                        onChange={e => setReplyDrafts(d => ({ ...d, [c.id]: e.target.value }))}
+                        onKeyDown={e => e.key === 'Enter' && !e.shiftKey && sendInlineReply(c)}
+                      />
+                      <button className="btn btn-primary !p-2" onClick={() => sendInlineReply(c)} disabled={replySending[c.id] || !(replyDrafts[c.id] || '').trim()}>
+                        {replySending[c.id] ? <Spinner size={12} /> : <Send size={12} />}
+                      </button>
+                    </div>
+                    {replyError[c.id] && <p className="text-[10.5px] text-rose-400 px-2.5 pb-2">{replyError[c.id]}</p>}
                   </div>
                 ))}
               </div>
