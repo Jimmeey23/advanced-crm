@@ -7,7 +7,7 @@ import {
 } from 'lucide-react'
 import {
   ResponsiveContainer, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip,
-  PieChart, Pie, Cell, BarChart, Bar
+  PieChart, Pie, Cell
 } from 'recharts'
 import { useApp } from '../store.jsx'
 import { useFetch } from '../hooks.js'
@@ -22,13 +22,14 @@ import ComposeModal from '../components/ComposeModal.jsx'
 import RespondioTemplateModal from '../components/RespondioTemplateModal.jsx'
 
 const QUICK_ACTIONS = [
-  { channel: 'call', icon: Phone, color: '#38bdf8', label: 'Call' },
-  { channel: 'whatsapp', icon: MessageCircle, color: '#34d399', label: 'WhatsApp' },
-  { channel: 'sms', icon: MessageSquareText, color: '#fbbf24', label: 'SMS' },
-  { channel: 'email', icon: Mail, color: '#a78bfa', label: 'Email' }
+  { channel: 'call', icon: Phone, color: 'var(--dashboard-secondary)', label: 'Call' },
+  { channel: 'whatsapp', icon: MessageCircle, color: 'var(--dashboard-secondary)', label: 'WhatsApp' },
+  { channel: 'sms', icon: MessageSquareText, color: 'var(--dashboard-warning)', label: 'SMS' },
+  { channel: 'email', icon: Mail, color: 'var(--accent)', label: 'Email' }
 ]
 
-const DONUT_COLORS = ['#f43f5e', '#8b5cf6', '#06b6d4', '#f59e0b', '#10b981', '#6366f1', '#ec4899', '#14b8a6']
+const DASH_COLORS = ['var(--accent)', 'var(--dashboard-secondary)', 'var(--dashboard-warning)']
+const DONUT_COLORS = DASH_COLORS
 
 function momPct(series) {
   if (series.length < 2) return null
@@ -65,6 +66,8 @@ export default function Dashboard() {
   const [compareOpen, setCompareOpen] = React.useState(false)
   const [perfOpen, setPerfOpen] = React.useState(false)
   const [sourceView, setSourceView] = React.useState('top')
+  const [leadChartMode, setLeadChartMode] = React.useState('combined')
+  const [perfSeries, setPerfSeries] = React.useState({ newLeads: true, won: true, missed: true })
   const [composeLead, setComposeLead] = React.useState(null)
   const [composeChannel, setComposeChannel] = React.useState('whatsapp')
   const [templateLead, setTemplateLead] = React.useState(null)
@@ -111,7 +114,7 @@ export default function Dashboard() {
   }
 
   return (
-    <div className="p-6 space-y-5">
+    <div className="dashboard-page p-6 space-y-5">
       <div className="flex items-center justify-between">
         <div>
           <p className="text-slate-400 text-[12.5px]">Overview · {(boot?.locations || []).length} studio locations</p>
@@ -121,54 +124,66 @@ export default function Dashboard() {
 
       {/* KPI row */}
       <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-6 gap-3">
-        <MetricCard icon={Users} title="Total leads" value={ov.totalLeads} color="#8b5cf6"
+        <MetricCard icon={Users} title="Total leads" value={ov.totalLeads} color="var(--accent)"
           description="All-time leads captured across every source." trend={newLeadsTrend} mom={momPct(newLeadsTrend)} yoy={yoyPct(newLeadsTrend)} />
-        <MetricCard icon={UserPlus} title="Open leads" value={ov.openLeads} color="#0ea5e9"
+        <MetricCard icon={UserPlus} title="Open leads" value={ov.openLeads} color="var(--dashboard-secondary)"
           description={`${ov.hotLeads} hot right now. Active leads that are not won or lost.`}
           calculation="Count of leads where status is open."
           trend={openLeadsTrend} mom={momPct(openLeadsTrend)} yoy={yoyPct(openLeadsTrend)} />
-        <MetricCard icon={TrendingUp} title="Conversion" value={`${ov.conversionRate}%`} color="#10b981"
+        <MetricCard icon={TrendingUp} title="Conversion" value={`${ov.conversionRate}%`} color="var(--dashboard-secondary)"
           description={`${ov.won} leads won out of all leads created.`} trend={conversionTrend} mom={momPct(conversionTrend)} yoy={yoyPct(conversionTrend)} />
-        <MetricCard icon={Target} title="New this month" value={ov.newThisMonth} color="#f59e0b"
+        <MetricCard icon={Target} title="New this month" value={ov.newThisMonth} color="var(--accent)"
           description="New leads created in the current calendar month." trend={newLeadsTrend} mom={ov.newDeltaPct} yoy={yoyPct(newLeadsTrend)} />
-        <MetricCard icon={IndianRupee} title="Revenue (month)" value={money(ov.revenueThisMonth)} color="#f43f5e"
+        <MetricCard icon={IndianRupee} title="Revenue (month)" value={money(ov.revenueThisMonth)} color="var(--dashboard-secondary)"
           description="Estimated revenue from deals won this month." trend={revenueTrend} mom={ov.revenueDeltaPct} yoy={yoyPct(revenueTrend)} />
-        <MetricCard icon={Flame} title="Avg deal value" value={money(ov.avgDealValue)} color="#ec4899"
+        <MetricCard icon={Flame} title="Avg deal value" value={money(ov.avgDealValue)} color="var(--accent)"
           description="Average estimated value per won lead." trend={avgDealTrend} mom={momPct(avgDealTrend)} yoy={yoyPct(avgDealTrend)} />
       </div>
 
       {/* row 2: timeline + sources */}
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
-        <div className="card p-5 xl:col-span-2">
+        <div className="card p-5 xl:col-span-2 lead-performance-panel">
           <div className="flex items-center justify-between mb-4">
             <div>
               <h3 className="font-display font-semibold text-white text-[15px]">Lead volume & wins</h3>
               <p className="text-[11.5px] text-slate-500 mt-0.5">Last 12 months</p>
             </div>
-            <div className="flex items-center gap-4 text-[11px] text-slate-400">
-              <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm" style={{ background: '#8b5cf6' }} /> New leads</span>
-              <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm" style={{ background: '#10b981' }} /> Won</span>
+            <div className="lead-chart-controls">
+              {[
+                { id: 'combined', label: 'Combined' },
+                { id: 'leads', label: 'Leads' },
+                { id: 'wins', label: 'Wins' }
+              ].map(btn => (
+                <button key={btn.id} className={leadChartMode === btn.id ? 'is-active' : ''} onClick={() => setLeadChartMode(btn.id)}>{btn.label}</button>
+              ))}
             </div>
           </div>
-          <div className="chart-3d h-[250px]">
+          <div className="lead-chart-stats">
+            <div><span>Current leads</span><strong>{newLeadsTrend.at(-1)?.value ?? 0}</strong></div>
+            <div><span>Current wins</span><strong>{(tl || []).at(-1)?.won ?? 0}</strong></div>
+            <div><span>MoM lead movement</span><strong>{momPct(newLeadsTrend) == null ? '—' : `${momPct(newLeadsTrend).toFixed(1)}%`}</strong></div>
+          </div>
+          <div className="lead-chart-3d h-[250px]">
             <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={tl || []} margin={{ top: 5, right: 5, left: -20, bottom: 0 }}>
+              <AreaChart data={tl || []} margin={{ top: 8, right: 8, left: -18, bottom: 0 }}>
                 <defs>
                   <linearGradient id="gNew" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#8b5cf6" stopOpacity={0.5} />
-                    <stop offset="100%" stopColor="#8b5cf6" stopOpacity={0} />
+                    <stop offset="0%" stopColor="var(--accent)" stopOpacity={0.58} />
+                    <stop offset="72%" stopColor="var(--accent)" stopOpacity={0.08} />
+                    <stop offset="100%" stopColor="var(--accent)" stopOpacity={0} />
                   </linearGradient>
                   <linearGradient id="gWon" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#10b981" stopOpacity={0.5} />
-                    <stop offset="100%" stopColor="#10b981" stopOpacity={0} />
+                    <stop offset="0%" stopColor="var(--dashboard-secondary)" stopOpacity={0.52} />
+                    <stop offset="72%" stopColor="var(--dashboard-secondary)" stopOpacity={0.07} />
+                    <stop offset="100%" stopColor="var(--dashboard-secondary)" stopOpacity={0} />
                   </linearGradient>
                 </defs>
-                <CartesianGrid stroke="rgba(255,255,255,0.06)" vertical={false} />
+                <CartesianGrid stroke="rgba(148,163,184,0.12)" vertical={false} strokeDasharray="4 6" />
                 <XAxis dataKey="month" tick={AXIS} axisLine={false} tickLine={false} />
                 <YAxis tick={AXIS} axisLine={false} tickLine={false} />
-                <Tooltip contentStyle={tooltipStyle()} />
-                <Area type="monotone" dataKey="newLeads" name="New leads" stroke="#a78bfa" fill="url(#gNew)" strokeWidth={2} activeDot={{ r: 5, strokeWidth: 2 }} />
-                <Area type="monotone" dataKey="won" name="Won" stroke="#34d399" fill="url(#gWon)" strokeWidth={2} activeDot={{ r: 5, strokeWidth: 2 }} />
+                <Tooltip contentStyle={tooltipStyle()} cursor={{ stroke: 'var(--accent)', strokeOpacity: 0.35, strokeWidth: 1 }} />
+                {leadChartMode !== 'wins' && <Area type="monotone" dataKey="newLeads" name="New leads" stroke="var(--accent)" fill="url(#gNew)" strokeWidth={2.6} activeDot={{ r: 5, strokeWidth: 2, stroke: 'var(--surface)' }} />}
+                {leadChartMode !== 'leads' && <Area type="monotone" dataKey="won" name="Won" stroke="var(--dashboard-secondary)" fill="url(#gWon)" strokeWidth={2.6} activeDot={{ r: 5, strokeWidth: 2, stroke: 'var(--surface)' }} />}
               </AreaChart>
             </ResponsiveContainer>
           </div>
@@ -204,7 +219,7 @@ export default function Dashboard() {
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
         <div className="card p-5">
           <div className="flex items-center gap-2 mb-1">
-            <Sparkles size={15} className="text-fuchsia-400" />
+            <Sparkles size={15} style={{ color: 'var(--accent)' }} />
             <h3 className="font-display font-semibold text-white text-[15px]">AI recommended actions</h3>
           </div>
           <p className="text-[11.5px] text-slate-500 mb-3">Highest-intent leads that need attention</p>
@@ -242,10 +257,10 @@ export default function Dashboard() {
             <h3 className="font-display font-semibold text-white text-[15px]">Leads by source</h3>
             <div className="flex rounded-lg overflow-hidden border border-white/10 shrink-0">
               <button type="button"
-                className={`px-2.5 py-1 text-[11px] font-semibold transition-colors ${sourceView === 'top' ? 'bg-emerald-500/25 text-emerald-300' : 'bg-white/5 text-slate-400 hover:text-white'}`}
+                className={`dashboard-segment px-2.5 py-1 text-[11px] font-semibold transition-colors ${sourceView === 'top' ? 'is-active' : ''}`}
                 onClick={() => setSourceView('top')}>Top</button>
               <button type="button"
-                className={`px-2.5 py-1 text-[11px] font-semibold transition-colors border-l border-white/10 ${sourceView === 'bottom' ? 'bg-rose-500/25 text-rose-300' : 'bg-white/5 text-slate-400 hover:text-white'}`}
+                className={`dashboard-segment px-2.5 py-1 text-[11px] font-semibold transition-colors border-l border-white/10 ${sourceView === 'bottom' ? 'is-active' : ''}`}
                 onClick={() => setSourceView('bottom')}>Bottom</button>
             </div>
           </div>
@@ -256,14 +271,14 @@ export default function Dashboard() {
               return (
                 <div key={s.source} className="rounded-xl bg-white/[0.03] border border-white/[0.05] p-2.5">
                   <div className="flex items-center gap-2.5">
-                    <span className={`w-5 h-5 rounded-md flex items-center justify-center text-[10px] font-bold shrink-0 ${sourceView === 'top' ? 'bg-emerald-500/15 text-emerald-300' : 'bg-rose-500/15 text-rose-300'}`}>{i + 1}</span>
+                    <span className="dashboard-rank w-5 h-5 rounded-md flex items-center justify-center text-[10px] font-bold shrink-0">{i + 1}</span>
                     <span className="text-[12.5px] font-medium text-white flex-1 truncate">{s.source}</span>
                     <span className="mono text-slate-400 text-[12px]">{s.count}</span>
-                    <span className="text-emerald-400 text-[10.5px] mono shrink-0">{s.won} won</span>
+                    <span className="dashboard-secondary-text text-[10.5px] mono shrink-0">{s.won} won</span>
                     <span className="text-[10.5px] mono text-slate-500 shrink-0 w-8 text-right">{rate}%</span>
                   </div>
                   <div className="mt-1.5 h-1.5 rounded-full bg-white/5 overflow-hidden">
-                    <div className={`h-full rounded-full ${sourceView === 'top' ? 'bg-emerald-400/70' : 'bg-rose-400/70'}`} style={{ width: `${Math.max(4, (s.count / shownMax) * 100)}%` }} />
+                    <div className="h-full rounded-full" style={{ width: `${Math.max(4, (s.count / shownMax) * 100)}%`, background: sourceView === 'top' ? 'var(--dashboard-secondary)' : 'var(--accent)' }} />
                   </div>
                 </div>
               )
@@ -274,7 +289,7 @@ export default function Dashboard() {
 
         <div className="card p-5">
           <div className="flex items-center gap-2 mb-1">
-            <ShieldAlert size={15} className="text-amber-400" />
+            <ShieldAlert size={15} style={{ color: 'var(--dashboard-warning)' }} />
             <h3 className="font-display font-semibold text-white text-[15px]">Priority alerts</h3>
           </div>
           <p className="text-[11.5px] text-slate-500 mb-3">Follow-ups, idle high-value leads & unassigned</p>
@@ -298,40 +313,32 @@ export default function Dashboard() {
       <div className="card p-5">
         <div className="flex flex-wrap items-center gap-3 mb-4">
           <div className="flex items-center gap-2">
-            <BarChart3 size={15} className="text-cyan-400" />
+            <BarChart3 size={15} style={{ color: 'var(--dashboard-secondary)' }} />
             <h3 className="font-display font-semibold text-white text-[15px]">Lead performance</h3>
           </div>
           <div className="flex rounded-lg overflow-hidden border border-white/10">
-            <button className={`px-3 py-1.5 text-[12px] font-semibold transition-colors ${perfRange === 'week' ? 'bg-rose-500/25 text-white' : 'bg-white/5 text-slate-400 hover:text-white'}`} onClick={() => setPerfRange('week')}>Weekly</button>
-            <button className={`px-3 py-1.5 text-[12px] font-semibold transition-colors border-l border-white/10 ${perfRange === 'month' ? 'bg-rose-500/25 text-white' : 'bg-white/5 text-slate-400 hover:text-white'}`} onClick={() => setPerfRange('month')}>Monthly</button>
+            <button className={`dashboard-segment px-3 py-1.5 text-[12px] font-semibold transition-colors ${perfRange === 'week' ? 'is-active' : ''}`} onClick={() => setPerfRange('week')}>Weekly</button>
+            <button className={`dashboard-segment px-3 py-1.5 text-[12px] font-semibold transition-colors border-l border-white/10 ${perfRange === 'month' ? 'is-active' : ''}`} onClick={() => setPerfRange('month')}>Monthly</button>
           </div>
-          <div className="ml-auto flex items-center gap-2 text-[11.5px] text-slate-400">
-            <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm" style={{ background: '#8b5cf6' }} /> New</span>
-            <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm" style={{ background: '#10b981' }} /> Won</span>
-            <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm" style={{ background: '#fbbf24' }} /> Missed FU</span>
+          <div className="lead-series-controls ml-auto">
+            {[['newLeads', 'New'], ['won', 'Won'], ['missed', 'Missed FU']].map(([key, label], i) => (
+              <button key={key} type="button" className={perfSeries[key] ? 'is-active' : ''} onClick={() => setPerfSeries(s => (s[key] && Object.values(s).filter(Boolean).length === 1) ? s : ({ ...s, [key]: !s[key] }))} aria-pressed={perfSeries[key]}>
+                <span style={{ background: DASH_COLORS[i] }} />{label}
+              </button>
+            ))}
           </div>
           <button className="btn btn-soft !py-1.5 !text-[12px]" onClick={() => setCompareOpen(true)}><Award size={14} /> Associate faceoff</button>
           <button className="btn btn-ghost !py-1.5 !text-[12px]" onClick={() => setPerfOpen(true)}><BarChart3 size={13} /> Full details</button>
         </div>
         <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
-          <div className="chart-3d lg:col-span-3 h-[250px]">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={perfBuckets} margin={{ top: 5, right: 5, left: -20, bottom: 0 }}>
-                <CartesianGrid stroke="rgba(255,255,255,0.06)" vertical={false} />
-                <XAxis dataKey="label" tick={AXIS} axisLine={false} tickLine={false} />
-                <YAxis tick={AXIS} axisLine={false} tickLine={false} />
-                <Tooltip contentStyle={tooltipStyle()} cursor={{ fill: 'rgba(255,255,255,0.04)' }} />
-                <Bar dataKey="newLeads" name="New leads" fill="#8b5cf6" radius={[4, 4, 0, 0]} activeBar={{ opacity: 1 }} />
-                <Bar dataKey="won" name="Won" fill="#10b981" radius={[4, 4, 0, 0]} activeBar={{ opacity: 1 }} />
-                <Bar dataKey="missed" name="Missed follow-ups" fill="#fbbf24" radius={[4, 4, 0, 0]} activeBar={{ opacity: 1 }} />
-              </BarChart>
-            </ResponsiveContainer>
+          <div className="lg:col-span-3">
+            <LeadPerformanceDeck data={perfBuckets} visible={perfSeries} />
           </div>
           <div className="space-y-2.5">
-            <PerfStat label="New leads" value={perfTotals.newLeads} color="#8b5cf6" />
-            <PerfStat label="Won deals" value={perfTotals.won} color="#34d399" />
-            <PerfStat label="Revenue" value={money(perfTotals.revenue)} color="#f43f5e" />
-            <PerfStat label="Follow-up completion" value={`${perfTotals.followUpRate || 0}%`} color="#fbbf24" sub={`${perfTotals.missed || 0} missed of ${perfTotals.followUps || 0} scheduled`} />
+            <PerfStat label="New leads" value={perfTotals.newLeads} color="var(--accent)" />
+            <PerfStat label="Won deals" value={perfTotals.won} color="var(--dashboard-secondary)" />
+            <PerfStat label="Revenue" value={money(perfTotals.revenue)} color="var(--accent)" />
+            <PerfStat label="Follow-up completion" value={`${perfTotals.followUpRate || 0}%`} color="var(--dashboard-warning)" sub={`${perfTotals.missed || 0} missed of ${perfTotals.followUps || 0} scheduled`} />
           </div>
         </div>
       </div>
@@ -374,6 +381,40 @@ function PerfStat({ label, value, color, sub }) {
         {sub && <div className="text-[10.5px] text-slate-600 mt-0.5">{sub}</div>}
       </div>
       <div className="font-display text-[17px] font-bold mono" style={{ color }}>{value}</div>
+    </div>
+  )
+}
+
+function LeadPerformanceDeck({ data, visible }) {
+  const rows = (data || []).slice(-12)
+  const max = Math.max(1, ...rows.map(r => Math.max(r.newLeads || 0, r.won || 0, r.missed || 0)))
+  const latest = rows.at(-1) || {}
+  return (
+    <div className="lead-performance-deck">
+      <div className="lead-deck-orbit" />
+      <div className="lead-deck-stage">
+        {rows.map((r, i) => {
+          const leadH = Math.max(10, Math.round(((r.newLeads || 0) / max) * 100))
+          const wonH = Math.max(8, Math.round(((r.won || 0) / max) * 100))
+          const missedH = Math.max(6, Math.round(((r.missed || 0) / max) * 100))
+          const active = i === rows.length - 1
+          const label = r.label || r.month
+          return (
+            <div key={`${label}-${i}`} className={`lead-deck-column ${active ? 'is-current' : ''}`} title={`${label}: ${r.newLeads || 0} new, ${r.won || 0} won, ${r.missed || 0} missed follow-ups`}>
+              <div className="lead-deck-bars">
+                {visible?.newLeads !== false && <span className="lead-deck-bar lead-deck-bar-new" style={{ height: `${leadH}%` }} />}
+                {visible?.won !== false && <span className="lead-deck-bar lead-deck-bar-won" style={{ height: `${wonH}%` }} />}
+                {visible?.missed !== false && <span className="lead-deck-bar lead-deck-bar-missed" style={{ height: `${missedH}%` }} />}
+              </div>
+              <span className="lead-deck-label">{label}</span>
+            </div>
+          )
+        })}
+      </div>
+      <div className="lead-deck-insight">
+        <span>{latest.label || latest.month || 'Current'}</span>
+        <strong>{latest.newLeads || 0} new · {latest.won || 0} won · {latest.missed || 0} missed</strong>
+      </div>
     </div>
   )
 }

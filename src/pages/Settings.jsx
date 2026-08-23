@@ -18,7 +18,11 @@ const ACCENTS = [
   { id: 'bottle', label: 'Bottle green', from: '#047857', to: '#10b981' },
   { id: 'ash', label: 'Ash gray', from: '#475569', to: '#94a3b8' },
   { id: 'blood', label: 'Blood red', from: '#7f1d1d', to: '#dc2626' },
-  { id: 'deep', label: 'Deep blue', from: '#172554', to: '#1e40af' }
+  { id: 'deep', label: 'Deep blue', from: '#172554', to: '#1e40af' },
+  { id: 'teal', label: 'Teal', from: '#0f766e', to: '#14b8a6' },
+  { id: 'gold', label: 'Gold', from: '#a16207', to: '#f59e0b' },
+  { id: 'graphite', label: 'Graphite', from: '#111827', to: '#64748b' },
+  { id: 'mono', label: 'Monochrome', from: '#18181b', to: '#a1a1aa' }
 ]
 
 const TABS = [
@@ -573,6 +577,8 @@ export default function SettingsPage() {
                 <ToggleMini label="Glossy surfaces" value={ui.glossy !== false} onChange={v => setUi({ ...ui, glossy: v })} />
                 <ToggleMini label="Show follow-up columns" value={ui.showFollowUpColumns !== false} onChange={v => setUi({ ...ui, showFollowUpColumns: v })} />
                 <ToggleMini label="Density — compact rows" value={ui.density === 'compact'} onChange={v => setUi({ ...ui, density: v ? 'compact' : 'comfortable' })} />
+                <ToggleMini label="Wide table workspace" value={ui.wideTables === true} onChange={v => setUi({ ...ui, wideTables: v })} />
+                <ToggleMini label="Compact metric cards" value={ui.compactMetrics === true} onChange={v => setUi({ ...ui, compactMetrics: v })} />
               </div>
             </Section>
           </>

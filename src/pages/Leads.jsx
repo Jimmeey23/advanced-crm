@@ -5,7 +5,7 @@ import {
   Table as TableIcon, LayoutGrid, Rows3, PieChart, KanbanSquare, CalendarDays,
   Phone, MessageCircle, Mail, MessageSquareText, Sparkles, Trash2, CheckSquare, Square,
   Users, TrendingUp, XCircle, Wallet, Clock, AlertTriangle, Flag,
-  Trophy, PhoneOff, FlaskConical, CircleDot
+  Trophy, PhoneOff, FlaskConical, CircleDot, Pin, PinOff, PanelTop
 } from 'lucide-react'
 import { useApp } from '../store.jsx'
 import { useFetch } from '../hooks.js'
@@ -100,8 +100,12 @@ export default function Leads({ initialSearch = '' }) {
   const [selectAllBusy, setSelectAllBusy] = useState(false)
   const [bulkBusy, setBulkBusy] = useState(false)
   const [columns, setColumnsRaw] = useState(loadColumns)
+  const [pinCount, setPinCount] = useState(() => Number(localStorage.getItem('p57_leads_pin_count')) || 1)
   const [pinnedCols, setPinnedCols] = useState(() => {
-    try { return JSON.parse(localStorage.getItem('p57_leads_pinned_cols') || '[]') } catch (e) { return [] }
+    try {
+      const savedCount = Number(localStorage.getItem('p57_leads_pin_count')) || 1
+      return savedCount > 0 ? ['select', 'lead'] : []
+    } catch (e) { return ['select', 'lead'] }
   })
   const [headerPinned, setHeaderPinned] = useState(() => localStorage.getItem('p57_leads_header_pinned') !== 'false')
   const [pageSize, setPageSize] = useState(() => Number(localStorage.getItem('p57_leads_page_size')) || 25)
@@ -258,6 +262,12 @@ export default function Leads({ initialSearch = '' }) {
     setPinnedCols(next)
     try { localStorage.setItem('p57_leads_pinned_cols', JSON.stringify(next)) } catch (e) { /* ignore */ }
   }
+  const savePinCount = (nextCount) => {
+    setPinCount(nextCount)
+    const next = nextCount > 0 ? ['select', 'lead', ...(nextCount > 1 ? ['stage'] : [])] : []
+    savePinnedCols(next)
+    try { localStorage.setItem('p57_leads_pin_count', String(nextCount)) } catch (e) { /* ignore */ }
+  }
   const toggleHeaderPinned = () => setHeaderPinned(current => {
     const next = !current
     try { localStorage.setItem('p57_leads_header_pinned', String(next)) } catch (e) { /* ignore */ }
@@ -340,24 +350,24 @@ export default function Leads({ initialSearch = '' }) {
         <select className="input !w-auto !py-1.5" value={groupBy} onChange={e => { setGroupBy(e.target.value); setCollapsed({}) }}>
           {GROUP_OPTIONS.map(g => <option key={g.id} value={g.id}>{g.id ? `Group by: ${g.label}` : 'No grouping'}</option>)}
         </select>
+        {grouped && (
+          <div className="flex items-center gap-1">
+            <button className="btn btn-ghost !py-2 !px-3" onClick={() => setCollapsed({})} title="Expand all groups"><ChevronRight size={14} className="rotate-90" /></button>
+            <button className="btn btn-ghost !py-2 !px-3" onClick={() => setCollapsed(Object.fromEntries(grouped.map(g => [g.key, true])))} title="Collapse all groups"><ChevronRight size={14} /></button>
+          </div>
+        )}
         <div className="ml-auto flex items-center gap-2 flex-nowrap [&>*]:shrink-0">
-          <select className="input !w-auto !py-1.5" value={sortBy} onChange={e => { setSortBy(e.target.value); setPage(0) }}>
-            <option value="createdAt">Sort: Created</option>
-            <option value="fullName">Sort: Name</option>
-            <option value="stage">Sort: Stage</option>
-            <option value="ai.score">Sort: Score</option>
-          </select>
-          <button className="btn btn-ghost !py-2" onClick={() => setSortDir(d => d === 'asc' ? 'desc' : 'asc')}>
-            <ChevronDown size={14} className={`transition-transform ${sortDir === 'asc' ? 'rotate-180' : ''}`} />
-          </button>
           <button className="btn btn-ghost !py-2" onClick={exportCsv}><Download size={14} /> Export</button>
           {view === 'table' && (
             <>
-              <button className={`btn btn-ghost !py-2 ${pinnedCols.length ? 'btn-soft' : ''}`} onClick={() => savePinnedCols(pinnedCols.length ? [] : ['select', 'lead', 'stage'])} title="Pin the first 1–2 columns">
-                <ColumnsToggleIcon pinned={pinnedCols.length > 0} /> {pinnedCols.length ? 'Pinned' : 'Pin cols'}
+              <button className={`btn btn-ghost !py-2 !px-3 ${pinnedCols.length ? 'btn-soft' : ''}`} onClick={() => savePinCount(pinCount ? 0 : 1)} title={pinnedCols.length ? 'Unpin columns' : 'Pin first column'}>
+                {pinnedCols.length ? <Pin size={14} /> : <PinOff size={14} />}
               </button>
-              <button className={`btn btn-ghost !py-2 ${headerPinned ? 'btn-soft' : ''}`} onClick={toggleHeaderPinned} title="Pin or unpin the table header row">
-                <TableIcon size={14} /> {headerPinned ? 'Header pinned' : 'Pin header'}
+              <select className="input !w-[76px] !py-1.5" value={pinCount} onChange={e => savePinCount(Number(e.target.value))} title="Number of lead columns to pin">
+                {[0, 1, 2].map(n => <option key={n} value={n}>{n} pin</option>)}
+              </select>
+              <button className={`btn btn-ghost !py-2 !px-3 ${headerPinned ? 'btn-soft' : ''}`} onClick={toggleHeaderPinned} title="Pin or unpin the table header row">
+                <PanelTop size={14} />
               </button>
               <button className="btn btn-ghost !py-2" onClick={toggleDensity} title="Row density">
                 <Rows3 size={14} /> {density === 'compact' ? 'Compact' : 'Comfortable'}
@@ -523,7 +533,7 @@ function Metric({ icon: Icon, children, tone = 'neutral', title }) {
     slate: 'bg-white/[0.03] border-white/8 text-slate-400'
   }
   return (
-    <span title={title} className={`inline-flex items-center gap-1.5 rounded-lg border px-2 py-1 text-[11px] font-medium mono ${tones[tone]}`}>
+    <span title={title} className={`group-metric inline-flex items-center gap-1.5 rounded-lg border px-2 py-1 text-[11px] font-medium mono ${tones[tone]}`}>
       {Icon && <Icon size={11} className="shrink-0" />}
       {children}
     </span>
@@ -563,17 +573,26 @@ function TableView({ items, boot, lookup, openLead, changeStage, toggleManualFla
   const focusedItems = focusLeadIds.length ? items.filter(l => focusLeadIds.includes(l.id)) : items
   if (grouped) {
     return (
-      <div className="divide-y divide-white/5">
+      <div className="lead-group-stack">
         {grouped.map(g => {
           const isOpen = !collapsed[g.key]
           return (
-            <div key={g.key}>
-              <button className="w-full flex flex-wrap items-center gap-3 px-4 py-3 bg-white/[0.025] hover:bg-white/[0.045] border-b border-white/8 transition-colors text-left" onClick={() => toggleGroup(g.key)}>
-                <ChevronRight size={14} className={`text-slate-500 transition-transform shrink-0 ${isOpen ? 'rotate-90' : ''}`} />
-                <span className="font-display text-[13.5px] font-semibold text-white shrink-0">{g.key}</span>
+            <div key={g.key} className={`lead-group-block ${isOpen ? 'is-open' : ''}`}>
+              <button className="lead-group-header" onClick={() => toggleGroup(g.key)}>
+                <span className="lead-group-chevron">
+                  <ChevronRight size={14} className={`transition-transform ${isOpen ? 'rotate-90' : ''}`} />
+                </span>
+                <span className="lead-group-title-wrap">
+                  <span className="lead-group-kicker">Grouped segment</span>
+                  <span className="lead-group-title">{g.key}</span>
+                </span>
                 <GroupSummary list={g.list} />
               </button>
-              {isOpen && <TableGrid items={focusLeadIds.length ? g.list.filter(l => focusLeadIds.includes(l.id)) : g.list} boot={boot} lookup={lookup} openLead={openLead} changeStage={changeStage} toggleManualFlag={toggleManualFlag} onMessage={onMessage} onTemplateMessage={onTemplateMessage} selected={selected} toggleSelect={toggleSelect} toggleSelectAll={toggleSelectAll} columns={columns} density={density} rowHeight={rowHeight} tableZoom={tableZoom} colWidths={colWidths} setColWidths={setColWidths} manualFlagOverrides={manualFlagOverrides} pinnedCols={pinnedCols} headerPinned={headerPinned} focusLeadIds={focusLeadIds} clearFocus={clearFocus} sortBy={sortBy} sortDir={sortDir} setSortBy={setSortBy} setSortDir={setSortDir} />}
+              {isOpen && (
+                <div className="lead-group-table">
+                  <TableGrid items={focusLeadIds.length ? g.list.filter(l => focusLeadIds.includes(l.id)) : g.list} boot={boot} lookup={lookup} openLead={openLead} changeStage={changeStage} toggleManualFlag={toggleManualFlag} onMessage={onMessage} onTemplateMessage={onTemplateMessage} selected={selected} toggleSelect={toggleSelect} toggleSelectAll={toggleSelectAll} columns={columns} density={density} rowHeight={rowHeight} tableZoom={tableZoom} colWidths={colWidths} setColWidths={setColWidths} manualFlagOverrides={manualFlagOverrides} pinnedCols={pinnedCols} headerPinned={headerPinned} focusLeadIds={focusLeadIds} clearFocus={clearFocus} sortBy={sortBy} sortDir={sortDir} setSortBy={setSortBy} setSortDir={setSortDir} />
+                </div>
+              )}
             </div>
           )
         })}
@@ -590,8 +609,21 @@ function TableGrid({ items, boot, lookup, openLead, changeStage, toggleManualFla
   const py = density === 'compact' ? 'py-1.5' : ''
   const [scoreTip, setScoreTip] = useState(null)
   const widthOf = (id, fallback) => colWidths[id] || fallback
+  const selectW = widthOf('select', 76)
+  const leadW = widthOf('lead', 260)
+  const stageW = widthOf('stage', 190)
+  const stickyStyle = (id) => {
+    if (id === 'select') return { left: 0, width: selectW, minWidth: selectW }
+    if (id === 'lead') return { left: selectW, width: leadW, minWidth: leadW }
+    if (id === 'stage') return { left: selectW + leadW, width: stageW, minWidth: stageW }
+    return {}
+  }
+  const stickyHeaderStyle = (id) => ({ ...stickyStyle(id), top: 0 })
+  const isLastPinned = (id) => pinnedCols[pinnedCols.length - 1] === id
+  const stickyClass = (id, z = 'z-20') => pinnedCols.includes(id) ? `sticky ${z} table-sticky-surface ${isLastPinned(id) ? 'table-sticky-edge' : ''}` : ''
+  const stickyHeadClass = (id) => pinnedCols.includes(id) ? `sticky z-50 table-sticky-surface table-sticky-corner ${isLastPinned(id) ? 'table-sticky-edge' : ''}` : ''
   const autoFitColumns = () => {
-    const next = { select: 76, lead: 240, stage: 190, createdAt: 140, remarksField: 160, message: 112 }
+    const next = { select: 76, lead: 260, stage: 190, createdAt: 140, remarksField: 160, message: 112 }
     for (const c of visibleCols) next[c.id] = c.field === 'owner' ? 180 : c.field === 'score' ? 104 : 145
     for (const ch of Object.keys(CHANNELS)) next[`fu_${ch}`] = 54
     setColWidths?.(next)
@@ -623,14 +655,14 @@ function TableGrid({ items, boot, lookup, openLead, changeStage, toggleManualFla
       <table className="data-table leads-data-table">
         <thead className={headerPinned ? 'is-pinned' : 'is-unpinned'}>
           <tr className="text-[10.5px] uppercase tracking-wider text-slate-500 border-b border-white/8">
-            <th className={`resizable-th px-3 py-3 font-semibold ${pinnedCols.includes('select') ? 'sticky left-0 z-40 table-sticky-surface' : ''}`} style={{ width: widthOf('select', 76), minWidth: widthOf('select', 76) }}>
+            <th className={`resizable-th px-3 py-3 font-semibold ${stickyHeadClass('select')}`} style={pinnedCols.includes('select') ? stickyHeaderStyle('select') : { width: selectW, minWidth: selectW }}>
               <button className="flex items-center justify-center text-slate-400 hover:text-white" onClick={toggleSelectAll} title={allChecked ? 'Deselect all' : 'Select all'}>
                 {allChecked ? <CheckSquare size={15} className="text-rose-400" /> : <Square size={15} />}
               </button>
               <span className="col-resize-handle" onDoubleClick={autoFitColumns} onMouseDown={startResize('select', widthOf('select', 76))} title="Drag to resize column. Double-click to auto-fit all columns." />
             </th>
-            <SortHead label="Lead" field="fullName" width={widthOf('lead', 260)} onResize={startResize} onAutoFit={autoFitColumns} className={`px-4 py-3 font-semibold ${pinnedCols.includes('lead') ? 'sticky left-[76px] z-30 table-sticky-surface' : ''}`} sortBy={sortBy} sortDir={sortDir} setSortBy={setSortBy} setSortDir={setSortDir} />
-            <SortHead label="Stage" field="stage" width={widthOf('stage', 190)} onResize={startResize} onAutoFit={autoFitColumns} className={`px-4 py-3 font-semibold ${pinnedCols.includes('stage') ? 'sticky left-[336px] z-30 table-sticky-surface' : ''}`} sortBy={sortBy} sortDir={sortDir} setSortBy={setSortBy} setSortDir={setSortDir} />
+            <SortHead label="Lead" field="fullName" width={leadW} style={pinnedCols.includes('lead') ? stickyHeaderStyle('lead') : null} onResize={startResize} onAutoFit={autoFitColumns} className={`px-4 py-3 font-semibold ${stickyHeadClass('lead')}`} sortBy={sortBy} sortDir={sortDir} setSortBy={setSortBy} setSortDir={setSortDir} />
+            <SortHead label="Stage" field="stage" width={stageW} style={pinnedCols.includes('stage') ? stickyHeaderStyle('stage') : null} onResize={startResize} onAutoFit={autoFitColumns} className={`px-4 py-3 font-semibold ${stickyHeadClass('stage')}`} sortBy={sortBy} sortDir={sortDir} setSortBy={setSortBy} setSortDir={setSortDir} />
             <SortHead label="Created" field="createdAt" width={widthOf('createdAt', 150)} onResize={startResize} onAutoFit={autoFitColumns} className="px-4 py-3 font-semibold" sortBy={sortBy} sortDir={sortDir} setSortBy={setSortBy} setSortDir={setSortDir} />
             {visibleCols.map(c => <SortHead key={c.id} label={c.label} field={c.field || c.id} resizeId={c.id} width={widthOf(c.id, c.field === 'owner' ? 190 : c.field === 'score' ? 112 : 150)} onResize={startResize} onAutoFit={autoFitColumns} className="px-4 py-3 font-semibold" sortBy={sortBy} sortDir={sortDir} setSortBy={setSortBy} setSortDir={setSortDir} />)}
             <th className="resizable-th px-4 py-3 font-semibold" style={{ width: widthOf('remarksField', 160), minWidth: widthOf('remarksField', 160) }}>
@@ -659,7 +691,7 @@ function TableGrid({ items, boot, lookup, openLead, changeStage, toggleManualFla
             const rowFlagged = rowManualFlags.some(f => f.id === 'focus')
             return (
               <tr key={l.id} className={`border-b border-white/5 hover:bg-white/[0.035] cursor-pointer transition-colors ${selected?.has(l.id) ? 'bg-rose-500/[0.05]' : ''} ${focusLeadIds.includes(l.id) ? 'ring-1 ring-rose-400/30 bg-rose-500/[0.08]' : ''}`} onClick={() => openLead(l.id)}>
-                <td className={`px-3 ${py} ${pinnedCols.includes('select') ? 'sticky left-0 z-20 table-sticky-surface' : ''}`} onClick={e => e.stopPropagation()}>
+                <td className={`px-3 ${py} ${stickyClass('select')}`} style={pinnedCols.includes('select') ? stickyStyle('select') : { width: selectW, minWidth: selectW }} onClick={e => e.stopPropagation()}>
                   <div className="flex items-center gap-2">
                     <button className="flex items-center justify-center text-slate-400 hover:text-white" onClick={() => toggleSelect(l.id)}>
                       {selected?.has(l.id) ? <CheckSquare size={15} className="text-rose-400" /> : <Square size={15} />}
@@ -669,18 +701,18 @@ function TableGrid({ items, boot, lookup, openLead, changeStage, toggleManualFla
                     </button>
                   </div>
                 </td>
-                <td className={`px-4 ${py} w-[260px] ${pinnedCols.includes('lead') ? 'sticky left-[76px] z-20 table-sticky-surface' : ''}`}>
+                <td className={`px-4 ${py} ${stickyClass('lead')}`} style={pinnedCols.includes('lead') ? stickyStyle('lead') : { width: leadW, minWidth: leadW }}>
                   <div className="min-w-0">
-                    <div className="text-[13px] font-semibold text-white truncate max-w-[220px] flex items-center gap-1.5">
+                    <div className="text-[13px] font-semibold text-white truncate flex items-center gap-1.5">
                       {l.fullName}
                       {[...rowManualFlags, ...(l.flags || [])].map(f => (
                         <span key={f.id} title={f.name} className="chip !px-1.5 !py-0 text-[9px]" style={{ background: `${f.color}22`, color: f.color, border: `1px solid ${f.color}44` }}>{f.label}</span>
                       ))}
                     </div>
-                    {density !== 'compact' && <div className="text-[11px] text-slate-500 truncate max-w-[220px]">{l.email}</div>}
+                    {density !== 'compact' && <div className="text-[11px] text-slate-500 truncate">{l.email}</div>}
                   </div>
                 </td>
-                <td className={`px-4 ${py} min-w-[190px] ${pinnedCols.includes('stage') ? 'sticky left-[336px] z-20 table-sticky-surface' : ''}`}>
+                <td className={`px-4 ${py} ${stickyClass('stage')}`} style={pinnedCols.includes('stage') ? stickyStyle('stage') : { width: stageW, minWidth: stageW }}>
                   {(() => {
                     const { icon: StageIcon, color } = stageVisual(l.stage)
                     return (
@@ -697,7 +729,7 @@ function TableGrid({ items, boot, lookup, openLead, changeStage, toggleManualFla
                     )
                   })()}
                 </td>
-                <td className={`px-4 ${py} w-[190px] text-[12px] text-slate-400 mono`}>{fmtDate(l.createdAt)}</td>
+                <td className={`px-4 ${py} text-[12px] text-slate-400 mono`} style={{ width: widthOf('createdAt', 150), minWidth: widthOf('createdAt', 150) }}>{fmtDate(l.createdAt)}</td>
                 {visibleCols.map(c => {
                   if (c.field === 'source') {
                     return (
@@ -760,11 +792,12 @@ function TableGrid({ items, boot, lookup, openLead, changeStage, toggleManualFla
   )
 }
 
-function SortHead({ label, field, resizeId, width, onResize, onAutoFit, className = '', sortBy, sortDir, setSortBy, setSortDir }) {
+function SortHead({ label, field, resizeId, width, style, onResize, onAutoFit, className = '', sortBy, sortDir, setSortBy, setSortDir }) {
   const active = sortBy === field
   const nextDir = active && sortDir === 'asc' ? 'desc' : 'asc'
+  const thStyle = style || { width, minWidth: width }
   return (
-    <th className={`resizable-th ${className} cursor-pointer select-none`} style={{ width, minWidth: width }} onClick={() => { setSortBy(field); setSortDir(nextDir) }}>
+    <th className={`resizable-th ${className} cursor-pointer select-none`} style={thStyle} onClick={() => { setSortBy(field); setSortDir(nextDir) }}>
       <span className="inline-flex items-center gap-1.5">
         {label}
         <ChevronDown size={11} className={`transition-transform ${active && sortDir === 'asc' ? 'rotate-180' : ''} ${active ? 'text-rose-400' : 'text-slate-500'}`} />

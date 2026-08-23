@@ -27,11 +27,20 @@ export default function MetricCard({
   const lastUp = lastIdx > 0 && trend[lastIdx].value >= trend[lastIdx - 1].value
   const analysis = buildAnalysis(title, trend, mom, yoy)
 
+  const toggle = () => setFlipped(f => !f)
+
   return (
-    <button
-      type="button"
+    <div
+      role="button"
+      tabIndex={0}
       className="flip-card w-full text-left"
-      onClick={() => setFlipped(f => !f)}
+      onClick={toggle}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault()
+          toggle()
+        }
+      }}
       title="Click for more analytics"
       style={{ '--metric-accent': color }}
     >
@@ -50,7 +59,7 @@ export default function MetricCard({
                   const h = Math.max(6, Math.round((Math.abs(t.value) / max) * 100))
                   const isLast = i === lastIdx
                   const isMax = i === maxIdx && !isLast
-                  const barColor = isLast ? (lastUp ? '#10b981' : '#3b82f6') : isMax ? '#3b82f6' : undefined
+                  const barColor = isLast || isMax ? 'var(--metric-accent)' : undefined
                   return (
                     <div key={i} className="metric-card-bar-col">
                       <div
@@ -90,7 +99,7 @@ export default function MetricCard({
           </div>
         </div>
       </div>
-    </button>
+    </div>
   )
 }
 

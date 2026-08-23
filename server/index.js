@@ -4,7 +4,7 @@ import crypto from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 import express from 'express'
 import multer from 'multer'
-import { init, load, save, saveNow, uid, nowIso, reset, markDirty, markDeleted, onRemoteChange } from './db.js'
+import { init, load, save, saveNow, saveMetaNow, uid, nowIso, reset, markDirty, markDeleted, onRemoteChange } from './db.js'
 import { enrichAll, enrichLead } from './ai.js'
 import { assignLead } from './roundRobin.js'
 import * as momence from './momence.js'
@@ -1228,7 +1228,7 @@ app.put('/api/settings', async (req, res) => {
   }
   if (Array.isArray(body.followUpChannels)) db.settings.followUpChannels = body.followUpChannels.filter(Boolean)
   try {
-    await saveNow()
+    await saveMetaNow()
   } catch (e) {
     return res.status(502).json({ error: `Settings saved locally but failed to sync to Supabase: ${e.message}` })
   }

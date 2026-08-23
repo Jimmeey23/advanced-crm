@@ -13,6 +13,7 @@ import ComposeModal from './ComposeModal.jsx'
 import RespondioTemplateModal from './RespondioTemplateModal.jsx'
 
 const R_CHANNELS = { whatsapp: '#34d399', sms: '#fbbf24', email: '#a78bfa', call: '#38bdf8' }
+const MIN_DRAWER_WIDTH = 560
 
 export default function LeadDrawer() {
   const { boot, lookup, drawerLeadId, closeLead, refreshData, toast, dataVersion } = useApp()
@@ -29,7 +30,7 @@ export default function LeadDrawer() {
   const [replyError, setReplyError] = useState({})
   const [enriching, setEnriching] = useState(false)
   const [autoSyncLeadId, setAutoSyncLeadId] = useState('')
-  const [drawerWidth, setDrawerWidth] = useState(() => Number(localStorage.getItem('p57_lead_drawer_width')) || 760)
+  const [drawerWidth, setDrawerWidth] = useState(() => Number(localStorage.getItem('p57_lead_drawer_width')) || MIN_DRAWER_WIDTH)
   const commentsRef = React.useRef(null)
 
   const fillSuggestion = (s) => {
@@ -105,7 +106,7 @@ export default function LeadDrawer() {
     const startX = e.clientX
     const startWidth = drawerWidth
     const onMove = (ev) => {
-      const next = Math.max(560, Math.min(Math.round(startWidth + startX - ev.clientX), Math.min(1100, window.innerWidth - 24)))
+      const next = Math.max(MIN_DRAWER_WIDTH, Math.min(Math.round(startWidth + startX - ev.clientX), Math.min(1100, window.innerWidth - 24)))
       setDrawerWidth(next)
       try { localStorage.setItem('p57_lead_drawer_width', String(next)) } catch (err) { /* ignore */ }
     }
@@ -655,6 +656,8 @@ function humanMomenceError(message) {
 function Tabbed({ tabs, children }) {
   const [active, setActive] = React.useState(tabs[0].key)
   const activeTab = tabs.find(t => t.key === active)
+  const childList = React.Children.toArray(children)
+  const activeChild = childList.find(c => String(c.key || '').replace(/^\.\$/, '').replace(/^\./, '') === activeTab.key) || childList[tabs.findIndex(t => t.key === activeTab.key)]
   return (
     <div>
       <div className="flex gap-1.5 mb-3">
@@ -667,7 +670,7 @@ function Tabbed({ tabs, children }) {
           )
         })}
       </div>
-      {React.Children.toArray(children).find(c => c.key === activeTab.key)}
+      {activeChild}
     </div>
   )
 }

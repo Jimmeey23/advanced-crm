@@ -3,7 +3,7 @@ import { api, API_BASE } from './api.js'
 
 const Ctx = createContext(null)
 
-const SESSION_ACCENTS = ['crimson', 'blue', 'purple', 'rani', 'bottle', 'ash', 'blood', 'deep']
+const SESSION_ACCENTS = ['crimson', 'blue', 'purple', 'rani', 'bottle', 'ash', 'blood', 'deep', 'teal', 'gold', 'graphite', 'mono']
 const randomAccent = () => 'blue'
 
 export function useApp() {

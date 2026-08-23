@@ -102,6 +102,16 @@ export async function saveNow() {
   lastLocalWriteAt = Date.now()
 }
 
+export async function saveMetaNow() {
+  if (!state) return
+  clearTimeout(saveTimer)
+  clearTimeout(syncTimer)
+  writeFile()
+  if (!supabase.isEnabled()) return
+  await supabase.persistMetaState(state)
+  lastLocalWriteAt = Date.now()
+}
+
 // Debounced disk write for remote-originated changes. A bulk edit (CSV
 // import, backfill, bulk action) touching thousands of rows makes Supabase
 // Realtime echo back thousands of individual change events in quick

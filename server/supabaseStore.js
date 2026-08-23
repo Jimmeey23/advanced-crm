@@ -133,6 +133,29 @@ export async function persistState(state, dirtyLeadIds = [], deletedLeadIds = []
   }
 }
 
+export async function persistMetaState(state) {
+  const c = getClient()
+  if (!c) return
+  const meta = {
+    version: state.version,
+    seededAt: state.seededAt,
+    settings: state.settings,
+    locations: state.locations,
+    associates: state.associates,
+    stages: state.stages,
+    sources: state.sources,
+    channels: state.channels,
+    classTypes: state.classTypes,
+    activity: state.activity,
+    importHistory: state.importHistory,
+    webhookIntegrations: state.webhookIntegrations,
+    webhookLogs: state.webhookLogs,
+    sheetSyncLogs: state.sheetSyncLogs
+  }
+  const { error } = await c.from(META_TABLE).upsert({ key: META_KEY, data: meta, updated_at: new Date().toISOString() })
+  if (error) throw new Error(`supabase persist meta: ${error.message}`)
+}
+
 function uniqueIds(ids) {
   return [...new Set((ids || []).map(id => String(id || '').trim()).filter(Boolean))]
 }
