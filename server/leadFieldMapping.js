@@ -16,15 +16,18 @@ export const LEAD_FIELD_ALIASES = {
   lastName: ['last_name', 'lastname', 'lname', 'surname', 'family_name'],
   email: ['email', 'email_address', 'emailaddress'],
   phone: ['phone', 'phone_number', 'phonenumber', 'mobile', 'contact_number', 'whatsapp'],
-  source: ['source', 'lead_source', 'utm_source', 'sourcename'],
+  createdAt: ['created_at', 'createdat', 'created', 'date_created', 'signup_date', 'created_date'],
+  convertedAt: ['converted_at', 'convertedat', 'converted_to_customer_at', 'conversion_date', 'closed_date', 'won_date'],
+  sourceId: ['source_id', 'sourceid'],
+  source: ['source', 'lead_source', 'utm_source', 'source_name', 'sourcename'],
   notes: ['notes', 'note', 'message', 'comments', 'remarks'],
   classType: ['class_type', 'classtype', 'service', 'interest', 'program'],
   channel: ['channel', 'medium', 'utm_medium'],
-  stage: ['stage', 'pipeline_stage'],
+  stage: ['stage', 'stage_name', 'stagename', 'pipeline_stage'],
   status: ['status', 'lead_status'],
-  valueEstimate: ['value', 'value_estimate', 'amount', 'price', 'deal_value'],
+  valueEstimate: ['value', 'value_estimate', 'amount', 'price', 'deal_value', 'ltv', 'lifetime_value', 'clv'],
   associateId: ['associate_id', 'associateid', 'owner_id', 'assigned_to'],
-  associateName: ['associate_name', 'associatename', 'owner_name', 'assigned_to_name', 'sales_rep'],
+  associateName: ['associate', 'associate_name', 'associatename', 'owner_name', 'assigned_to_name', 'sales_rep'],
   locationId: ['location_id', 'locationid', 'studio_id', 'center_id'],
   center: ['center', 'centre', 'studio', 'location'],
   memberId: ['member_id', 'memberid'],
@@ -37,28 +40,36 @@ export const LEAD_FIELD_ALIASES = {
   retentionStatus: ['retention_status', 'retentionstatus']
 }
 
+// Real-world headers/keys vary in punctuation, not just case — "Full Name"
+// vs "full_name" vs "fullName" — so both sides of every alias comparison are
+// reduced to bare lowercase alphanumerics before comparing. Precomputed once
+// since the alias dictionary never changes at runtime.
+const normalizeKey = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '')
+const NORMALIZED_ALIASES = Object.fromEntries(
+  Object.entries(LEAD_FIELD_ALIASES).map(([field, aliases]) => [field, aliases.map(normalizeKey)])
+)
+
 // Given a sheet's (or any source's) raw header/key list, guesses which Lead
 // field each one maps to by matching against the same alias dictionary the
 // live resolver uses — so "auto-detect" and "what actually happens at
-// receive time" can never drift apart. Only exact alias matches count (no
-// fuzzy scoring) to keep suggestions predictable and reviewable.
+// receive time" can never drift apart. Only exact (post-normalization)
+// alias matches count — no fuzzy scoring — to keep suggestions predictable.
 export function suggestMappingFromKeys(keys) {
   const suggestions = {}
   for (const key of keys) {
-    const norm = String(key || '').trim().toLowerCase()
+    const norm = normalizeKey(key)
     if (!norm) continue
-    for (const [field, aliases] of Object.entries(LEAD_FIELD_ALIASES)) {
+    for (const [field, aliases] of Object.entries(NORMALIZED_ALIASES)) {
       if (aliases.includes(norm)) { suggestions[key] = field; break }
     }
   }
   return suggestions
 }
 
-function findByAlias(record, aliases) {
-  const keys = Object.keys(record)
-  for (const alias of aliases) {
-    const hit = keys.find(k => k.toLowerCase() === alias)
-    if (hit) return record[hit]
+function findByAlias(record, field) {
+  const aliases = NORMALIZED_ALIASES[field]
+  for (const key of Object.keys(record)) {
+    if (aliases.includes(normalizeKey(key))) return record[key]
   }
   return undefined
 }
@@ -82,7 +93,7 @@ export function resolveLeadFields(record, integ) {
     const mappedKey = reverseMapping[field]
     if (mappedKey !== undefined) val = record[mappedKey]
     if (val === undefined || val === null || String(val).trim() === '') {
-      val = findByAlias(record, LEAD_FIELD_ALIASES[field])
+      val = findByAlias(record, field)
     }
     if (val === undefined || val === null || String(val).trim() === '') {
       val = defaults[field]
@@ -109,6 +120,9 @@ export function buildLeadPayloadFromResolved(resolved, db, fallbackSourceName) {
     fullName: resolved.fullName ? String(resolved.fullName).trim() : '',
     email: resolved.email ? String(resolved.email).trim() : '-',
     phone: resolved.phone ? String(resolved.phone).trim() : '',
+    createdAt: resolved.createdAt ? String(resolved.createdAt).trim() : undefined,
+    convertedAt: resolved.convertedAt ? String(resolved.convertedAt).trim() : undefined,
+    sourceId: resolved.sourceId ? String(resolved.sourceId).trim() : undefined,
     sourceName: resolved.source ? String(resolved.source).trim() : fallbackSourceName,
     remarks: resolved.notes ? String(resolved.notes) : '',
     classType: resolved.classType ? String(resolved.classType).trim() : undefined,
