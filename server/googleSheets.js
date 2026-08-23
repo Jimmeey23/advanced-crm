@@ -208,7 +208,11 @@ async function writeStatusColumn(db, statusColIndex, rowUpdates) {
 // status column, resolves the rest through the shared mapping/alias
 // resolver, dedups against existing leads, creates the new ones, and
 // writes the status column back for every row it just processed.
-export async function runSync(db, { createLeadFrom, findDuplicateLead, assignLead, markDirty, logSync }) {
+// `force: true` ignores the status-column check entirely (still dedups
+// against whatever leads currently exist) — for when the sheet's marker
+// column says "already imported" but the app-side leads it created were
+// since deleted, and the intent is a genuine full re-pull.
+export async function runSync(db, { createLeadFrom, findDuplicateLead, assignLead, markDirty, logSync, force = false }) {
   if (!isConfigured(db)) throw new Error('Google Sheets is not fully configured yet.')
   const c = config(db)
   const { header, rows } = await readSheetRows(db)
@@ -231,7 +235,7 @@ export async function runSync(db, { createLeadFrom, findDuplicateLead, assignLea
     // it) can already be full of unrelated values, and skipping every row
     // that merely has *something* in that column was skipping the entire
     // sheet on the very first sync.
-    if (existingStatus.startsWith(IMPORTED_MARK)) { alreadyImported++; skipped++; continue }
+    if (!force && existingStatus.startsWith(IMPORTED_MARK)) { alreadyImported++; skipped++; continue }
 
     const record = {}
     header.forEach((h, idx) => { if (h) record[String(h).trim()] = row[idx] })

@@ -644,6 +644,24 @@ app.post('/api/webhooks/:id/test', (req, res) => {
   res.json({ resolved, preview, missing })
 })
 
+// Auto-detects field mapping from a sample payload's keys — same idea as the
+// Google Sheets "detect from header row" flow, applied to a webhook since a
+// webhook has no fixed schema to read in advance, only whatever sample the
+// admin pastes into the test tool.
+app.post('/api/webhooks/:id/detect-mapping', (req, res) => {
+  const w = db.webhookIntegrations.find(x => x.id === req.params.id)
+  if (!w) return res.status(404).json({ error: 'Webhook integration not found' })
+  const payload = req.body?.payload
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    return res.status(400).json({ error: 'Provide a sample JSON object as "payload"' })
+  }
+  const keys = Object.keys(payload)
+  const suggested = suggestMappingFromKeys(keys)
+  const existing = w.fieldMapping || {}
+  for (const key of Object.keys(existing)) delete suggested[key]
+  res.json({ keys, suggested })
+})
+
 app.post('/api/webhooks/:id/regenerate', (req, res) => {
   const w = db.webhookIntegrations.find(x => x.id === req.params.id)
   if (!w) return res.status(404).json({ error: 'Webhook integration not found' })
@@ -820,7 +838,7 @@ app.post('/api/google-sheets/disconnect', (req, res) => {
 
 app.post('/api/google-sheets/sync-now', async (req, res) => {
   try {
-    const counts = await googleSheets.runSync(db, { createLeadFrom, findDuplicateLead, assignLead, markDirty, logSync: logSheetSync })
+    const counts = await googleSheets.runSync(db, { createLeadFrom, findDuplicateLead, assignLead, markDirty, logSync: logSheetSync, force: req.body?.force === true })
     save()
     res.json(counts)
   } catch (e) {
@@ -1877,7 +1895,31 @@ app.post('/api/leads/:id/enrich', async (req, res) => {
 // ---------- Respond.io messaging ----------
 
 app.get('/api/respondio/status', (req, res) => {
-  res.json({ configured: respondio.isConfigured(db), workspaceId: respondio.workspaceId(db) })
+  if (!db.settings.respondio) db.settings.respondio = {}
+  if (!db.settings.respondio.inboundWebhookKey) {
+    db.settings.respondio.inboundWebhookKey = genWebhookKey()
+    save()
+  }
+  res.json({
+    configured: respondio.isConfigured(db),
+    workspaceId: respondio.workspaceId(db),
+    inboundWebhookUrl: `${req.protocol}://${req.get('host')}/api/respondio/webhook/${db.settings.respondio.inboundWebhookKey}`
+  })
+})
+
+// Respond.io only tells us about inbound replies (a lead messaging back) if we
+// ask it to — the app otherwise only ever pulls conversation history when a
+// lead's drawer happens to be open, so a reply can sit unseen indefinitely.
+// Add a Workflow in Respond.io (trigger: Message Received) with a Webhook
+// action pointed at the URL from /api/respondio/status; the payload contents
+// don't matter here — arrival alone is enough to tell every open tab "go
+// refetch conversations now" over the existing SSE channel.
+app.post('/api/respondio/webhook/:key', (req, res) => {
+  if (!db.settings.respondio?.inboundWebhookKey || req.params.key !== db.settings.respondio.inboundWebhookKey) {
+    return res.status(404).json({ error: 'Unknown webhook' })
+  }
+  broadcastChange('respondio-message')
+  res.json({ ok: true })
 })
 
 app.post('/api/respondio/test', async (req, res) => {
@@ -2079,6 +2121,10 @@ app.get('/api/analytics/performance/details', (req, res) => {
 
 const sseClients = new Set()
 
+function broadcastChange(type) {
+  for (const res of sseClients) res.write(`data: ${JSON.stringify({ type })}\n\n`)
+}
+
 app.get('/api/events', (req, res) => {
   res.writeHead(200, {
     'Content-Type': 'text/event-stream',
@@ -2090,9 +2136,7 @@ app.get('/api/events', (req, res) => {
   req.on('close', () => sseClients.delete(res))
 })
 
-onRemoteChange(() => {
-  for (const res of sseClients) res.write(`data: ${JSON.stringify({ type: 'remote-change' })}\n\n`)
-})
+onRemoteChange(() => broadcastChange('remote-change'))
 
 // ---------- static hosting ----------
 

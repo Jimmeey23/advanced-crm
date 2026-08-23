@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import { Plus, Save, X } from 'lucide-react'
+import { Plus, Save, X, ChevronUp, ChevronDown } from 'lucide-react'
 
 // Shared by lead webhooks and the Google Sheets import — both feed an
 // external {key: value} record through the same server-side alias/mapping
@@ -21,7 +21,7 @@ export const LEAD_FIELD_OPTIONS = [
   { id: 'status', label: 'Status' },
   { id: 'valueEstimate', label: 'Value estimate' },
   { id: 'associateId', label: 'Associate ID' },
-  { id: 'associateName', label: 'Associate name' },
+  { id: 'associateName', label: 'Owner / associate name' },
   { id: 'locationId', label: 'Location ID' },
   { id: 'center', label: 'Center' },
   { id: 'memberId', label: 'Member ID' },
@@ -47,6 +47,19 @@ export default function FieldMappingEditor({
   const addRow = () => { setMapping(m => [...m, { key: '', field: fieldOptions[0]?.id || '' }]); setMappingDirty(true) }
   const updateRow = (i, patch) => { setMapping(m => m.map((r, idx) => idx === i ? { ...r, ...patch } : r)); setMappingDirty(true) }
   const removeRow = (i) => { setMapping(m => m.filter((_, idx) => idx !== i)); setMappingDirty(true) }
+  // Order matters when two rows target the same lead field — the first one
+  // wins at resolve time — so letting the admin reorder is how they pick
+  // which of two overlapping sheet columns/keys actually takes precedence.
+  const moveRow = (i, dir) => {
+    setMapping(m => {
+      const j = i + dir
+      if (j < 0 || j >= m.length) return m
+      const next = m.slice()
+      ;[next[i], next[j]] = [next[j], next[i]]
+      return next
+    })
+    setMappingDirty(true)
+  }
   const saveMapping = () => {
     const obj = {}
     for (const r of mapping) if (r.key.trim()) obj[r.key.trim()] = r.field
@@ -71,6 +84,10 @@ export default function FieldMappingEditor({
         <div className="space-y-1.5">
           {mapping.map((r, i) => (
             <div key={i} className="flex items-center gap-2">
+              <div className="flex flex-col shrink-0">
+                <button className="btn btn-ghost !p-0.5 !min-h-0 disabled:opacity-20" onClick={() => moveRow(i, -1)} disabled={i === 0} title="Move up"><ChevronUp size={11} /></button>
+                <button className="btn btn-ghost !p-0.5 !min-h-0 disabled:opacity-20" onClick={() => moveRow(i, 1)} disabled={i === mapping.length - 1} title="Move down"><ChevronDown size={11} /></button>
+              </div>
               <input className="input !py-1.5 !text-[12px] flex-1" placeholder={keyPlaceholder} value={r.key} onChange={e => updateRow(i, { key: e.target.value })} />
               <span className="text-slate-600 text-[11px]">→</span>
               <select className="input !py-1.5 !text-[12px] !w-auto" value={r.field} onChange={e => updateRow(i, { field: e.target.value })}>
@@ -80,6 +97,7 @@ export default function FieldMappingEditor({
             </div>
           ))}
           {!mapping.length && <p className="text-[11px] text-slate-600">No manual mapping — common key spellings (name/full_name, phone/mobile, email, etc.) are auto-detected.</p>}
+          {mapping.length > 1 && <p className="text-[10.5px] text-slate-600">Order matters if two rows target the same lead field — the top one wins. Use the arrows to reorder.</p>}
         </div>
         <div className="flex items-center gap-2 mt-2">
           <button className="btn btn-ghost !py-1.5 !text-[12px]" onClick={addRow}><Plus size={12} /> Add field</button>

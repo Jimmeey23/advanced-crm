@@ -27,7 +27,7 @@ export const LEAD_FIELD_ALIASES = {
   status: ['status', 'lead_status'],
   valueEstimate: ['value', 'value_estimate', 'amount', 'price', 'deal_value', 'ltv', 'lifetime_value', 'clv'],
   associateId: ['associate_id', 'associateid', 'owner_id', 'assigned_to'],
-  associateName: ['associate', 'associate_name', 'associatename', 'owner_name', 'assigned_to_name', 'sales_rep'],
+  associateName: ['associate', 'associate_name', 'associatename', 'owner', 'owner_name', 'assigned_to_name', 'sales_rep'],
   locationId: ['location_id', 'locationid', 'studio_id', 'center_id'],
   center: ['center', 'centre', 'studio', 'location'],
   memberId: ['member_id', 'memberid'],

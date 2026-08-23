@@ -311,6 +311,21 @@ export default function SettingsPage() {
 
   const testWebhook = async (id, payload) => api.post(`/api/webhooks/${id}/test`, { payload })
 
+  const detectWebhookMapping = async (id, payload) => {
+    try {
+      const { keys, suggested } = await api.post(`/api/webhooks/${id}/detect-mapping`, { payload })
+      if (Object.keys(suggested).length) {
+        const w = webhooks.find(x => x.id === id)
+        const merged = { ...(w?.fieldMapping || {}), ...suggested }
+        await api.patch(`/api/webhooks/${id}`, { fieldMapping: merged })
+        loadWebhooks()
+        toast(`Auto-detected ${Object.keys(suggested).length} of ${keys.length} field${keys.length === 1 ? '' : 's'}`)
+      } else {
+        toast('No new fields matched automatically from this sample — map the rest by hand above')
+      }
+    } catch (e) { toast(e.message, 'error') }
+  }
+
   const renameWebhook = async (id, name) => {
     try { await api.patch(`/api/webhooks/${id}`, { name }); loadWebhooks() }
     catch (e) { toast(e.message, 'error') }
@@ -406,10 +421,11 @@ export default function SettingsPage() {
     catch (e) { toast(e.message, 'error') }
   }
 
-  const syncSheetNow = async () => {
+  const syncSheetNow = async (force) => {
+    if (force && !window.confirm('Force full resync ignores this sheet\'s "already imported" markers and re-pulls every row, recreating a lead for each one that doesn\'t match a current lead by email/phone. Use this after deleting leads from the app so the sheet can repopulate them. Continue?')) return
     setSheetsSyncing(true); setSheetsSyncResult(null)
     try {
-      const counts = await api.post('/api/google-sheets/sync-now', {})
+      const counts = await api.post('/api/google-sheets/sync-now', { force: !!force })
       setSheetsSyncResult({ ok: true, ...counts })
       loadSheetsConfig()
       toast(`Synced — ${counts.created} new lead${counts.created === 1 ? '' : 's'}`)
@@ -707,6 +723,18 @@ export default function SettingsPage() {
                 <div className="sm:col-span-2"><label className="label">API key</label><input className="input" type="password" value={respSet.apiKey} onChange={e => setRespSet({ ...respSet, apiKey: e.target.value })} placeholder={respStatus?.configured ? '•••••••• (stored)' : 'pk_… from app.respond.io'} /></div>
                 <div><label className="label">Workspace ID (optional)</label><input className="input" value={respSet.workspaceId} onChange={e => setRespSet({ ...respSet, workspaceId: e.target.value })} placeholder="e.g. 5f2b…" /></div>
               </div>
+
+              {respStatus?.inboundWebhookUrl && (
+                <div className="mt-4 rounded-xl bg-white/[0.03] border border-white/6 px-4 py-3">
+                  <div className="text-[12.5px] font-semibold text-white">Receive replies live</div>
+                  <div className="text-[11px] text-slate-500 mt-0.5 mb-2">Without this, a lead's reply only shows up once someone reopens that lead. In Respond.io, add a Workflow (trigger: <em>Message Received</em>) with a <em>Webhook</em> action pointed at this URL — the payload contents don't matter, arrival alone tells every open tab to refresh.</div>
+                  <div className="flex items-center gap-2">
+                    <code className="input !py-1.5 flex-1 !text-[11.5px] overflow-x-auto whitespace-nowrap">{respStatus.inboundWebhookUrl}</code>
+                    <button className="btn btn-ghost !py-1.5" onClick={() => navigator.clipboard?.writeText(respStatus.inboundWebhookUrl).then(() => toast('URL copied')).catch(() => toast('Could not copy — copy manually', 'error'))}><Copy size={13} /> Copy</button>
+                  </div>
+                </div>
+              )}
+
               <div className="mt-4 card p-4 bg-white/[0.02] border-white/6">
                 <div className="flex items-center justify-between gap-3 mb-3">
                   <div>
@@ -822,6 +850,7 @@ export default function SettingsPage() {
                     onSaveDefaults={(d) => updateWebhookDefaults(w.id, d)}
                     onSaveMethod={(m) => updateWebhookMethod(w.id, m)}
                     onTest={(payload) => testWebhook(w.id, payload)}
+                    onDetectMapping={(payload) => detectWebhookMapping(w.id, payload)}
                     onRegenerate={() => regenerateWebhook(w.id)}
                     onDelete={() => deleteWebhook(w.id)}
                     onCopy={() => copyWebhookUrl(w.url)}
@@ -860,7 +889,8 @@ export default function SettingsPage() {
                   </div>
                   <div className="flex items-center gap-3 mt-3">
                     <button className="btn btn-primary" onClick={saveSheetTarget}>Save sheet</button>
-                    <button className="btn btn-soft" onClick={syncSheetNow} disabled={sheetsSyncing || !sheetsConfig?.sheetId}>{sheetsSyncing ? <Spinner size={14} /> : <RefreshCcw size={13} />} Sync now</button>
+                    <button className="btn btn-soft" onClick={() => syncSheetNow(false)} disabled={sheetsSyncing || !sheetsConfig?.sheetId}>{sheetsSyncing ? <Spinner size={14} /> : <RefreshCcw size={13} />} Sync now</button>
+                    <button className="btn btn-ghost !text-[12px]" onClick={() => syncSheetNow(true)} disabled={sheetsSyncing || !sheetsConfig?.sheetId} title="Ignore the sheet's already-imported markers and re-pull every row">Force full resync</button>
                     <button className="btn btn-ghost !py-2" onClick={toggleSheetsLogs}><ScrollText size={14} /> {sheetsLogsOpen ? 'Hide log' : 'View sync log'}</button>
                   </div>
                   {sheetsSyncResult && (
@@ -1135,13 +1165,14 @@ function ThemeCard({ active, onClick, title, sub, swatch }) {
 
 const WEBHOOK_METHODS = ['POST', 'PUT', 'GET']
 
-function WebhookRow({ webhook, logs, logsOpen, onToggleLogs, onRename, onSaveMapping, onSaveDefaults, onSaveMethod, onTest, onRegenerate, onDelete, onCopy }) {
+function WebhookRow({ webhook, logs, logsOpen, onToggleLogs, onRename, onSaveMapping, onSaveDefaults, onSaveMethod, onTest, onDetectMapping, onRegenerate, onDelete, onCopy }) {
   const [nameDraft, setNameDraft] = useState(webhook.name)
   const [testOpen, setTestOpen] = useState(false)
   const [testPayload, setTestPayload] = useState('{\n  "name": "Jane Doe",\n  "phone_number": "9876543210",\n  "email": "jane@example.com"\n}')
   const [testResult, setTestResult] = useState(null)
   const [testError, setTestError] = useState('')
   const [testing, setTesting] = useState(false)
+  const [detecting, setDetecting] = useState(false)
 
   const runTest = async () => {
     setTesting(true); setTestError(''); setTestResult(null)
@@ -1152,6 +1183,16 @@ function WebhookRow({ webhook, logs, logsOpen, onToggleLogs, onRename, onSaveMap
     } catch (e) {
       setTestError(e instanceof SyntaxError ? 'Sample payload is not valid JSON' : e.message)
     } finally { setTesting(false) }
+  }
+
+  const detectFromPayload = async () => {
+    setDetecting(true); setTestError('')
+    try {
+      const parsed = JSON.parse(testPayload)
+      await onDetectMapping(parsed)
+    } catch (e) {
+      setTestError(e instanceof SyntaxError ? 'Sample payload is not valid JSON' : e.message)
+    } finally { setDetecting(false) }
   }
 
   return (
@@ -1175,6 +1216,7 @@ function WebhookRow({ webhook, logs, logsOpen, onToggleLogs, onRename, onSaveMap
       {webhook.method === 'GET' && <p className="text-[11px] text-amber-400/90">GET mode — send lead fields as query params on this URL, not a body.</p>}
 
       <FieldMappingEditor
+        key={JSON.stringify(webhook.fieldMapping)}
         fieldMapping={webhook.fieldMapping}
         defaults={webhook.defaults}
         onSaveMapping={onSaveMapping}
@@ -1189,7 +1231,10 @@ function WebhookRow({ webhook, logs, logsOpen, onToggleLogs, onRename, onSaveMap
           <div className="mt-2 space-y-2 rounded-lg bg-black/20 border border-white/6 p-2.5">
             <p className="text-[11px] text-slate-500">Paste a sample payload to preview the lead it would create — nothing is saved.</p>
             <textarea className="input !text-[12px] font-mono resize-none" rows={5} value={testPayload} onChange={e => setTestPayload(e.target.value)} />
-            <button className="btn btn-soft !py-1.5 !text-[12px]" onClick={runTest} disabled={testing}>{testing ? <Spinner size={12} /> : <Zap size={12} />} Preview</button>
+            <div className="flex items-center gap-2">
+              <button className="btn btn-soft !py-1.5 !text-[12px]" onClick={runTest} disabled={testing}>{testing ? <Spinner size={12} /> : <Zap size={12} />} Preview</button>
+              <button className="btn btn-ghost !py-1.5 !text-[12px]" onClick={detectFromPayload} disabled={detecting}>{detecting ? <Spinner size={12} /> : <Sparkles size={12} />} Detect mapping from this payload</button>
+            </div>
             {testError && <p className="text-[11.5px] text-rose-400">{testError}</p>}
             {testResult && (
               testResult.missing?.length ? (
