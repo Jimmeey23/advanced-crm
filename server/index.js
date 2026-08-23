@@ -293,6 +293,7 @@ function applyFilters(list, q) {
   if (q.sourceName) out = out.filter(l => l.sourceName === q.sourceName)
   if (q.channel) out = out.filter(l => l.channel === q.channel)
   if (q.classType) out = out.filter(l => l.classType === q.classType)
+  if (q.flagged === '1' || q.flagged === 'true') out = out.filter(l => (l.manualFlags || []).some(f => f.id === 'focus'))
   if (q.risk) out = out.filter(l => {
     const e = enrichLead(l, db)
     return e.ai.risk === q.risk

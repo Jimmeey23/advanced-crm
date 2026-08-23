@@ -5,10 +5,11 @@ import { AVATAR_COLORS, initials } from './lib.js'
 export function Avatar({ name, color, size = 30, className = '', photoUrl }) {
   const c = color || AVATAR_COLORS[(name || '').length % AVATAR_COLORS.length]
   const [broken, setBroken] = useState(false)
-  if (photoUrl && !broken) {
+  const src = normalizePhotoUrl(photoUrl)
+  if (src && !broken) {
     return (
       <img
-        src={photoUrl}
+        src={src}
         alt={name}
         title={name}
         className={`inline-block rounded-full object-cover shrink-0 ${className}`}
@@ -26,6 +27,13 @@ export function Avatar({ name, color, size = 30, className = '', photoUrl }) {
       {initials(name)}
     </span>
   )
+}
+
+function normalizePhotoUrl(photoUrl) {
+  const raw = String(photoUrl || '').trim()
+  if (!raw) return ''
+  if (/^(https?:)?\/\//i.test(raw) || raw.startsWith('data:')) return raw
+  return `/${raw.replace(/^public\//, '').replace(/^\/+/, '')}`
 }
 
 export function ScorePill({ score, size = 'md' }) {

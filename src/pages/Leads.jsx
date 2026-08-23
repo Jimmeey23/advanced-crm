@@ -33,7 +33,7 @@ function getColumnValue(col, l, lookup) {
 
 const EMPTY_FILTERS = {
   locationId: '', stage: '', status: '', associateId: '', sourceName: '', channel: '',
-  classType: '', risk: '', minScore: '', maxScore: '', dateFrom: '', dateTo: '', createdWithinDays: ''
+  classType: '', risk: '', minScore: '', maxScore: '', dateFrom: '', dateTo: '', createdWithinDays: '', flagged: ''
 }
 
 const VIEWS = [
@@ -106,6 +106,13 @@ export default function Leads({ initialSearch = '' }) {
   const [headerPinned, setHeaderPinned] = useState(() => localStorage.getItem('p57_leads_header_pinned') !== 'false')
   const [pageSize, setPageSize] = useState(() => Number(localStorage.getItem('p57_leads_page_size')) || 25)
   const [density, setDensity] = useState(() => localStorage.getItem('p57_leads_density') || 'comfortable')
+  const [rowHeight, setRowHeight] = useState(() => Number(localStorage.getItem('p57_leads_row_height')) || 58)
+  const [tableZoom, setTableZoom] = useState(() => Number(localStorage.getItem('p57_leads_table_zoom')) || 100)
+  const [colWidths, setColWidths] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('p57_leads_col_widths') || '{}') } catch (e) { return {} }
+  })
+  const [aiAlertOpen, setAiAlertOpen] = useState(false)
+  const [manualFlagOverrides, setManualFlagOverrides] = useState({})
   const tableJumpRef = useRef(null)
   const setColumns = (updater) => setColumnsRaw(prev => {
     const next = typeof updater === 'function' ? updater(prev) : updater
@@ -115,6 +122,19 @@ export default function Leads({ initialSearch = '' }) {
   const toggleDensity = () => setDensity(d => {
     const next = d === 'comfortable' ? 'compact' : 'comfortable'
     try { localStorage.setItem('p57_leads_density', next) } catch (e) { /* ignore */ }
+    return next
+  })
+  const saveRowHeight = (next) => {
+    setRowHeight(next)
+    try { localStorage.setItem('p57_leads_row_height', String(next)) } catch (e) { /* ignore */ }
+  }
+  const saveTableZoom = (next) => {
+    setTableZoom(next)
+    try { localStorage.setItem('p57_leads_table_zoom', String(next)) } catch (e) { /* ignore */ }
+  }
+  const saveColWidths = (updater) => setColWidths(prev => {
+    const next = typeof updater === 'function' ? updater(prev) : updater
+    try { localStorage.setItem('p57_leads_col_widths', JSON.stringify(next)) } catch (e) { /* ignore */ }
     return next
   })
   const hasFilters = Object.values(filters).some(Boolean) || search
@@ -131,14 +151,21 @@ export default function Leads({ initialSearch = '' }) {
   }
 
   const toggleManualFlag = async (lead) => {
-    const flagged = lead.manualFlags?.some(f => f.id === 'focus')
+    const currentFlags = manualFlagOverrides[lead.id] || lead.manualFlags || []
+    const flagged = currentFlags.some(f => f.id === 'focus')
     const manualFlags = flagged
-      ? (lead.manualFlags || []).filter(f => f.id !== 'focus')
-      : [...(lead.manualFlags || []), { id: 'focus', label: 'Flagged', color: '#f43f5e' }]
+      ? currentFlags.filter(f => f.id !== 'focus')
+      : [...currentFlags, { id: 'focus', name: 'Manual priority flag', label: 'Flagged', color: '#e11d48' }]
+    setManualFlagOverrides(prev => ({ ...prev, [lead.id]: manualFlags }))
     try {
       await api.patch(`/api/leads/${lead.id}`, { manualFlags })
+      toast(flagged ? 'Flag removed' : 'Lead flagged')
+      reload()
       refreshData()
-    } catch (e) { toast(e.message, 'error') }
+    } catch (e) {
+      setManualFlagOverrides(prev => ({ ...prev, [lead.id]: lead.manualFlags || [] }))
+      toast(e.message, 'error')
+    }
   }
 
   const toggleSelect = (id) => setSelected(s => {
@@ -248,17 +275,24 @@ export default function Leads({ initialSearch = '' }) {
     <div className="p-6 space-y-4">
       {/* AI intelligence banner */}
       {(missedLeads.length > 0 || outreachLeads.length > 0) && (
-        <div className="card p-4 flex flex-wrap items-center gap-3 border-amber-400/20" style={{ background: 'linear-gradient(135deg, rgba(245,158,11,0.08), rgba(244,63,94,0.05))' }}>
-          <span className="w-9 h-9 rounded-xl bg-amber-400/15 border border-amber-400/25 flex items-center justify-center shrink-0"><Sparkles size={16} className="text-amber-400" /></span>
-          <div className="flex-1 min-w-[220px]">
-            <div className="font-display font-semibold text-white text-[13px]">AI missed follow-up & outreach detection</div>
-            <div className="text-[12px] text-slate-400 mt-0.5">
-              {missedLeads.length > 0 && <span className="text-amber-300 font-medium">{missedLeads.length} leads have missed follow-ups · </span>}
-              {outreachLeads.length > 0 && <span className="text-rose-300 font-medium">{outreachLeads.length} leads need outreach (idle &gt; {cadenceDays}d) · </span>}
-              hover the Call / WhatsApp / Email / SMS indicators for AI-suggested messages.
+        <div className={`ai-alert-compact ${aiAlertOpen ? 'is-open' : ''}`}>
+          <button className="ai-alert-trigger" onClick={() => setAiAlertOpen(v => !v)} title="AI missed follow-up & outreach detection">
+            <Sparkles size={15} />
+            <span>{missedLeads.length + outreachLeads.length}</span>
+          </button>
+          {aiAlertOpen && (
+            <div className="ai-alert-panel">
+              <div className="font-display font-semibold text-white text-[13px]">AI missed follow-up & outreach detection</div>
+              <div className="text-[12px] text-slate-400 mt-0.5">
+                {missedLeads.length > 0 && <span className="text-amber-300 font-medium">{missedLeads.length} leads have missed follow-ups · </span>}
+                {outreachLeads.length > 0 && <span className="text-rose-300 font-medium">{outreachLeads.length} leads need outreach (idle &gt; {cadenceDays}d)</span>}
+              </div>
+              <div className="flex items-center gap-2 mt-2">
+                <button className="btn btn-ghost !py-1.5 !text-[12px]" onClick={jumpToTable}>View in table</button>
+                <button className="btn btn-ghost !py-1.5 !text-[12px]" onClick={() => setAiAlertOpen(false)}>Collapse</button>
+              </div>
             </div>
-          </div>
-          <button className="btn btn-ghost !py-1.5 !text-[12px]" onClick={jumpToTable}>View in table</button>
+          )}
         </div>
       )}
 
@@ -328,6 +362,14 @@ export default function Leads({ initialSearch = '' }) {
               <button className="btn btn-ghost !py-2" onClick={toggleDensity} title="Row density">
                 <Rows3 size={14} /> {density === 'compact' ? 'Compact' : 'Comfortable'}
               </button>
+              <label className="table-control">
+                <span>Row</span>
+                <input type="range" min="42" max="86" value={rowHeight} onChange={e => saveRowHeight(Number(e.target.value))} />
+              </label>
+              <label className="table-control">
+                <span>Zoom</span>
+                <input type="range" min="88" max="116" value={tableZoom} onChange={e => saveTableZoom(Number(e.target.value))} />
+              </label>
               <ColumnManager columns={columns} setColumns={setColumns} />
             </>
           )}
@@ -384,6 +426,10 @@ export default function Leads({ initialSearch = '' }) {
             <option value="">All</option>
             <option value="hot">Hot</option><option value="warm">Warm</option><option value="cold">Cold</option>
           </Filter>
+          <Filter label="Flags" value={filters.flagged} onChange={setF('flagged')}>
+            <option value="">All leads</option>
+            <option value="1">Flagged only</option>
+          </Filter>
           <div>
             <label className="text-[10.5px] uppercase tracking-wider text-slate-500 font-semibold mb-1 block">Min score</label>
             <input className="input !py-1.5" type="number" min={0} max={100} placeholder="e.g. 70" value={filters.minScore} onChange={setF('minScore')} />
@@ -420,7 +466,7 @@ export default function Leads({ initialSearch = '' }) {
                   onMessage={setComposeLead}
                   onTemplateMessage={setTemplateLead}
               selected={selected} toggleSelect={toggleSelect} toggleSelectAll={toggleSelectAll}
-              columns={columns} density={density} pinnedCols={pinnedCols} headerPinned={headerPinned} focusLeadIds={focusLeadIds} clearFocus={() => setFocusLeadIds([])} sortBy={sortBy} sortDir={sortDir} setSortBy={setSortBy} setSortDir={setSortDir}
+              columns={columns} density={density} rowHeight={rowHeight} tableZoom={tableZoom} colWidths={colWidths} setColWidths={saveColWidths} manualFlagOverrides={manualFlagOverrides} pinnedCols={pinnedCols} headerPinned={headerPinned} focusLeadIds={focusLeadIds} clearFocus={() => setFocusLeadIds([])} sortBy={sortBy} sortDir={sortDir} setSortBy={setSortBy} setSortDir={setSortDir}
             />
           )}
               {view === 'cards' && <CardsView items={items} lookup={lookup} openLead={openLead} grouped={grouped} collapsed={collapsed} toggleGroup={toggleGroup} boot={boot} onMessage={setComposeLead} onTemplateMessage={setTemplateLead} />}
@@ -513,7 +559,7 @@ function GroupSummary({ list }) {
   )
 }
 
-function TableView({ items, boot, lookup, openLead, changeStage, toggleManualFlag, grouped, collapsed, toggleGroup, onMessage, onTemplateMessage, selected, toggleSelect, toggleSelectAll, columns, density, pinnedCols = [], headerPinned = true, focusLeadIds = [], clearFocus, sortBy, sortDir, setSortBy, setSortDir }) {
+function TableView({ items, boot, lookup, openLead, changeStage, toggleManualFlag, grouped, collapsed, toggleGroup, onMessage, onTemplateMessage, selected, toggleSelect, toggleSelectAll, columns, density, rowHeight, tableZoom, colWidths, setColWidths, manualFlagOverrides, pinnedCols = [], headerPinned = true, focusLeadIds = [], clearFocus, sortBy, sortDir, setSortBy, setSortDir }) {
   const focusedItems = focusLeadIds.length ? items.filter(l => focusLeadIds.includes(l.id)) : items
   if (grouped) {
     return (
@@ -527,23 +573,47 @@ function TableView({ items, boot, lookup, openLead, changeStage, toggleManualFla
                 <span className="font-display text-[13.5px] font-semibold text-white shrink-0">{g.key}</span>
                 <GroupSummary list={g.list} />
               </button>
-              {isOpen && <TableGrid items={focusLeadIds.length ? g.list.filter(l => focusLeadIds.includes(l.id)) : g.list} boot={boot} lookup={lookup} openLead={openLead} changeStage={changeStage} toggleManualFlag={toggleManualFlag} onMessage={onMessage} onTemplateMessage={onTemplateMessage} selected={selected} toggleSelect={toggleSelect} toggleSelectAll={toggleSelectAll} columns={columns} density={density} pinnedCols={pinnedCols} headerPinned={headerPinned} focusLeadIds={focusLeadIds} clearFocus={clearFocus} sortBy={sortBy} sortDir={sortDir} setSortBy={setSortBy} setSortDir={setSortDir} />}
+              {isOpen && <TableGrid items={focusLeadIds.length ? g.list.filter(l => focusLeadIds.includes(l.id)) : g.list} boot={boot} lookup={lookup} openLead={openLead} changeStage={changeStage} toggleManualFlag={toggleManualFlag} onMessage={onMessage} onTemplateMessage={onTemplateMessage} selected={selected} toggleSelect={toggleSelect} toggleSelectAll={toggleSelectAll} columns={columns} density={density} rowHeight={rowHeight} tableZoom={tableZoom} colWidths={colWidths} setColWidths={setColWidths} manualFlagOverrides={manualFlagOverrides} pinnedCols={pinnedCols} headerPinned={headerPinned} focusLeadIds={focusLeadIds} clearFocus={clearFocus} sortBy={sortBy} sortDir={sortDir} setSortBy={setSortBy} setSortDir={setSortDir} />}
             </div>
           )
         })}
       </div>
     )
   }
-  return <TableGrid items={focusedItems} boot={boot} lookup={lookup} openLead={openLead} changeStage={changeStage} toggleManualFlag={toggleManualFlag} onMessage={onMessage} onTemplateMessage={onTemplateMessage} selected={selected} toggleSelect={toggleSelect} toggleSelectAll={toggleSelectAll} columns={columns} density={density} pinnedCols={pinnedCols} headerPinned={headerPinned} focusLeadIds={focusLeadIds} clearFocus={clearFocus} sortBy={sortBy} sortDir={sortDir} setSortBy={setSortBy} setSortDir={setSortDir} />
+  return <TableGrid items={focusedItems} boot={boot} lookup={lookup} openLead={openLead} changeStage={changeStage} toggleManualFlag={toggleManualFlag} onMessage={onMessage} onTemplateMessage={onTemplateMessage} selected={selected} toggleSelect={toggleSelect} toggleSelectAll={toggleSelectAll} columns={columns} density={density} rowHeight={rowHeight} tableZoom={tableZoom} colWidths={colWidths} setColWidths={setColWidths} manualFlagOverrides={manualFlagOverrides} pinnedCols={pinnedCols} headerPinned={headerPinned} focusLeadIds={focusLeadIds} clearFocus={clearFocus} sortBy={sortBy} sortDir={sortDir} setSortBy={setSortBy} setSortDir={setSortDir} />
 }
 
-function TableGrid({ items, boot, lookup, openLead, changeStage, toggleManualFlag, onMessage, onTemplateMessage, selected, toggleSelect, toggleSelectAll, columns, density, pinnedCols = [], headerPinned = true, focusLeadIds = [], clearFocus, sortBy, sortDir, setSortBy, setSortDir }) {
+function TableGrid({ items, boot, lookup, openLead, changeStage, toggleManualFlag, onMessage, onTemplateMessage, selected, toggleSelect, toggleSelectAll, columns, density, rowHeight = 58, tableZoom = 100, colWidths = {}, setColWidths, manualFlagOverrides = {}, pinnedCols = [], headerPinned = true, focusLeadIds = [], clearFocus, sortBy, sortDir, setSortBy, setSortDir }) {
   const cadenceDays = boot?.settings?.cadence?.outreachDays || 7
   const allChecked = items.length > 0 && items.every(l => selected?.has(l.id))
   const visibleCols = (columns || []).filter(c => !c.hidden && c.field !== 'created')
   const py = density === 'compact' ? 'py-1.5' : ''
+  const [scoreTip, setScoreTip] = useState(null)
+  const widthOf = (id, fallback) => colWidths[id] || fallback
+  const autoFitColumns = () => {
+    const next = { select: 76, lead: 240, stage: 190, createdAt: 140, remarksField: 160, message: 112 }
+    for (const c of visibleCols) next[c.id] = c.field === 'owner' ? 180 : c.field === 'score' ? 104 : 145
+    for (const ch of Object.keys(CHANNELS)) next[`fu_${ch}`] = 54
+    setColWidths?.(next)
+  }
+  const startResize = (id, fallback) => (e) => {
+    e.preventDefault()
+    e.stopPropagation()
+    const startX = e.clientX
+    const startWidth = widthOf(id, fallback)
+    const onMove = (ev) => {
+      const next = Math.max(48, Math.min(540, Math.round(startWidth + ev.clientX - startX)))
+      setColWidths?.(prev => ({ ...prev, [id]: next }))
+    }
+    const onUp = () => {
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+    }
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+  }
   return (
-    <div className="lead-table-scroll scrollbar-thin">
+    <div className="lead-table-scroll scrollbar-thin" style={{ '--lead-row-height': `${rowHeight}px`, '--lead-table-zoom': tableZoom / 100 }}>
       {focusLeadIds.length > 0 && (
         <div className="px-4 pt-4 pb-3 flex items-center gap-2">
           <span className="chip bg-rose-500/15 border border-rose-400/25 text-rose-300">{focusLeadIds.length} highlighted lead{focusLeadIds.length === 1 ? '' : 's'}</span>
@@ -553,18 +623,30 @@ function TableGrid({ items, boot, lookup, openLead, changeStage, toggleManualFla
       <table className="data-table leads-data-table">
         <thead className={headerPinned ? 'is-pinned' : 'is-unpinned'}>
           <tr className="text-[10.5px] uppercase tracking-wider text-slate-500 border-b border-white/8">
-            <th className={`px-3 py-3 font-semibold w-[76px] ${pinnedCols.includes('select') ? 'sticky left-0 z-40 table-sticky-surface' : ''}`}>
+            <th className={`resizable-th px-3 py-3 font-semibold ${pinnedCols.includes('select') ? 'sticky left-0 z-40 table-sticky-surface' : ''}`} style={{ width: widthOf('select', 76), minWidth: widthOf('select', 76) }}>
               <button className="flex items-center justify-center text-slate-400 hover:text-white" onClick={toggleSelectAll} title={allChecked ? 'Deselect all' : 'Select all'}>
                 {allChecked ? <CheckSquare size={15} className="text-rose-400" /> : <Square size={15} />}
               </button>
+              <span className="col-resize-handle" onDoubleClick={autoFitColumns} onMouseDown={startResize('select', widthOf('select', 76))} title="Drag to resize column. Double-click to auto-fit all columns." />
             </th>
-            <SortHead label="Lead" field="fullName" className={`px-4 py-3 font-semibold w-[260px] ${pinnedCols.includes('lead') ? 'sticky left-[76px] z-30 table-sticky-surface' : ''}`} sortBy={sortBy} sortDir={sortDir} setSortBy={setSortBy} setSortDir={setSortDir} />
-            <SortHead label="Stage" field="stage" className={`px-4 py-3 font-semibold min-w-[190px] ${pinnedCols.includes('stage') ? 'sticky left-[336px] z-30 table-sticky-surface' : ''}`} sortBy={sortBy} sortDir={sortDir} setSortBy={setSortBy} setSortDir={setSortDir} />
-            <SortHead label="Created" field="createdAt" className="px-4 py-3 font-semibold w-[190px]" sortBy={sortBy} sortDir={sortDir} setSortBy={setSortBy} setSortDir={setSortDir} />
-            {visibleCols.map(c => <SortHead key={c.id} label={c.label} field={c.field || c.id} className="px-4 py-3 font-semibold" sortBy={sortBy} sortDir={sortDir} setSortBy={setSortBy} setSortDir={setSortDir} />)}
-            <th className="px-4 py-3 font-semibold min-w-[190px]">Next follow-up</th>
-            {Object.entries(CHANNELS).map(([ch, c], i) => <th key={ch} className="px-2 py-3 font-semibold text-center min-w-[48px]" title={`${c.label} follow-up status`}>FU{i + 1}</th>)}
-            <th className="px-4 py-3 font-semibold text-right">Message</th>
+            <SortHead label="Lead" field="fullName" width={widthOf('lead', 260)} onResize={startResize} onAutoFit={autoFitColumns} className={`px-4 py-3 font-semibold ${pinnedCols.includes('lead') ? 'sticky left-[76px] z-30 table-sticky-surface' : ''}`} sortBy={sortBy} sortDir={sortDir} setSortBy={setSortBy} setSortDir={setSortDir} />
+            <SortHead label="Stage" field="stage" width={widthOf('stage', 190)} onResize={startResize} onAutoFit={autoFitColumns} className={`px-4 py-3 font-semibold ${pinnedCols.includes('stage') ? 'sticky left-[336px] z-30 table-sticky-surface' : ''}`} sortBy={sortBy} sortDir={sortDir} setSortBy={setSortBy} setSortDir={setSortDir} />
+            <SortHead label="Created" field="createdAt" width={widthOf('createdAt', 150)} onResize={startResize} onAutoFit={autoFitColumns} className="px-4 py-3 font-semibold" sortBy={sortBy} sortDir={sortDir} setSortBy={setSortBy} setSortDir={setSortDir} />
+            {visibleCols.map(c => <SortHead key={c.id} label={c.label} field={c.field || c.id} resizeId={c.id} width={widthOf(c.id, c.field === 'owner' ? 190 : c.field === 'score' ? 112 : 150)} onResize={startResize} onAutoFit={autoFitColumns} className="px-4 py-3 font-semibold" sortBy={sortBy} sortDir={sortDir} setSortBy={setSortBy} setSortDir={setSortDir} />)}
+            <th className="resizable-th px-4 py-3 font-semibold" style={{ width: widthOf('remarksField', 160), minWidth: widthOf('remarksField', 160) }}>
+              <span>Remarks</span>
+              <span className="col-resize-handle" onDoubleClick={autoFitColumns} onMouseDown={startResize('remarksField', widthOf('remarksField', 160))} title="Drag to resize column. Double-click to auto-fit all columns." />
+            </th>
+            {Object.entries(CHANNELS).map(([ch, c], i) => (
+              <th key={ch} className="resizable-th px-2 py-3 font-semibold text-center" style={{ width: widthOf(`fu_${ch}`, 56), minWidth: widthOf(`fu_${ch}`, 56) }} title={`${c.label} follow-up status`}>
+                <span>FU{i + 1}</span>
+                <span className="col-resize-handle" onDoubleClick={autoFitColumns} onMouseDown={startResize(`fu_${ch}`, widthOf(`fu_${ch}`, 56))} title="Drag to resize column. Double-click to auto-fit all columns." />
+              </th>
+            ))}
+            <th className="resizable-th px-4 py-3 font-semibold" style={{ width: widthOf('message', 118), minWidth: widthOf('message', 118) }}>
+              <span>Message</span>
+              <span className="col-resize-handle" onDoubleClick={autoFitColumns} onMouseDown={startResize('message', widthOf('message', 118))} title="Drag to resize column. Double-click to auto-fit all columns." />
+            </th>
           </tr>
         </thead>
         <tbody>
@@ -572,6 +654,9 @@ function TableGrid({ items, boot, lookup, openLead, changeStage, toggleManualFla
             const owner = lookup.asnById[l.associateId]
             const nextFu = l.followUps?.find(f => f.date && f.done === false && f.date !== '-')
             const dueIn = nextFu ? daysFromNow(nextFu.date) : null
+            const cadenceMissedOpen = l.status === 'open' && ((l.fu?.missedCount || 0) > 0 || (l.fu?.lastOutreachDays || 0) > cadenceDays || (nextFu && dueIn < 0))
+            const rowManualFlags = manualFlagOverrides[l.id] || l.manualFlags || []
+            const rowFlagged = rowManualFlags.some(f => f.id === 'focus')
             return (
               <tr key={l.id} className={`border-b border-white/5 hover:bg-white/[0.035] cursor-pointer transition-colors ${selected?.has(l.id) ? 'bg-rose-500/[0.05]' : ''} ${focusLeadIds.includes(l.id) ? 'ring-1 ring-rose-400/30 bg-rose-500/[0.08]' : ''}`} onClick={() => openLead(l.id)}>
                 <td className={`px-3 ${py} ${pinnedCols.includes('select') ? 'sticky left-0 z-20 table-sticky-surface' : ''}`} onClick={e => e.stopPropagation()}>
@@ -579,7 +664,7 @@ function TableGrid({ items, boot, lookup, openLead, changeStage, toggleManualFla
                     <button className="flex items-center justify-center text-slate-400 hover:text-white" onClick={() => toggleSelect(l.id)}>
                       {selected?.has(l.id) ? <CheckSquare size={15} className="text-rose-400" /> : <Square size={15} />}
                     </button>
-                    <button className={`lead-row-flag ${l.manualFlags?.some(f => f.id === 'focus') ? 'is-active' : ''}`} title={l.manualFlags?.some(f => f.id === 'focus') ? 'Remove row flag' : 'Flag this member'} onClick={() => toggleManualFlag(l)}>
+                    <button type="button" className={`lead-row-flag ${rowFlagged ? 'is-active' : ''}`} title={rowFlagged ? 'Remove row flag' : 'Flag this member'} onClick={(e) => { e.stopPropagation(); toggleManualFlag({ ...l, manualFlags: rowManualFlags }) }}>
                       <Flag size={14} />
                     </button>
                   </div>
@@ -588,7 +673,7 @@ function TableGrid({ items, boot, lookup, openLead, changeStage, toggleManualFla
                   <div className="min-w-0">
                     <div className="text-[13px] font-semibold text-white truncate max-w-[220px] flex items-center gap-1.5">
                       {l.fullName}
-                      {[...(l.manualFlags || []), ...(l.flags || [])].map(f => (
+                      {[...rowManualFlags, ...(l.flags || [])].map(f => (
                         <span key={f.id} title={f.name} className="chip !px-1.5 !py-0 text-[9px]" style={{ background: `${f.color}22`, color: f.color, border: `1px solid ${f.color}44` }}>{f.label}</span>
                       ))}
                     </div>
@@ -599,7 +684,7 @@ function TableGrid({ items, boot, lookup, openLead, changeStage, toggleManualFla
                   {(() => {
                     const { icon: StageIcon, color } = stageVisual(l.stage)
                     return (
-                      <div className="relative w-[170px] shrink-0">
+                          <div className="relative w-full max-w-[170px] shrink-0">
                         <StageIcon size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" style={{ color }} />
                         <select
                           className="input stage-select !py-1 !pl-7 !text-[11.5px] !w-[170px] !rounded-full truncate"
@@ -625,61 +710,39 @@ function TableGrid({ items, boot, lookup, openLead, changeStage, toggleManualFla
                     return (
                       <td key={c.id} className={`px-4 ${py}`}>
                         <div className="flex items-center gap-2 min-w-0">
-                          <Avatar name={owner?.name || '?'} color={owner?.color} photoUrl={owner?.photoUrl} size={22} />
+                          <Avatar name={owner?.name || '?'} color={owner?.color} photoUrl={owner?.photoUrl} size={28} />
                           <span className="text-[12px] text-slate-300 truncate max-w-[110px]">{owner?.name || 'Unassigned'}</span>
                         </div>
+                      </td>
+                    )
+                  }
+                  if (c.field === 'score') {
+                    return (
+                      <td key={c.id} className={`px-4 ${py} text-[12.5px] mono text-slate-300`} onClick={e => e.stopPropagation()}>
+                        <button className="score-detail-trigger" onClick={(e) => setScoreTip({ lead: l, x: e.clientX, y: e.clientY })} title="View score calculation">
+                          <ScorePill score={l.ai?.score || 0} />
+                        </button>
                       </td>
                     )
                   }
                   const val = getColumnValue(c, l, lookup)
                   return (
                     <td key={c.id} className={`px-4 ${py} text-[12.5px] ${c.type === 'number' || c.type === 'currency' || c.type === 'percent' ? 'mono text-slate-300' : 'text-slate-400'}`}>
-                      {formatColumnValue(val, c)}
+                      <span className="table-cell-fit" title={String(formatColumnValue(val, c) ?? '')}>{formatColumnValue(val, c)}</span>
                     </td>
                   )
                 })}
-                <td className={`px-4 ${py} w-[200px]`}>
-                  {nextFu ? (
-                    <div className="min-w-0">
-                      <span className={`inline-flex items-center gap-1 text-[12.5px] whitespace-nowrap ${dueIn < 0 ? 'text-rose-400 font-semibold' : dueIn === 0 ? 'text-amber-400 font-semibold' : 'text-slate-300'}`}>
-                        <Clock size={11} className="shrink-0" /> {dueIn === 0 ? 'Today' : fmtDate(nextFu.date)}{dueIn < 0 ? ` · ${-dueIn}d overdue` : ''}
-                      </span>
-                      {(l.fu?.missedCount > 0 || (l.status === 'open' && l.fu?.lastOutreachDays > cadenceDays)) && (
-                        <div className="mt-1 flex flex-nowrap gap-1">
-                          {l.fu?.missedCount > 0 && (
-                            <span className="chip !px-1.5 !py-0.5 text-[9px] bg-rose-500/20 text-rose-300 whitespace-nowrap" title="Cadence deviation — follow-up tasks missed">
-                              {l.fu.missedCount} missed
-                            </span>
-                          )}
-                          {l.status === 'open' && l.fu?.lastOutreachDays > cadenceDays && (
-                            <span className="chip !px-1.5 !py-0.5 text-[9px] bg-amber-500/15 text-amber-300 border border-amber-400/20 whitespace-nowrap" title={`No outreach in ${l.fu.lastOutreachDays}d (cadence ${cadenceDays}d)`}>
-                              idle {l.fu.lastOutreachDays}d
-                            </span>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  ) : (
-                    <div className="min-w-0">
-                      <span className="inline-flex items-center gap-1 text-[12.5px] text-slate-500 whitespace-nowrap" title="No follow-up scheduled yet">
-                        <Clock size={11} className="shrink-0" /> Not scheduled
-                      </span>
-                      {l.status === 'open' && l.fu?.lastOutreachDays > cadenceDays && (
-                        <div className="mt-1">
-                          <span className="chip !px-1.5 !py-0.5 text-[9px] bg-amber-500/15 text-amber-300 border border-amber-400/20 whitespace-nowrap" title={`No outreach in ${l.fu.lastOutreachDays}d (cadence ${cadenceDays}d)`}>
-                            idle {l.fu.lastOutreachDays}d
-                          </span>
-                        </div>
-                      )}
-                    </div>
-                  )}
+                <td className={`px-4 ${py}`}>
+                  <span className="table-remarks-wrap">
+                    <span className="table-remarks" title={l.remarks || ''}>{l.remarks || '—'}</span>
+                  </span>
                 </td>
                 {['call', 'whatsapp', 'email', 'sms'].map(ch => (
                   <td key={ch} className="px-1 text-center">
-                    <FuCell lead={l} ch={ch} />
+                    <FuCell lead={l} ch={ch} forceMissed={cadenceMissedOpen} />
                   </td>
                 ))}
-                <td className="px-4 text-right" onClick={e => e.stopPropagation()}>
+                <td className="px-4 text-left" onClick={e => e.stopPropagation()}>
                   <button className="btn btn-ghost !p-1.5 !text-[11px] mr-1" onClick={() => onMessage(l)} title="Send a message via Respond.io">
                     <MessageCircle size={13} className="text-emerald-400" />
                   </button>
@@ -692,24 +755,63 @@ function TableGrid({ items, boot, lookup, openLead, changeStage, toggleManualFla
           })}
         </tbody>
       </table>
+      {scoreTip && <ScoreDetailsPopover tip={scoreTip} onClose={() => setScoreTip(null)} />}
     </div>
   )
 }
 
-function SortHead({ label, field, className = '', sortBy, sortDir, setSortBy, setSortDir }) {
+function SortHead({ label, field, resizeId, width, onResize, onAutoFit, className = '', sortBy, sortDir, setSortBy, setSortDir }) {
   const active = sortBy === field
   const nextDir = active && sortDir === 'asc' ? 'desc' : 'asc'
   return (
-    <th className={`${className} cursor-pointer select-none`} onClick={() => { setSortBy(field); setSortDir(nextDir) }}>
+    <th className={`resizable-th ${className} cursor-pointer select-none`} style={{ width, minWidth: width }} onClick={() => { setSortBy(field); setSortDir(nextDir) }}>
       <span className="inline-flex items-center gap-1.5">
         {label}
         <ChevronDown size={11} className={`transition-transform ${active && sortDir === 'asc' ? 'rotate-180' : ''} ${active ? 'text-rose-400' : 'text-slate-500'}`} />
       </span>
+      <span className="col-resize-handle" onDoubleClick={(e) => { e.preventDefault(); e.stopPropagation(); onAutoFit?.() }} onMouseDown={onResize(resizeId || field, width)} title="Drag to resize column. Double-click a header edge to auto-fit all columns." />
     </th>
   )
 }
 
-function FuCell({ lead, ch }) {
+function ScoreDetailsPopover({ tip, onClose }) {
+  const { lead, x, y } = tip
+  const factors = [
+    { label: 'Intent score', value: lead.ai?.score ?? 0, detail: 'Weighted from stage, source, recency, risk, value, and follow-up state.' },
+    { label: 'Risk band', value: lead.ai?.risk || '—', detail: 'Derived from score and lead status.' },
+    { label: 'Sentiment', value: lead.ai?.sentiment || '—', detail: 'Heuristic/GPT sentiment when available.' },
+    { label: 'Cadence', value: `${lead.fu?.missedCount || 0} missed`, detail: `${lead.fu?.lastOutreachDays ?? '—'} days since outreach.` }
+  ]
+  const left = Math.max(14, Math.min(window.innerWidth - 334, x - 150))
+  const top = Math.max(14, Math.min(window.innerHeight - 260, y + 12))
+  return createPortal(
+    <div className="fixed inset-0 z-[120]" onClick={onClose}>
+      <div className="score-detail-popover" style={{ left, top }} onClick={e => e.stopPropagation()}>
+        <div className="flex items-center gap-2 mb-2">
+          <ScorePill score={lead.ai?.score || 0} />
+          <div className="min-w-0">
+            <div className="text-[13px] font-bold text-white truncate">{lead.fullName}</div>
+            <div className="text-[11px] text-slate-500">Score calculation details</div>
+          </div>
+          <button className="ml-auto btn btn-ghost !p-1.5" onClick={onClose}><X size={12} /></button>
+        </div>
+        <div className="space-y-1.5">
+          {factors.map(f => (
+            <div key={f.label} className="score-factor-row">
+              <span>{f.label}</span>
+              <strong>{f.value}</strong>
+              <small>{f.detail}</small>
+            </div>
+          ))}
+        </div>
+        {lead.ai?.summary && <p className="mt-2 text-[11.5px] text-slate-400 leading-relaxed">{lead.ai.summary}</p>}
+      </div>
+    </div>,
+    document.body
+  )
+}
+
+function FuCell({ lead, ch, forceMissed = false }) {
   const o = lead.fu?.outreach?.[ch]
   const filled = !!o?.filled
   const missed = filled && o?.pending
@@ -720,7 +822,7 @@ function FuCell({ lead, ch }) {
   // actioned (no comment yet) is invisible to `o` — check the lead's raw
   // follow-ups directly so an overdue-but-never-logged one still shows red
   // instead of silently looking identical to "never scheduled."
-  const hasOverduePending = !filled && (lead.followUps || []).some(f => f.channel === ch && f.done === false && f.date && f.date !== '-' && f.date < today)
+  const hasOverduePending = forceMissed || (!filled && (lead.followUps || []).some(f => f.channel === ch && f.done === false && f.date && f.date !== '-' && f.date < today))
   const suggestion = lead.ai?.followupSuggestions?.find(s => s.channel === ch)?.text
   const Icon = CHANNELS[ch].icon
   const anchorRef = useRef(null)
@@ -756,7 +858,7 @@ function FuCell({ lead, ch }) {
           title={title}
         >
           {!filled && !hasOverduePending
-            ? <span className="text-[11px] grayscale opacity-40">🚫</span>
+            ? <XCircle size={12} style={{ color: iconColor }} />
             : <Icon size={12} style={{ color: iconColor }} />}
         </span>
       </Tip>

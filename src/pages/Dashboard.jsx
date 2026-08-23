@@ -38,6 +38,14 @@ function momPct(series) {
   return ((cur - prev) / prev) * 100
 }
 
+function yoyPct(series) {
+  if (series.length < 12) return null
+  const prev = series[series.length - 12].value
+  const cur = series[series.length - 1].value
+  if (!prev) return null
+  return ((cur - prev) / prev) * 100
+}
+
 const tooltipStyle = () => ({
   background: 'var(--tt-bg)', border: '1px solid var(--tt-border)', borderRadius: 12,
   fontSize: 12, color: 'var(--tt-color)', boxShadow: '0 10px 30px rgba(0,0,0,.5)'
@@ -114,19 +122,19 @@ export default function Dashboard() {
       {/* KPI row */}
       <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-6 gap-3">
         <MetricCard icon={Users} title="Total leads" value={ov.totalLeads} color="#8b5cf6"
-          description="All-time leads captured across every source." trend={newLeadsTrend} mom={momPct(newLeadsTrend)} />
+          description="All-time leads captured across every source." trend={newLeadsTrend} mom={momPct(newLeadsTrend)} yoy={yoyPct(newLeadsTrend)} />
         <MetricCard icon={UserPlus} title="Open leads" value={ov.openLeads} color="#0ea5e9"
           description={`${ov.hotLeads} hot right now. Active leads that are not won or lost.`}
           calculation="Count of leads where status is open."
-          trend={openLeadsTrend} mom={momPct(openLeadsTrend)} />
+          trend={openLeadsTrend} mom={momPct(openLeadsTrend)} yoy={yoyPct(openLeadsTrend)} />
         <MetricCard icon={TrendingUp} title="Conversion" value={`${ov.conversionRate}%`} color="#10b981"
-          description={`${ov.won} leads won out of all leads created.`} trend={conversionTrend} mom={momPct(conversionTrend)} />
+          description={`${ov.won} leads won out of all leads created.`} trend={conversionTrend} mom={momPct(conversionTrend)} yoy={yoyPct(conversionTrend)} />
         <MetricCard icon={Target} title="New this month" value={ov.newThisMonth} color="#f59e0b"
-          description="New leads created in the current calendar month." trend={newLeadsTrend} mom={ov.newDeltaPct} />
+          description="New leads created in the current calendar month." trend={newLeadsTrend} mom={ov.newDeltaPct} yoy={yoyPct(newLeadsTrend)} />
         <MetricCard icon={IndianRupee} title="Revenue (month)" value={money(ov.revenueThisMonth)} color="#f43f5e"
-          description="Estimated revenue from deals won this month." trend={revenueTrend} mom={ov.revenueDeltaPct} />
+          description="Estimated revenue from deals won this month." trend={revenueTrend} mom={ov.revenueDeltaPct} yoy={yoyPct(revenueTrend)} />
         <MetricCard icon={Flame} title="Avg deal value" value={money(ov.avgDealValue)} color="#ec4899"
-          description="Average estimated value per won lead." trend={avgDealTrend} mom={momPct(avgDealTrend)} />
+          description="Average estimated value per won lead." trend={avgDealTrend} mom={momPct(avgDealTrend)} yoy={yoyPct(avgDealTrend)} />
       </div>
 
       {/* row 2: timeline + sources */}

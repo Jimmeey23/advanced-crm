@@ -29,6 +29,7 @@ export default function LeadDrawer() {
   const [replyError, setReplyError] = useState({})
   const [enriching, setEnriching] = useState(false)
   const [autoSyncLeadId, setAutoSyncLeadId] = useState('')
+  const [drawerWidth, setDrawerWidth] = useState(() => Number(localStorage.getItem('p57_lead_drawer_width')) || 760)
   const commentsRef = React.useRef(null)
 
   const fillSuggestion = (s) => {
@@ -98,6 +99,23 @@ export default function LeadDrawer() {
   }, [lead?.id, lead?.momence, boot?.integrations?.momence])
 
   if (!drawerLeadId) return null
+
+  const startDrawerResize = (e) => {
+    e.preventDefault()
+    const startX = e.clientX
+    const startWidth = drawerWidth
+    const onMove = (ev) => {
+      const next = Math.max(560, Math.min(Math.round(startWidth + startX - ev.clientX), Math.min(1100, window.innerWidth - 24)))
+      setDrawerWidth(next)
+      try { localStorage.setItem('p57_lead_drawer_width', String(next)) } catch (err) { /* ignore */ }
+    }
+    const onUp = () => {
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+    }
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+  }
 
   if (!lead) {
     return (
@@ -190,7 +208,8 @@ export default function LeadDrawer() {
     <>
       <div className="fixed inset-0 z-[80] flex justify-end">
       <div className="absolute inset-0 bg-black/55 backdrop-blur-[2px]" onClick={closeLead} />
-      <aside className="lead-drawer lead-detail-panel relative w-full max-w-[700px] h-full border-l border-white/10 flex flex-col shadow-2xl" style={{ animation: 'slideIn .2s ease' }}>
+      <aside className="lead-drawer lead-detail-panel relative w-full h-full border-l border-white/10 flex flex-col shadow-2xl" style={{ maxWidth: 'calc(100vw - 16px)', width: drawerWidth, animation: 'slideIn .2s ease' }}>
+        <button className="lead-drawer-resizer" onMouseDown={startDrawerResize} title="Drag to resize detail drawer" />
         {/* header */}
         <div className="lead-detail-header px-6 pt-5 pb-4 border-b border-white/8 bg-white/[0.02] backdrop-blur-xl">
           <div className="flex items-start gap-3">

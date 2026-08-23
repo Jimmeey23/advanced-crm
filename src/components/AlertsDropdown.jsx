@@ -35,12 +35,12 @@ export default function AlertsDropdown() {
       </button>
 
       {open && (
-        <div className="absolute right-0 mt-2 w-[380px] card z-[999] overflow-hidden shadow-2xl" style={{ background: 'var(--tt-bg)', animation: 'fadeIn .15s ease' }}>
+        <div className="alerts-menu fixed right-5 top-[76px] w-[min(420px,calc(100vw-24px))] card z-[999] overflow-hidden shadow-2xl" style={{ background: 'var(--tt-bg)', animation: 'fadeIn .15s ease' }}>
           <div className="flex items-center justify-between px-4 py-3 border-b border-white/8">
             <div className="font-display font-semibold text-white text-[14px]">Alerts & reminders</div>
             <span className="chip bg-white/5 border border-white/10 text-slate-300">{alerts.length} active</span>
           </div>
-          <div className="max-h-[430px] overflow-y-auto scrollbar-thin">
+          <div className="max-h-[min(620px,calc(100vh-150px))] overflow-y-auto scrollbar-thin">
             {alerts.length === 0 && (
               <div className="px-4 py-10 text-center text-[13px] text-slate-500">All clear — no alerts right now.</div>
             )}
