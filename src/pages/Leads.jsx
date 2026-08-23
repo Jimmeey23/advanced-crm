@@ -4,7 +4,8 @@ import {
   Search, SlidersHorizontal, ChevronDown, ChevronRight, X, Download,
   Table as TableIcon, LayoutGrid, Rows3, PieChart, KanbanSquare, CalendarDays,
   Phone, MessageCircle, Mail, MessageSquareText, Sparkles, Trash2, CheckSquare, Square,
-  Users, TrendingUp, XCircle, Wallet, Clock, AlertTriangle, Flag
+  Users, TrendingUp, XCircle, Wallet, Clock, AlertTriangle, Flag,
+  Trophy, PhoneOff, FlaskConical, CircleDot
 } from 'lucide-react'
 import { useApp } from '../store.jsx'
 import { useFetch } from '../hooks.js'
@@ -49,6 +50,22 @@ const CHANNELS = {
   whatsapp: { icon: MessageCircle, label: 'WhatsApp', color: '#34d399' },
   email: { icon: Mail, label: 'Email', color: '#a78bfa' },
   sms: { icon: MessageSquareText, label: 'SMS', color: '#fbbf24' }
+}
+
+// Real stage names vary a lot ("Trial Completed - Unresponsive", "Called -
+// Did Not Answer", ...) — far more than the ~10 hand-picked demo stages
+// index.css has colors for — so this classifies by pattern into a handful
+// of coarse categories with a consistent icon + color, rather than trying
+// to hand-maintain a color per exact stage string.
+const STAGE_CATEGORIES = [
+  { test: /won|sold|member/i, icon: Trophy, color: '#34d399' },
+  { test: /lost|unresponsive|no.?answer|invalid|not.?interested|didn.?t/i, icon: PhoneOff, color: '#fb7185' },
+  { test: /trial/i, icon: FlaskConical, color: '#22d3ee' },
+  { test: /new|enquiry/i, icon: Sparkles, color: '#818cf8' }
+]
+function stageVisual(stage) {
+  const hit = STAGE_CATEGORIES.find(c => c.test.test(stage || ''))
+  return hit || { icon: CircleDot, color: '#94a3b8' }
 }
 
 const GROUP_OPTIONS = [
@@ -273,9 +290,12 @@ export default function Leads({ initialSearch = '' }) {
         </div>
       )}
 
-      {/* toolbar */}
-      <div className="flex flex-wrap items-center gap-3">
-        <div className="relative w-[240px]">
+      {/* toolbar — nowrap + horizontal scroll instead of wrap: this row has
+          enough controls (search, filters, grouping, sort, pin, density,
+          columns, view switcher) that wrapping to a second row reads as
+          broken layout rather than a deliberate two-row toolbar. */}
+      <div className="flex flex-nowrap items-center gap-2 overflow-x-auto scrollbar-thin pb-1 [&>*]:shrink-0">
+        <div className="relative w-[220px]">
           <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
           <input className="input !pl-9" placeholder="Search name, phone, email…" value={search} onChange={e => { setSearch(e.target.value); setPage(0) }} />
         </div>
@@ -286,7 +306,7 @@ export default function Leads({ initialSearch = '' }) {
         <select className="input !w-auto !py-1.5" value={groupBy} onChange={e => { setGroupBy(e.target.value); setCollapsed({}) }}>
           {GROUP_OPTIONS.map(g => <option key={g.id} value={g.id}>{g.id ? `Group by: ${g.label}` : 'No grouping'}</option>)}
         </select>
-        <div className="ml-auto flex items-center gap-2">
+        <div className="ml-auto flex items-center gap-2 flex-nowrap [&>*]:shrink-0">
           <select className="input !w-auto !py-1.5" value={sortBy} onChange={e => { setSortBy(e.target.value); setPage(0) }}>
             <option value="createdAt">Sort: Created</option>
             <option value="fullName">Sort: Name</option>
@@ -517,8 +537,6 @@ function TableView({ items, boot, lookup, openLead, changeStage, toggleManualFla
   return <TableGrid items={focusedItems} boot={boot} lookup={lookup} openLead={openLead} changeStage={changeStage} toggleManualFlag={toggleManualFlag} onMessage={onMessage} onTemplateMessage={onTemplateMessage} selected={selected} toggleSelect={toggleSelect} toggleSelectAll={toggleSelectAll} columns={columns} density={density} pinnedCols={pinnedCols} headerPinned={headerPinned} focusLeadIds={focusLeadIds} clearFocus={clearFocus} sortBy={sortBy} sortDir={sortDir} setSortBy={setSortBy} setSortDir={setSortDir} />
 }
 
-const FU_LABELS = ['1', '2', '3', '4']
-
 function TableGrid({ items, boot, lookup, openLead, changeStage, toggleManualFlag, onMessage, onTemplateMessage, selected, toggleSelect, toggleSelectAll, columns, density, pinnedCols = [], headerPinned = true, focusLeadIds = [], clearFocus, sortBy, sortDir, setSortBy, setSortDir }) {
   const cadenceDays = boot?.settings?.cadence?.outreachDays || 7
   const allChecked = items.length > 0 && items.every(l => selected?.has(l.id))
@@ -545,7 +563,7 @@ function TableGrid({ items, boot, lookup, openLead, changeStage, toggleManualFla
             <SortHead label="Created" field="createdAt" className="px-4 py-3 font-semibold w-[190px]" sortBy={sortBy} sortDir={sortDir} setSortBy={setSortBy} setSortDir={setSortDir} />
             {visibleCols.map(c => <SortHead key={c.id} label={c.label} field={c.field || c.id} className="px-4 py-3 font-semibold" sortBy={sortBy} sortDir={sortDir} setSortBy={setSortBy} setSortDir={setSortDir} />)}
             <th className="px-4 py-3 font-semibold min-w-[190px]">Next follow-up</th>
-            {FU_LABELS.map(label => <th key={label} className="px-2 py-3 font-semibold text-center min-w-[48px]" title={`Follow-up ${label}`}>FU {label}</th>)}
+            {Object.entries(CHANNELS).map(([ch, c]) => <th key={ch} className="px-2 py-3 font-semibold text-center min-w-[48px]" title={`${c.label} follow-up status`}>{c.label}</th>)}
             <th className="px-4 py-3 font-semibold text-right">Message</th>
           </tr>
         </thead>
@@ -581,9 +599,21 @@ function TableGrid({ items, boot, lookup, openLead, changeStage, toggleManualFla
                   </div>
                 </td>
                 <td className={`px-4 ${py} min-w-[190px] ${pinnedCols.includes('stage') ? 'sticky left-[336px] z-20 table-sticky-surface' : ''}`}>
-                  <select className="input stage-select !py-1 !text-[11.5px] !w-[170px]" title={l.stage} value={l.stage} onClick={e => e.stopPropagation()} onChange={e => changeStage(l, e.target.value)}>
-                    {(boot?.stages || []).map(s => <option key={s}>{s}</option>)}
-                  </select>
+                  {(() => {
+                    const { icon: StageIcon, color } = stageVisual(l.stage)
+                    return (
+                      <div className="relative w-[170px] shrink-0">
+                        <StageIcon size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" style={{ color }} />
+                        <select
+                          className="input stage-select !py-1 !pl-7 !text-[11.5px] !w-[170px] !rounded-full truncate"
+                          style={{ background: `${color}14`, borderColor: `${color}40`, color }}
+                          title={l.stage} value={l.stage} onClick={e => e.stopPropagation()} onChange={e => changeStage(l, e.target.value)}
+                        >
+                          {(boot?.stages || []).map(s => <option key={s}>{s}</option>)}
+                        </select>
+                      </div>
+                    )
+                  })()}
                 </td>
                 <td className={`px-4 ${py} w-[190px] text-[12px] text-slate-400 mono`}>{fmtDate(l.createdAt)}</td>
                 {visibleCols.map(c => {
@@ -671,6 +701,12 @@ function FuCell({ lead, ch }) {
   const missed = filled && o?.pending
   const today = new Date().toISOString().slice(0, 10)
   const isMissed = missed && missed < today
+  // channelOutreach() (server/ai.js) only tracks entries that already have a
+  // comment logged, so a follow-up scheduled on this channel but never
+  // actioned (no comment yet) is invisible to `o` — check the lead's raw
+  // follow-ups directly so an overdue-but-never-logged one still shows red
+  // instead of silently looking identical to "never scheduled."
+  const hasOverduePending = !filled && (lead.followUps || []).some(f => f.channel === ch && f.done === false && f.date && f.date !== '-' && f.date < today)
   const suggestion = lead.ai?.followupSuggestions?.find(s => s.channel === ch)?.text
   const Icon = CHANNELS[ch].icon
   const anchorRef = useRef(null)
@@ -684,18 +720,28 @@ function FuCell({ lead, ch }) {
     setPopOpen(true)
   }
 
+  const boxClass = filled
+    ? (isMissed ? 'border-rose-400/50 bg-rose-400/15' : 'border-emerald-400/50 bg-emerald-400/15')
+    : hasOverduePending
+      ? 'border-rose-400/50 bg-rose-400/15'
+      : 'border-white/8 bg-white/[0.03]'
+  const iconColor = filled ? (isMissed ? '#fb7185' : '#34d399') : hasOverduePending ? '#fb7185' : '#64748b'
+  const title = filled
+    ? `Last ${CHANNELS[ch].label}: ${o.date} — click to log another`
+    : hasOverduePending
+      ? `${CHANNELS[ch].label} follow-up overdue — click to log`
+      : `No ${CHANNELS[ch].label} logged — click to log`
+
   return (
     <>
-      <Tip content={<FuTip lead={lead} ch={ch} o={o} suggestion={suggestion} isMissed={isMissed} />}>
+      <Tip content={<FuTip lead={lead} ch={ch} o={o} suggestion={suggestion} isMissed={isMissed || hasOverduePending} />}>
         <span
           ref={anchorRef}
           onClick={openPopover}
-          className={`inline-flex w-6 h-6 rounded-lg items-center justify-center border transition-colors cursor-pointer hover:brightness-125 ${filled ? 'border-emerald-400/50 bg-emerald-400/15' : 'border-white/8 bg-white/[0.03]'}`}
-          title={filled ? `Last ${CHANNELS[ch].label}: ${o.date} — click to log another` : `No ${CHANNELS[ch].label} logged — click to log`}
+          className={`inline-flex w-6 h-6 rounded-lg items-center justify-center border transition-colors cursor-pointer hover:brightness-125 ${boxClass}`}
+          title={title}
         >
-          {filled
-            ? <Icon size={12} style={{ color: isMissed ? '#fb7185' : '#34d399' }} />
-            : <span className="text-slate-600">—</span>}
+          <Icon size={12} style={{ color: iconColor }} />
         </span>
       </Tip>
       {popOpen && pos && createPortal(

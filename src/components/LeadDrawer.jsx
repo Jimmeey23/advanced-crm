@@ -90,12 +90,12 @@ export default function LeadDrawer() {
   )
 
   useEffect(() => {
-    if (!lead || !boot?.settings?.momence?.configured || lead.momence || syncing || candidates || autoSyncLeadId === lead.id) return
+    if (!lead || !boot?.integrations?.momence || lead.momence || syncing || candidates || autoSyncLeadId === lead.id) return
     if (!lead.email && !lead.phone && !lead.memberId) return
     setAutoSyncLeadId(lead.id)
     doSync()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lead?.id, lead?.momence, boot?.settings?.momence?.configured])
+  }, [lead?.id, lead?.momence, boot?.integrations?.momence])
 
   if (!drawerLeadId) return null
 
@@ -167,6 +167,12 @@ export default function LeadDrawer() {
 
   const m = lead.momence
   const classesAttended = m?.classHistory?.filter(c => c.checkedIn).length || 0
+
+  // A follow-up slot with neither a real date nor a comment is a blank
+  // placeholder row (common in imported data with a fixed number of
+  // follow-up columns, most left empty) — nothing happened on it, so it
+  // shouldn't render as a timeline entry at all, let alone as "done".
+  const realFollowUps = (lead.followUps || []).filter(f => (f.date && f.date !== '-') || (f.comments && f.comments !== '-'))
 
   const cadence = boot?.settings?.cadence || {}
   const outreachDays = cadence.outreachDays || 7
@@ -329,7 +335,7 @@ export default function LeadDrawer() {
               <div className="rounded-xl bg-white/[0.03] border border-white/8 px-3.5 py-3 flex items-center gap-3">
                 <div className="flex-1 min-w-0">
                   <div className="text-[12.5px] text-slate-300">Let the OpenAI model produce a richer summary, next-step and message suggestions for this lead.</div>
-                  {!boot?.settings?.gpt?.configured && !boot?.settings?.gpt?.apiKey && (
+                  {!boot?.integrations?.gpt && !boot?.settings?.gpt?.apiKey && (
                     <div className="text-[11px] text-slate-500 mt-1">Add an OpenAI key in Settings → Integrations to enable.</div>
                   )}
                 </div>
@@ -343,12 +349,12 @@ export default function LeadDrawer() {
           {/* Respond.io conversations */}
           <section className="modern-card !rounded-2xl p-5">
             <div className="flex items-center gap-2 mb-3">
-              <MessageCircle size={14} className={boot?.settings?.respondio?.configured ? 'text-emerald-400' : 'text-slate-500'} />
+              <MessageCircle size={14} className={boot?.integrations?.respondio ? 'text-emerald-400' : 'text-slate-500'} />
               <h3 className="font-display font-semibold text-white text-[13px]">Respond.io conversation</h3>
-              {boot?.settings?.respondio?.configured && <span className="chip ml-auto bg-white/5 border border-white/10 text-slate-400">{conv?.conversations?.length || 0} threads</span>}
+              {boot?.integrations?.respondio && <span className="chip ml-auto bg-white/5 border border-white/10 text-slate-400">{conv?.conversations?.length || 0} threads</span>}
             </div>
 
-            {!boot?.settings?.respondio?.configured ? (
+            {!boot?.integrations?.respondio ? (
               <div className="text-[12.5px] text-slate-400 flex items-center gap-2"><span>Connect Respond.io in Settings → Integrations to view and send messages.</span></div>
             ) : conv?.error ? (
               <p className="text-[12px] text-rose-400">{conv.error}</p>
@@ -398,7 +404,7 @@ export default function LeadDrawer() {
               <h3 className="font-display font-semibold text-white text-[13px]">Momence · sales & class history</h3>
             </div>
 
-            {!boot?.settings?.momence?.configured ? (
+            {!boot?.integrations?.momence ? (
               <div className="text-[12.5px] text-slate-400 flex items-center gap-2"><span>Connect Momence in Settings to pull sales and class history automatically.</span></div>
             ) : !m ? (
               <div>
@@ -531,10 +537,10 @@ export default function LeadDrawer() {
             <div className="flex items-center gap-2 mb-3">
               <MessageSquare size={14} className="text-amber-400" />
               <h3 className="font-display font-semibold text-white text-[13px]">Follow-up timeline</h3>
-              <span className="chip ml-auto bg-white/5 border border-white/10 text-slate-400">{lead.followUps?.length || 0}</span>
+              <span className="chip ml-auto bg-white/5 border border-white/10 text-slate-400">{realFollowUps.length}</span>
             </div>
             <div className="space-y-0 mb-4">
-              {(lead.followUps || []).slice().reverse().map((f, i) => (
+              {realFollowUps.slice().reverse().map((f, i) => (
                 <div key={f.id || i} className="relative pl-5 pb-4 border-l border-white/10 last:border-0 last:pb-0">
                   <span className={`absolute left-[-5px] top-1 w-2.5 h-2.5 rounded-full ${f.done ? 'bg-emerald-400' : 'bg-amber-400'}`} />
                   <div className="text-[11px] text-slate-500 flex items-center gap-2">
@@ -545,7 +551,7 @@ export default function LeadDrawer() {
                   {f.comments && f.comments !== '-' && <p className="text-[12.5px] text-slate-300 mt-0.5 leading-relaxed">{f.comments}</p>}
                 </div>
               ))}
-              {!lead.followUps?.length && <p className="text-[12px] text-slate-500 mb-3">No follow-ups logged yet.</p>}
+              {!realFollowUps.length && <p className="text-[12px] text-slate-500 mb-3">No follow-ups logged yet.</p>}
             </div>
             <form onSubmit={addFollowUp} className="space-y-2">
               <div className="flex gap-2">

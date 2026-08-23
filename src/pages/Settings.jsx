@@ -3,7 +3,7 @@ import {
   Building2, Link2, Zap, Bell, ShieldCheck, TestTube2, ExternalLink,
   Palette, ListChecks, Users, Bot, Database, Save, Plus, X,
   Sparkles, RotateCcw, Pencil, Check, KeyRound, MessageCircle, Mail, Cloud, Send,
-  Webhook, Copy, RefreshCcw, Trash2, ScrollText, Sheet
+  Webhook, Copy, RefreshCcw, Trash2, ScrollText, Sheet, Filter
 } from 'lucide-react'
 import { useApp } from '../store.jsx'
 import { api } from '../api.js'
@@ -467,7 +467,30 @@ export default function SettingsPage() {
     } catch (e) { toast(e.message, 'error') }
   }
 
-  const configured = boot?.settings?.momence?.configured
+  const [dedupeChecking, setDedupeChecking] = useState(false)
+  const [dedupePreview, setDedupePreview] = useState(null)
+  const [dedupeRemoving, setDedupeRemoving] = useState(false)
+
+  const checkDuplicates = async () => {
+    setDedupeChecking(true); setDedupePreview(null)
+    try { setDedupePreview(await api.post('/api/leads/dedupe', { dryRun: true })) }
+    catch (e) { toast(e.message, 'error') }
+    finally { setDedupeChecking(false) }
+  }
+
+  const removeDuplicates = async () => {
+    if (!window.confirm(`Remove ${dedupePreview.wouldRemove} duplicate lead(s)? This keeps the oldest of each group and deletes the rest — cannot be undone.`)) return
+    setDedupeRemoving(true)
+    try {
+      const result = await api.post('/api/leads/dedupe', { dryRun: false })
+      toast(`Removed ${result.removed} duplicate lead${result.removed === 1 ? '' : 's'}`)
+      setDedupePreview(null)
+      refreshData()
+    } catch (e) { toast(e.message, 'error') }
+    finally { setDedupeRemoving(false) }
+  }
+
+  const configured = boot?.integrations?.momence
 
   return (
     <div className="p-6 max-w-[980px]">
@@ -1000,6 +1023,33 @@ export default function SettingsPage() {
               )}
               <button className="btn btn-soft !mt-4" onClick={resetData}><RotateCcw size={14} /> Reset to demo data</button>
               <p className="text-[11.5px] text-slate-500 mt-2">This restores the original demo dataset with 130 leads across all 4 studios.</p>
+            </Section>
+
+            <Section icon={<Users size={15} className="text-amber-400" />} title="Duplicate leads" desc="Find and remove leads that share the same email or phone number — same person, imported more than once (e.g. an overlapping sync).">
+              <button className="btn btn-soft" onClick={checkDuplicates} disabled={dedupeChecking}>
+                {dedupeChecking ? <Spinner size={14} /> : <Filter size={14} />} Check for duplicates
+              </button>
+              {dedupePreview && (
+                <div className="mt-3 rounded-xl bg-white/[0.03] border border-white/6 p-3.5">
+                  {dedupePreview.wouldRemove > 0 ? (
+                    <>
+                      <p className="text-[12.5px] text-amber-300">{dedupePreview.wouldRemove} duplicate lead{dedupePreview.wouldRemove === 1 ? '' : 's'} found across {dedupePreview.duplicateGroups} group{dedupePreview.duplicateGroups === 1 ? '' : 's'} — the oldest of each group is kept, the rest would be removed.</p>
+                      <div className="mt-2 max-h-40 overflow-y-auto scrollbar-thin space-y-1">
+                        {dedupePreview.preview.map(l => (
+                          <div key={l.id} className="text-[11px] text-slate-400 flex items-center gap-2">
+                            <span className="text-slate-300 truncate flex-1">{l.fullName}</span>
+                            <span className="mono shrink-0">{l.email !== '-' ? l.email : l.phone}</span>
+                          </div>
+                        ))}
+                        {dedupePreview.wouldRemove > dedupePreview.preview.length && <div className="text-[11px] text-slate-600">…and {dedupePreview.wouldRemove - dedupePreview.preview.length} more</div>}
+                      </div>
+                      <button className="btn btn-primary !mt-3 !py-1.5 !text-[12px]" onClick={removeDuplicates} disabled={dedupeRemoving}>
+                        {dedupeRemoving ? <Spinner size={13} /> : <Trash2 size={13} />} Remove {dedupePreview.wouldRemove} duplicate{dedupePreview.wouldRemove === 1 ? '' : 's'}
+                      </button>
+                    </>
+                  ) : <p className="text-[12.5px] text-emerald-400">No duplicates found.</p>}
+                </div>
+              )}
             </Section>
           </>
         )}

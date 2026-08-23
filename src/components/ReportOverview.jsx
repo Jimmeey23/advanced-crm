@@ -144,8 +144,8 @@ export default function ReportOverview({ title, desc }) {
   const comp = data?.comparisons
   const cols = comp ? [
     { key: 'current', label: comp.current.label, accent: '#f43f5e', data: comp.current },
-    { key: 'previousPeriod', label: 'Previous period', accent: '#3b82f6', data: comp.previousPeriod },
-    { key: 'yoy', label: 'Same period last year', accent: '#8b5cf6', data: comp.yoy }
+    { key: 'previousPeriod', label: `Previous period (${comp.previousPeriod.label})`, accent: '#3b82f6', data: comp.previousPeriod },
+    { key: 'yoy', label: `Same period last year (${comp.yoy.label})`, accent: '#8b5cf6', data: comp.yoy }
   ] : []
 
   return (

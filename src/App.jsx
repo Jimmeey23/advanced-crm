@@ -36,7 +36,7 @@ const NAV = [
 
 function Sidebar() {
   const { view, navigate, boot, alerts, sidebarCollapsed, toggleSidebar } = useApp()
-  const momenceOn = boot?.settings?.momence?.configured || boot?.settings?.momence?.connected
+  const momenceOn = boot?.integrations?.momence
   const rrEnabled = boot?.settings?.roundRobin?.enabled
   const highCount = alerts.filter(a => a.level === 'high').length
 

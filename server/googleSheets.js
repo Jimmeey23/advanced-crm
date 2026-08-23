@@ -212,8 +212,26 @@ async function writeStatusColumn(db, statusColIndex, rowUpdates) {
 // against whatever leads currently exist) — for when the sheet's marker
 // column says "already imported" but the app-side leads it created were
 // since deleted, and the intent is a genuine full re-pull.
+// Without this, two runs overlapping (the 30-minute background poll firing
+// mid-way through a manual "Sync now" on a large sheet, or a double click)
+// both read the sheet before either has written its "Imported" markers back
+// — every row still looks unprocessed to both, so both create a lead for
+// it: a full duplicate set of the sheet. A large sheet (tens of thousands of
+// rows) easily takes long enough for this to happen in practice.
+let syncInFlight = false
+
 export async function runSync(db, { createLeadFrom, findDuplicateLead, assignLead, markDirty, logSync, force = false }) {
   if (!isConfigured(db)) throw new Error('Google Sheets is not fully configured yet.')
+  if (syncInFlight) throw new Error('A sync is already in progress — wait for it to finish before starting another.')
+  syncInFlight = true
+  try {
+    return await runSyncInner(db, { createLeadFrom, findDuplicateLead, assignLead, markDirty, logSync, force })
+  } finally {
+    syncInFlight = false
+  }
+}
+
+async function runSyncInner(db, { createLeadFrom, findDuplicateLead, assignLead, markDirty, logSync, force = false }) {
   const c = config(db)
   const { header, rows } = await readSheetRows(db)
   if (!header.length) return { created: 0, duplicates: 0, skipped: 0 }
@@ -222,9 +240,28 @@ export async function runSync(db, { createLeadFrom, findDuplicateLead, assignLea
   const needsStatusHeader = statusColIndex === -1
   if (needsStatusHeader) statusColIndex = header.length
 
+  if (needsStatusHeader) {
+    const col = colLetter(statusColIndex)
+    await sheetsFetch(db, `${SHEETS_BASE}/${c.sheetId}/values/${c.sheetTab}!${col}1?valueInputOption=RAW`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ values: [[STATUS_HEADER]] })
+    })
+  }
+
   let created = 0, duplicates = 0, skipped = 0
   let alreadyImported = 0, blankRows = 0, missingFields = 0
-  const toMarkImported = []
+  let toMarkImported = []
+  // Flushed periodically rather than once at the very end — on a very large
+  // sheet (tens of thousands of rows) a single run can take long enough that
+  // a crash or redeploy mid-run would otherwise leave every already-created
+  // lead's row unmarked, and the next sync would recreate all of them.
+  const FLUSH_EVERY = 250
+  const flush = async () => {
+    if (!toMarkImported.length) return
+    await writeStatusColumn(db, statusColIndex, toMarkImported)
+    toMarkImported = []
+  }
 
   for (let i = 0; i < rows.length; i++) {
     const row = rows[i]
@@ -251,25 +288,20 @@ export async function runSync(db, { createLeadFrom, findDuplicateLead, assignLea
     if (!name || (!isValidEmail(email) && !isValidPhone(phone))) { missingFields++; skipped++; continue }
 
     const dup = findDuplicateLead(email, phone)
-    if (dup) { duplicates++; toMarkImported.push({ sheetRowNumber }); continue }
+    if (dup) { duplicates++; toMarkImported.push({ sheetRowNumber }) }
+    else {
+      const lead = createLeadFrom(buildLeadPayloadFromResolved(resolved, db, 'Google Sheets', record))
+      if (!lead.associateId && db.settings.roundRobin?.enabled) assignLead(db, lead)
+      db.leads.push(lead)
+      markDirty(lead.id)
+      created++
+      toMarkImported.push({ sheetRowNumber })
+    }
 
-    const lead = createLeadFrom(buildLeadPayloadFromResolved(resolved, db, 'Google Sheets', record))
-    if (!lead.associateId && db.settings.roundRobin?.enabled) assignLead(db, lead)
-    db.leads.push(lead)
-    markDirty(lead.id)
-    created++
-    toMarkImported.push({ sheetRowNumber })
+    if (toMarkImported.length >= FLUSH_EVERY) await flush()
   }
 
-  if (needsStatusHeader && toMarkImported.length) {
-    const col = colLetter(statusColIndex)
-    await sheetsFetch(db, `${SHEETS_BASE}/${c.sheetId}/values/${c.sheetTab}!${col}1?valueInputOption=RAW`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ values: [[STATUS_HEADER]] })
-    })
-  }
-  await writeStatusColumn(db, statusColIndex, toMarkImported)
+  await flush()
 
   const counts = { created, duplicates, skipped, alreadyImported, blankRows, missingFields }
   db.settings.googleSheets.lastSyncAt = nowIso()

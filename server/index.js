@@ -477,6 +477,7 @@ app.patch('/api/leads/:id', (req, res) => {
   const before = lead.stage
   safePatch(lead, req.body)
   markDirty(lead.id)
+  save()
   if (req.body.associateId) log('assign', `Assigned ${lead.fullName}`, lead.id)
   if (req.body.stage && req.body.stage !== before) log('stage', `${lead.fullName} moved ${before} → ${req.body.stage}`, lead.id)
   res.json(enrichLead(lead, db))
@@ -1245,6 +1246,44 @@ app.put('/api/lists', (req, res) => {
   res.json({ stages: db.stages, sources: db.sources, channels: db.channels, classTypes: db.classTypes })
 })
 
+// Finds leads sharing the same email or phone and removes all but the
+// oldest of each group — cleanup for duplicates created by any past bug
+// (e.g. two overlapping Google Sheets syncs racing before the fixed lock
+// existed). `dryRun` (default) reports what WOULD be removed without
+// touching anything, so an admin can sanity-check the count first.
+app.post('/api/leads/dedupe', (req, res) => {
+  const dryRun = req.body?.dryRun !== false
+  const groups = new Map() // key -> array of leads, oldest first once sorted
+  const keyFor = (l) => {
+    const email = l.email && l.email !== '-' ? String(l.email).trim().toLowerCase() : ''
+    const phone = l.phone ? String(l.phone).replace(/\D/g, '') : ''
+    return email ? `email:${email}` : phone ? `phone:${phone}` : null
+  }
+  for (const l of db.leads) {
+    const key = keyFor(l)
+    if (!key) continue
+    if (!groups.has(key)) groups.set(key, [])
+    groups.get(key).push(l)
+  }
+
+  const toRemove = []
+  for (const group of groups.values()) {
+    if (group.length < 2) continue
+    group.sort((a, b) => String(a.createdAt || '').localeCompare(String(b.createdAt || '')))
+    toRemove.push(...group.slice(1))
+  }
+
+  const preview = toRemove.slice(0, 20).map(l => ({ id: l.id, fullName: l.fullName, email: l.email, phone: l.phone, createdAt: l.createdAt }))
+  if (dryRun) return res.json({ dryRun: true, duplicateGroups: [...groups.values()].filter(g => g.length > 1).length, wouldRemove: toRemove.length, preview })
+
+  const removeIds = new Set(toRemove.map(l => l.id))
+  db.leads = db.leads.filter(l => !removeIds.has(l.id))
+  for (const id of removeIds) markDeleted(id)
+  save()
+  log('lead', `Deduped leads: removed ${removeIds.size} duplicate(s) by email/phone`)
+  res.json({ dryRun: false, removed: removeIds.size })
+})
+
 app.post('/api/reset', (req, res) => {
   const fresh = reset()
   log('system', 'Database reset to demo dataset')
@@ -1441,7 +1480,7 @@ function reportBreakdown(scope, entityId, start, end, groupField) {
   const leads = scopedLeads(scope, entityId).filter(l => inRange(l.createdAt))
   const map = {}
   for (const l of leads) {
-    const key = (groupField === 'stage' ? l.stage : l.source) || 'Unspecified'
+    const key = (groupField === 'stage' ? l.stage : l.sourceName) || 'Unspecified'
     const row = map[key] = map[key] || { key, leadsReceived: 0, trialsScheduled: 0, trialsCompleted: 0, converted: 0 }
     row.leadsReceived++
     if (isTrialScheduledStage(l.stage)) row.trialsScheduled++
@@ -1798,7 +1837,7 @@ function periodLostBySource(start, end, locationId) {
     .filter(l => l.status === 'lost' && inRange(l.createdAt))
   const map = {}
   for (const l of leads) {
-    const key = l.source || 'Unspecified'
+    const key = l.sourceName || 'Unspecified'
     map[key] = map[key] || { source: key, count: 0, lostValue: 0 }
     map[key].count++
     map[key].lostValue += l.valueEstimate || 0
@@ -1879,9 +1918,9 @@ app.get('/api/analytics/report/drill', (req, res) => {
   const groupValue = req.query.stage !== undefined ? req.query.stage : req.query.source
   const leads = scopedLeads(scope, entityId)
     .filter(l => inRange(l.createdAt))
-    .filter(l => ((groupField === 'stage' ? l.stage : l.source) || 'Unspecified') === groupValue)
+    .filter(l => ((groupField === 'stage' ? l.stage : l.sourceName) || 'Unspecified') === groupValue)
     .slice(0, 100)
-    .map(l => ({ id: l.id, fullName: l.fullName, stage: l.stage, status: l.status, source: l.source, revenue: l.valueEstimate || 0, createdAt: l.createdAt }))
+    .map(l => ({ id: l.id, fullName: l.fullName, stage: l.stage, status: l.status, source: l.sourceName, revenue: l.valueEstimate || 0, createdAt: l.createdAt }))
   res.json({ leads })
 })
 
