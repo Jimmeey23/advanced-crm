@@ -4,7 +4,7 @@ import { useApp } from '../store.jsx'
 import { api } from '../api.js'
 import { Modal, ModalHeader, Avatar, Spinner } from '../ui.jsx'
 
-function getLibrary(settingsTemplates) {
+export function getLibrary(settingsTemplates) {
   const defaults = [
     { id: 'welcome', name: 'welcome_message', label: 'Welcome / First Reply', language: 'en', category: 'marketing', parameters: ['First name', 'Studio name'] },
     { id: 'trial', name: 'trial_booking_followup', label: 'Trial Booking Follow-up', language: 'en', category: 'utility', parameters: ['First name', 'Trial date', 'Studio name'] }
@@ -24,7 +24,7 @@ function countPlaceholders(text) {
 // mismatch against the approved template that makes WhatsApp deliver the
 // message as an empty bubble. `rawComponents` is forwarded to the backend
 // unchanged so it can rebuild the exact component types/positions expected.
-function fromApiTemplate(t) {
+export function fromApiTemplate(t) {
   const components = Array.isArray(t.components) ? t.components : []
   const header = components.find(c => String(c.type).toUpperCase() === 'HEADER')
   const body = components.find(c => String(c.type).toUpperCase() === 'BODY')

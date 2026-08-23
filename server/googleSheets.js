@@ -250,7 +250,7 @@ export async function runSync(db, { createLeadFrom, findDuplicateLead, assignLea
     const dup = findDuplicateLead(email, phone)
     if (dup) { duplicates++; toMarkImported.push({ sheetRowNumber }); continue }
 
-    const lead = createLeadFrom(buildLeadPayloadFromResolved(resolved, db, 'Google Sheets'))
+    const lead = createLeadFrom(buildLeadPayloadFromResolved(resolved, db, 'Google Sheets', record))
     if (!lead.associateId && db.settings.roundRobin?.enabled) assignLead(db, lead)
     db.leads.push(lead)
     markDirty(lead.id)

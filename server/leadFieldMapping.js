@@ -108,12 +108,41 @@ export function resolveLeadFields(record, integ) {
   return out
 }
 
+// "Follow Up 1 Date" / "Follow Up Comments (1)" / "Follow Up 2 Date" / ... —
+// a repeating pair of columns per historical follow-up, not a single flat
+// field, so it can't go through the alias dictionary above (that's one
+// column -> one field). Pulled straight off the raw record by column-name
+// pattern instead, grouped by their shared index, in index order.
+function extractFollowUps(record) {
+  const byIndex = {}
+  for (const [key, value] of Object.entries(record || {})) {
+    const norm = normalizeKey(key)
+    let m = norm.match(/^followup(\d+)date$/)
+    if (m) { (byIndex[m[1]] ||= {}).date = value; continue }
+    m = norm.match(/^followupcomments?(\d+)$/)
+    if (m) { (byIndex[m[1]] ||= {}).comments = value; continue }
+  }
+  return Object.keys(byIndex)
+    .sort((a, b) => Number(a) - Number(b))
+    .map(i => byIndex[i])
+    .filter(f => String(f.date || '').trim() || String(f.comments || '').trim())
+    .map((f, i) => ({
+      id: `fu_import_${Date.now().toString(36)}_${i}`,
+      date: f.date ? String(f.date).trim() : '',
+      comments: f.comments ? String(f.comments).trim() : '',
+      channel: null,
+      done: true
+    }))
+}
+
 // Turns a resolveLeadFields() result into the payload shape
 // createLeadFrom() expects, dropping associateId/locationId if they don't
 // match a real record rather than silently creating a lead pointed at a
 // non-existent associate or studio. `db` needs `.associates`/`.locations`;
-// `fallbackSourceName` is used when the record didn't resolve a `source`.
-export function buildLeadPayloadFromResolved(resolved, db, fallbackSourceName) {
+// `fallbackSourceName` is used when the record didn't resolve a `source`;
+// `record` (optional, the raw pre-alias record) is scanned for the
+// "Follow Up N ..." column pairs described above.
+export function buildLeadPayloadFromResolved(resolved, db, fallbackSourceName, record) {
   const associateId = resolved.associateId && db.associates.some(a => a.id === resolved.associateId) ? resolved.associateId : undefined
   const locationId = resolved.locationId && db.locations.some(l => l.id === resolved.locationId) ? resolved.locationId : undefined
   return {
@@ -141,6 +170,7 @@ export function buildLeadPayloadFromResolved(resolved, db, fallbackSourceName) {
     retentionStatus: resolved.retentionStatus ? String(resolved.retentionStatus).trim() : undefined,
     associateName: resolved.associateName ? String(resolved.associateName).trim() : undefined,
     associateId,
-    locationId
+    locationId,
+    followUps: record ? extractFollowUps(record) : undefined
   }
 }

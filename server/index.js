@@ -552,8 +552,8 @@ function serializeWebhook(w, req) {
 function resolveWebhookLeadFields(body, integ) {
   return resolveLeadFields(body, integ)
 }
-function buildWebhookLeadPayload(resolved, integ) {
-  return buildLeadPayloadFromResolved(resolved, db, integ.name)
+function buildWebhookLeadPayload(resolved, integ, record) {
+  return buildLeadPayloadFromResolved(resolved, db, integ.name, record)
 }
 
 function findDuplicateLead(email, phone) {
@@ -640,7 +640,7 @@ app.post('/api/webhooks/:id/test', (req, res) => {
   const missing = []
   if (!resolved.fullName) missing.push('name')
   if (!resolved.email && !resolved.phone) missing.push('email or phone')
-  const preview = missing.length ? null : buildWebhookLeadPayload(resolved, w)
+  const preview = missing.length ? null : buildWebhookLeadPayload(resolved, w, payload)
   res.json({ resolved, preview, missing })
 })
 
@@ -745,7 +745,7 @@ app.all('/api/webhooks/leads/:key', (req, res) => {
     return res.json({ status: 'duplicate', leadId: dup.id })
   }
 
-  const lead = createLeadFrom(buildWebhookLeadPayload(resolved, integ))
+  const lead = createLeadFrom(buildWebhookLeadPayload(resolved, integ, body))
   if (!lead.associateId && db.settings.roundRobin.enabled) assignLead(db, lead)
   db.leads.push(lead)
   markDirty(lead.id)
@@ -851,14 +851,14 @@ app.get('/api/google-sheets/logs', (req, res) => {
   res.json((db.sheetSyncLogs || []).slice(0, 50))
 })
 
-// Background poll: once a sheet is fully configured, sync every 5 minutes
+// Background poll: once a sheet is fully configured, sync every 30 minutes
 // without blocking anything — failures are logged, never thrown.
 setInterval(() => {
   if (!db || !googleSheets.isConfigured(db)) return
   googleSheets.runSync(db, { createLeadFrom, findDuplicateLead, assignLead, markDirty, logSync: logSheetSync })
     .then(() => save())
     .catch(e => logSheetSync('error', e.message))
-}, 5 * 60 * 1000)
+}, 30 * 60 * 1000)
 
 // ---------- CSV import ----------
 

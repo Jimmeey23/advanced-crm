@@ -902,7 +902,7 @@ export default function SettingsPage() {
                   )}
                   {sheetsConfig?.lastSyncAt && (
                     <p className="mt-1 text-[11px] text-slate-500">Last synced {new Date(sheetsConfig.lastSyncAt).toLocaleString()}
-                      {sheetsConfig.lastSyncCounts && ` — ${sheetsConfig.lastSyncCounts.created} created, ${sheetsConfig.lastSyncCounts.duplicates} duplicate, ${sheetsConfig.lastSyncCounts.skipped} skipped`}. Also syncs automatically every 5 minutes.
+                      {sheetsConfig.lastSyncCounts && ` — ${sheetsConfig.lastSyncCounts.created} created, ${sheetsConfig.lastSyncCounts.duplicates} duplicate, ${sheetsConfig.lastSyncCounts.skipped} skipped`}. Also syncs automatically every 30 minutes.
                     </p>
                   )}
 

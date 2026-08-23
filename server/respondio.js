@@ -313,6 +313,19 @@ export async function sendTemplateMessage(db, lead, template) {
   const components = Array.isArray(template.components) && template.components.length
     ? template.components
     : buildTemplateComponents(template.rawComponents, template.parameters)
+
+  // A template that the picker showed parameter fields for has variables by
+  // definition — if none of them ended up in a component here, the raw
+  // schema didn't match what countPlaceholders() expected (an API shape
+  // change, a template missing its component text) and WhatsApp would
+  // silently deliver an empty bubble instead of erroring. Fail loudly here
+  // instead, since that's a far more useful signal than "sent successfully."
+  const hasEnteredValues = Array.isArray(template.parameters) && template.parameters.some(v => String(v ?? '').trim())
+  const componentsCarryValues = components.some(c => Array.isArray(c.parameters) && c.parameters.length)
+  if (hasEnteredValues && !componentsCarryValues) {
+    throw new Error(`Could not match "${template.name}"'s entered variables to its template structure — the message would send with a blank body. Try re-opening the template picker (refreshes the template schema) before sending again.`)
+  }
+
   const channelId = template.channelId || await resolveChannelId(db, template.channel || 'whatsapp')
   const body = {
     channelId,
