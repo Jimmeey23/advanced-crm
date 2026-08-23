@@ -614,6 +614,23 @@ function TableGrid({ items, boot, lookup, openLead, changeStage, toggleManualFla
                 </td>
                 <td className={`px-4 ${py} w-[190px] text-[12px] text-slate-400 mono`}>{fmtDate(l.createdAt)}</td>
                 {visibleCols.map(c => {
+                  if (c.field === 'source') {
+                    return (
+                      <td key={c.id} className={`px-4 ${py}`}>
+                        {l.sourceName ? <span className="source-chip">{l.sourceName}</span> : <span className="text-slate-600">—</span>}
+                      </td>
+                    )
+                  }
+                  if (c.field === 'owner') {
+                    return (
+                      <td key={c.id} className={`px-4 ${py}`}>
+                        <div className="flex items-center gap-2 min-w-0">
+                          <Avatar name={owner?.name || '?'} color={owner?.color} photoUrl={owner?.photoUrl} size={22} />
+                          <span className="text-[12px] text-slate-300 truncate max-w-[110px]">{owner?.name || 'Unassigned'}</span>
+                        </div>
+                      </td>
+                    )
+                  }
                   const val = getColumnValue(c, l, lookup)
                   return (
                     <td key={c.id} className={`px-4 ${py} text-[12.5px] ${c.type === 'number' || c.type === 'currency' || c.type === 'percent' ? 'mono text-slate-300' : 'text-slate-400'}`}>
@@ -735,7 +752,7 @@ function FuCell({ lead, ch }) {
         <span
           ref={anchorRef}
           onClick={openPopover}
-          className={`inline-flex w-6 h-6 rounded-lg items-center justify-center border transition-colors cursor-pointer hover:brightness-125 ${boxClass}`}
+          className={`fu-cell-box inline-flex w-7 h-7 rounded-lg items-center justify-center border transition-all cursor-pointer hover:brightness-125 hover:-translate-y-px hover:shadow-md ${boxClass}`}
           title={title}
         >
           {!filled && !hasOverduePending

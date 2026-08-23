@@ -519,7 +519,7 @@ html[data-theme="light"] {
   width: 100%;
   max-height: min(68vh, 760px);
   overflow: auto;
-  overscroll-behavior: contain;
+  overscroll-behavior: auto;
   position: relative;
 }
 .data-table thead { position: sticky; top: 0; z-index: 35; }
@@ -532,11 +532,11 @@ html[data-theme="light"] {
 .data-table thead tr { position: relative; }
 .data-table thead tr::after {
   content: ''; position: absolute; left: 0; right: 0; bottom: -1px; height: 2px; z-index: 1;
-  background: linear-gradient(90deg, transparent, var(--accent), transparent);
-  background-size: 220% 100%;
-  animation: tblHeaderSweep 4.5s linear infinite;
+  background: linear-gradient(90deg, #fb7185, #fbbf24, #34d399, #38bdf8, #a78bfa, #fb7185);
+  background-size: 400% 100%;
+  animation: tblHeaderSweep 8s linear infinite;
 }
-@keyframes tblHeaderSweep { 0% { background-position: 220% 0; } 100% { background-position: -220% 0; } }
+@keyframes tblHeaderSweep { 0% { background-position: 0% 0; } 100% { background-position: 400% 0; } }
 @media (prefers-reduced-motion: reduce) { .data-table thead tr::after { animation: none; background-position: 0 0; } }
 .table-sticky-surface {
   background: #0d101d !important;
@@ -559,7 +559,15 @@ html[data-theme="light"] {
 .data-table tbody tr:last-child td { border-bottom: 0; }
 .lead-table-scroll { border-radius: 14px; border: 1px solid var(--tbl-border); }
 .data-table td, .data-table th { border-color: var(--tbl-border); }
-.stage-select { min-width: 170px; text-overflow: ellipsis; }
+.stage-select { min-width: 170px; text-overflow: ellipsis; font-weight: 700; letter-spacing: 0.01em; box-shadow: 0 1px 2px rgba(0,0,0,.15), inset 0 0 0 1px rgba(255,255,255,.04); transition: filter .15s ease, box-shadow .15s ease; }
+.stage-select:hover { filter: brightness(1.12); }
+.source-chip {
+  display: inline-flex; align-items: center; padding: 3px 9px; border-radius: 999px;
+  font-size: 11px; font-weight: 600; letter-spacing: .01em;
+  background: rgba(56,189,248,.1); color: #7dd3fc; border: 1px solid rgba(56,189,248,.28);
+}
+html[data-theme="light"] .source-chip { background: rgba(2,132,199,.1); color: #0369a1; border-color: rgba(2,132,199,.28); }
+.fu-cell-box { box-shadow: 0 1px 2px rgba(0,0,0,.12); }
 /* Stage badge colors are set per-row via inline style (JS-computed hue),
    tuned for a dark background — against light mode's white surface the same
    pastel alpha reads as washed-out and low-contrast, so darken/saturate it
