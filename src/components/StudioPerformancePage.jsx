@@ -81,11 +81,16 @@ export default function StudioPerformancePage({ range, title, desc }) {
     api.get(`/api/analytics/performance/by-location?${params.toString()}`)
       .then(d => {
         setData(d)
-        // First load (or a stale selection referring to studios no longer
-        // returned): adopt the server's default so the picker and the report
-        // agree on what's actually shown, without fighting the user's choice
-        // on every subsequent fetch.
-        if (!selectedLocationIds.length && d?.selectedLocationIds?.length) {
+        // First load, or a stale selection referring to studios no longer
+        // returned (e.g. a location was renamed/removed since this was set):
+        // adopt the server's default so the picker, the Executive scorecard
+        // (driven by perLocation, keyed off this selection) and the Studio
+        // brief cards (driven by rows, independent of this selection) agree
+        // on what's actually shown, instead of the scorecard silently going
+        // to zero for a studio the brief cards still render correctly.
+        const validIds = new Set((d?.rows || []).map(r => r.locationId))
+        const stillValid = selectedLocationIds.length && selectedLocationIds.every(id => validIds.has(id))
+        if (!stillValid && d?.selectedLocationIds?.length) {
           setSelectedLocationIds(d.selectedLocationIds)
         }
       })
@@ -147,7 +152,23 @@ export default function StudioPerformancePage({ range, title, desc }) {
       setExporting(false)
     }
   }
-  const totals = primary?.summary || { newLeads: 0, trials: 0, won: 0, revenue: 0, followUps: 0, missed: 0 }
+  // `primary.summary` (server-computed perLocation[0]) and `rows` (also
+  // server-computed, one entry per studio) both derive from the same lead
+  // data — but perLocation is keyed off the client's selectedLocationIds
+  // while rows always covers every real studio. If the two ever disagree
+  // (a stale/invalid selection, a race between selection and fetch), rows
+  // is the one guaranteed to match a real studio, so it's the fallback
+  // rather than a flat zero — the Executive scorecard should never show 0
+  // while the Studio brief cards below it show real numbers for the same
+  // studio.
+  const primaryRow = rows.find(r => r.locationId === primary?.locationId) || rows[0] || null
+  const rawTotals = primary?.summary
+  const hasRawTotals = rawTotals && (rawTotals.newLeads || rawTotals.trials || rawTotals.won || rawTotals.revenue || rawTotals.followUps)
+  const totals = hasRawTotals
+    ? rawTotals
+    : primaryRow
+      ? { newLeads: primaryRow.newLeads, trials: primaryRow.trials, won: primaryRow.won, revenue: primaryRow.revenue, followUps: primaryRow.followUps, missed: primaryRow.missed }
+      : { newLeads: 0, trials: 0, won: 0, revenue: 0, followUps: 0, missed: 0 }
   const followUpRate = totals.followUps ? Math.round(((totals.followUps - totals.missed) / totals.followUps) * 100) : 0
   const openLeads = (primary?.funnel?.new || 0) + (primary?.funnel?.trial || 0)
   const activeAssociates = (primary?.leaderboard || []).filter(a => a.active !== false)
@@ -585,16 +606,22 @@ function AssociateCard({ label, icon, associate }) {
   )
 }
 
+// Capped at a fixed pixel height with its own scrollbar — a busy studio can
+// have hundreds of new leads in a period, and rendering all of them with no
+// cap used to blow the report out to a many-thousand-pixel unscrollable
+// column (visible as a near-endless list on export/print).
+const DETAIL_LIST_MAX_HEIGHT = 260
+
 function DetailList({ title, color, items, openLead, moneyValue }) {
   if (!items?.length) return <div className="text-[12px] text-slate-500">{title}: none</div>
   return (
     <div>
       <div className="text-[10.5px] uppercase tracking-wider font-bold mb-1.5" style={{ color }}>{title} ({items.length})</div>
-      <div className="space-y-1">
+      <div className="space-y-1 overflow-y-auto scrollbar-thin pr-1" style={{ maxHeight: DETAIL_LIST_MAX_HEIGHT }}>
         {items.map(it => (
           <button key={it.id} className="w-full text-left flex items-center justify-between gap-2 text-[12px] text-slate-300 bg-white/[0.03] border border-white/8 rounded-lg px-2.5 py-1.5 hover:bg-white/[0.06] transition-colors" onClick={() => openLead(it.id)}>
             <span className="truncate">{it.fullName}</span>
-            {moneyValue ? <span className="mono text-emerald-400 shrink-0">{money(it.revenue)}</span> : <span className="chip !px-1.5 !py-0.5 text-[9px] bg-white/5 border border-white/10 text-slate-400">{it.stage}</span>}
+            {moneyValue ? <span className="mono text-emerald-400 shrink-0">{money(it.revenue)}</span> : <span className="chip !px-1.5 !py-0.5 text-[9px] bg-white/5 border border-white/10 text-slate-400 shrink-0 max-w-[140px] truncate" title={it.stage}>{it.stage}</span>}
           </button>
         ))}
       </div>

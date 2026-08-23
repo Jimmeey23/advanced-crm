@@ -33,6 +33,13 @@ try {
 } catch (e) { /* ignore */ }
 
 const app = express()
+// Railway (and most PaaS hosts) terminate TLS at a proxy in front of this
+// process, so the request Express actually sees is plain HTTP — without this,
+// req.protocol always reports "http" even on the public https:// URL, which
+// breaks anything that builds an absolute URL from it (Google OAuth redirect
+// URI, webhook URLs): Google rejects the OAuth callback because the http://
+// URI it's given was never registered (only the real https:// one was).
+app.set('trust proxy', true)
 
 // Frontend and API can be deployed to separate origins (e.g. frontend on
 // Vercel, this server on Railway) — allow cross-origin requests. Restrict
