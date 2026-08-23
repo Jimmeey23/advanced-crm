@@ -14,6 +14,8 @@ import * as mailer from './mailer.js'
 import * as supabase from './supabaseStore.js'
 import { runReminderDigest, startReminderScheduler } from './reminders.js'
 import { parseCsv, autoMap, normalizeStage, normalizeStatus, parseFlexibleDate } from './csv.js'
+import { resolveLeadFields, buildLeadPayloadFromResolved } from './leadFieldMapping.js'
+import * as googleSheets from './googleSheets.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -538,111 +540,13 @@ function serializeWebhook(w, req) {
   return { ...w, url: webhookUrlForReq(req, w.key) }
 }
 
-// Every Lead field a webhook is allowed to populate, and the common
-// third-party key spellings that map to it automatically. This alias
-// dictionary is a standing fallback under any explicit mapping — it fires
-// whenever the payload has a recognizable key that isn't already claimed by
-// the integration's own fieldMapping, so a brand-new webhook produces sane
-// leads immediately, before anyone visits the mapping editor.
-const WEBHOOK_FIELD_ALIASES = {
-  fullName: ['name', 'fullname', 'full_name', 'customer_name', 'contact_name', 'lead_name'],
-  firstName: ['first_name', 'firstname', 'fname', 'given_name'],
-  lastName: ['last_name', 'lastname', 'lname', 'surname', 'family_name'],
-  email: ['email', 'email_address', 'emailaddress'],
-  phone: ['phone', 'phone_number', 'phonenumber', 'mobile', 'contact_number', 'whatsapp'],
-  source: ['source', 'lead_source', 'utm_source', 'sourcename'],
-  notes: ['notes', 'note', 'message', 'comments', 'remarks'],
-  classType: ['class_type', 'classtype', 'service', 'interest', 'program'],
-  channel: ['channel', 'medium', 'utm_medium'],
-  stage: ['stage', 'pipeline_stage'],
-  status: ['status', 'lead_status'],
-  valueEstimate: ['value', 'value_estimate', 'amount', 'price', 'deal_value'],
-  associateId: ['associate_id', 'associateid', 'owner_id', 'assigned_to'],
-  associateName: ['associate_name', 'associatename', 'owner_name', 'assigned_to_name', 'sales_rep'],
-  locationId: ['location_id', 'locationid', 'studio_id', 'center_id'],
-  center: ['center', 'centre', 'studio', 'location'],
-  memberId: ['member_id', 'memberid'],
-  hostId: ['host_id', 'hostid'],
-  period: ['period', 'time_period'],
-  purchasesMade: ['purchases_made', 'purchasesmade', 'purchases'],
-  visits: ['visits', 'visit_count'],
-  trialStatus: ['trial_status', 'trialstatus'],
-  conversionStatus: ['conversion_status', 'conversionstatus'],
-  retentionStatus: ['retention_status', 'retentionstatus']
-}
-
-function findByAlias(body, aliases) {
-  const keys = Object.keys(body)
-  for (const alias of aliases) {
-    const hit = keys.find(k => k.toLowerCase() === alias)
-    if (hit) return body[hit]
-  }
-  return undefined
-}
-
-// Resolves every webhook-eligible Lead field from a received payload, in
-// priority order: (1) integration's own explicit fieldMapping, (2) the
-// built-in alias dictionary above, (3) the integration's configured static
-// defaults. Returns only the fields that resolved to a non-empty value.
+// Alias/mapping resolution used by both webhooks and Google Sheets sync
+// lives in leadFieldMapping.js — see that file for the alias dictionary.
 function resolveWebhookLeadFields(body, integ) {
-  const mapping = integ.fieldMapping || {}
-  const defaults = integ.defaults || {}
-  const reverseMapping = {}
-  for (const [incomingKey, targetField] of Object.entries(mapping)) {
-    if (!reverseMapping[targetField]) reverseMapping[targetField] = incomingKey
-  }
-  const out = {}
-  for (const field of Object.keys(WEBHOOK_FIELD_ALIASES)) {
-    let val
-    const mappedKey = reverseMapping[field]
-    if (mappedKey !== undefined) val = body[mappedKey]
-    if (val === undefined || val === null || String(val).trim() === '') {
-      val = findByAlias(body, WEBHOOK_FIELD_ALIASES[field])
-    }
-    if (val === undefined || val === null || String(val).trim() === '') {
-      val = defaults[field]
-    }
-    if (val !== undefined && val !== null && String(val).trim() !== '') out[field] = val
-  }
-  // firstName/lastName aren't real Lead fields — they only exist to build
-  // fullName when a form sends split name fields instead of one combined one.
-  if (!out.fullName && (out.firstName || out.lastName)) {
-    out.fullName = [out.firstName, out.lastName].filter(Boolean).join(' ').trim()
-  }
-  return out
+  return resolveLeadFields(body, integ)
 }
-
-// Turns a resolveWebhookLeadFields() result into the payload shape
-// createLeadFrom() expects, dropping associateId/locationId if they don't
-// match a real record rather than silently creating a lead pointed at a
-// non-existent associate or studio.
-function buildLeadPayloadFromResolved(resolved, integ) {
-  const associateId = resolved.associateId && db.associates.some(a => a.id === resolved.associateId) ? resolved.associateId : undefined
-  const locationId = resolved.locationId && db.locations.some(l => l.id === resolved.locationId) ? resolved.locationId : undefined
-  return {
-    fullName: resolved.fullName ? String(resolved.fullName).trim() : '',
-    email: resolved.email ? String(resolved.email).trim() : '-',
-    phone: resolved.phone ? String(resolved.phone).trim() : '',
-    sourceName: resolved.source ? String(resolved.source).trim() : integ.name,
-    remarks: resolved.notes ? String(resolved.notes) : '',
-    classType: resolved.classType ? String(resolved.classType).trim() : undefined,
-    channel: resolved.channel ? String(resolved.channel).trim() : undefined,
-    stage: resolved.stage ? String(resolved.stage).trim() : undefined,
-    status: resolved.status ? String(resolved.status).trim() : undefined,
-    valueEstimate: resolved.valueEstimate !== undefined ? Number(resolved.valueEstimate) : undefined,
-    center: resolved.center ? String(resolved.center).trim() : undefined,
-    memberId: resolved.memberId ? String(resolved.memberId).trim() : undefined,
-    hostId: resolved.hostId ? String(resolved.hostId).trim() : undefined,
-    period: resolved.period ? String(resolved.period).trim() : undefined,
-    purchasesMade: resolved.purchasesMade !== undefined ? Number(resolved.purchasesMade) : undefined,
-    visits: resolved.visits !== undefined ? Number(resolved.visits) : undefined,
-    trialStatus: resolved.trialStatus ? String(resolved.trialStatus).trim() : undefined,
-    conversionStatus: resolved.conversionStatus ? String(resolved.conversionStatus).trim() : undefined,
-    retentionStatus: resolved.retentionStatus ? String(resolved.retentionStatus).trim() : undefined,
-    associateName: resolved.associateName ? String(resolved.associateName).trim() : undefined,
-    associateId,
-    locationId
-  }
+function buildWebhookLeadPayload(resolved, integ) {
+  return buildLeadPayloadFromResolved(resolved, db, integ.name)
 }
 
 function findDuplicateLead(email, phone) {
@@ -729,7 +633,7 @@ app.post('/api/webhooks/:id/test', (req, res) => {
   const missing = []
   if (!resolved.fullName) missing.push('name')
   if (!resolved.email && !resolved.phone) missing.push('email or phone')
-  const preview = missing.length ? null : buildLeadPayloadFromResolved(resolved, w)
+  const preview = missing.length ? null : buildWebhookLeadPayload(resolved, w)
   res.json({ resolved, preview, missing })
 })
 
@@ -816,7 +720,7 @@ app.all('/api/webhooks/leads/:key', (req, res) => {
     return res.json({ status: 'duplicate', leadId: dup.id })
   }
 
-  const lead = createLeadFrom(buildLeadPayloadFromResolved(resolved, integ))
+  const lead = createLeadFrom(buildWebhookLeadPayload(resolved, integ))
   if (!lead.associateId && db.settings.roundRobin.enabled) assignLead(db, lead)
   db.leads.push(lead)
   markDirty(lead.id)
@@ -825,6 +729,93 @@ app.all('/api/webhooks/leads/:key', (req, res) => {
   logWebhookCall(integ.id, 'created', `Lead ${lead.id}`)
   res.status(201).json({ status: 'created', leadId: lead.id })
 })
+
+// ---------- Google Sheets lead import ----------
+
+function logSheetSync(outcome, detail) {
+  db.sheetSyncLogs = db.sheetSyncLogs || []
+  db.sheetSyncLogs.unshift({ id: uid('shlog'), ts: nowIso(), outcome, detail: detail || null })
+  if (db.sheetSyncLogs.length > 300) db.sheetSyncLogs.length = 300
+  save()
+}
+
+function sheetsRedirectUri(req) {
+  return `${req.protocol}://${req.get('host')}/api/google-sheets/oauth/callback`
+}
+
+app.get('/api/google-sheets/config', (req, res) => {
+  res.json(googleSheets.sanitizedConfig(db))
+})
+
+app.put('/api/google-sheets/config', (req, res) => {
+  const body = req.body || {}
+  const current = db.settings.googleSheets || {}
+  db.settings.googleSheets = {
+    ...current,
+    ...(typeof body.clientId === 'string' ? { clientId: body.clientId.trim() } : {}),
+    ...(typeof body.clientSecret === 'string' && body.clientSecret ? { clientSecret: body.clientSecret.trim() } : {}),
+    ...(typeof body.sheetId === 'string' ? { sheetId: body.sheetId.trim() } : {}),
+    ...(typeof body.sheetTab === 'string' ? { sheetTab: body.sheetTab.trim() } : {}),
+    ...(body.fieldMapping && typeof body.fieldMapping === 'object' ? { fieldMapping: body.fieldMapping } : {}),
+    ...(body.defaults && typeof body.defaults === 'object' ? { defaults: body.defaults } : {})
+  }
+  save()
+  log('settings', 'Google Sheets config updated')
+  res.json(googleSheets.sanitizedConfig(db))
+})
+
+app.get('/api/google-sheets/oauth/start', (req, res) => {
+  try {
+    const url = googleSheets.buildAuthUrl(db, sheetsRedirectUri(req))
+    res.redirect(url)
+  } catch (e) {
+    res.status(400).json({ error: e.message })
+  }
+})
+
+app.get('/api/google-sheets/oauth/callback', async (req, res) => {
+  try {
+    if (req.query.error) throw new Error(req.query.error_description || req.query.error)
+    if (!req.query.code) throw new Error('No authorization code returned by Google')
+    await googleSheets.exchangeCode(db, req.query.code, sheetsRedirectUri(req))
+    save()
+    log('settings', `Connected Google Sheets (${db.settings.googleSheets.connectedEmail})`)
+    res.redirect('/settings?tab=integrations&googleSheets=connected')
+  } catch (e) {
+    res.redirect(`/settings?tab=integrations&googleSheets=error&message=${encodeURIComponent(e.message)}`)
+  }
+})
+
+app.post('/api/google-sheets/disconnect', (req, res) => {
+  googleSheets.disconnect(db)
+  save()
+  log('settings', 'Disconnected Google Sheets')
+  res.json(googleSheets.sanitizedConfig(db))
+})
+
+app.post('/api/google-sheets/sync-now', async (req, res) => {
+  try {
+    const counts = await googleSheets.runSync(db, { createLeadFrom, findDuplicateLead, assignLead, markDirty, logSync: logSheetSync })
+    save()
+    res.json(counts)
+  } catch (e) {
+    logSheetSync('error', e.message)
+    res.status(502).json({ error: e.message })
+  }
+})
+
+app.get('/api/google-sheets/logs', (req, res) => {
+  res.json((db.sheetSyncLogs || []).slice(0, 50))
+})
+
+// Background poll: once a sheet is fully configured, sync every 5 minutes
+// without blocking anything — failures are logged, never thrown.
+setInterval(() => {
+  if (!db || !googleSheets.isConfigured(db)) return
+  googleSheets.runSync(db, { createLeadFrom, findDuplicateLead, assignLead, markDirty, logSync: logSheetSync })
+    .then(() => save())
+    .catch(e => logSheetSync('error', e.message))
+}, 5 * 60 * 1000)
 
 // ---------- CSV import ----------
 

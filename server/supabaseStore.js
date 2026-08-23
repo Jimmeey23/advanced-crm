@@ -73,7 +73,8 @@ export async function loadState() {
     activity: meta.activity || [],
     importHistory: meta.importHistory || [],
     webhookIntegrations: meta.webhookIntegrations || [],
-    webhookLogs: meta.webhookLogs || []
+    webhookLogs: meta.webhookLogs || [],
+    sheetSyncLogs: meta.sheetSyncLogs || []
   }
 }
 
@@ -110,7 +111,8 @@ export async function persistState(state, dirtyLeadIds = [], deletedLeadIds = []
     activity: state.activity,
     importHistory: state.importHistory,
     webhookIntegrations: state.webhookIntegrations,
-    webhookLogs: state.webhookLogs
+    webhookLogs: state.webhookLogs,
+    sheetSyncLogs: state.sheetSyncLogs
   }
   const { error: metaErr } = await c.from(META_TABLE).upsert({ key: META_KEY, data: meta, updated_at: new Date().toISOString() })
   if (metaErr) throw new Error(`supabase persist meta: ${metaErr.message}`)

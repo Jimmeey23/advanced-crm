@@ -3,11 +3,12 @@ import {
   Building2, Link2, Zap, Bell, ShieldCheck, TestTube2, ExternalLink,
   Palette, ListChecks, Users, Bot, Database, Save, Plus, X,
   Sparkles, RotateCcw, Pencil, Check, KeyRound, MessageCircle, Mail, Cloud, Send,
-  Webhook, Copy, RefreshCcw, Trash2, ScrollText
+  Webhook, Copy, RefreshCcw, Trash2, ScrollText, Sheet
 } from 'lucide-react'
 import { useApp } from '../store.jsx'
 import { api } from '../api.js'
 import { Spinner } from '../ui.jsx'
+import FieldMappingEditor from '../components/FieldMappingEditor.jsx'
 
 const ACCENTS = [
   { id: 'crimson', label: 'Crimson', from: '#be123c', to: '#f43f5e' },
@@ -32,7 +33,7 @@ const TABS = [
 
 export default function SettingsPage() {
   const { boot, refreshData, toast, theme, setTheme, accent, setAccent } = useApp()
-  const [tab, setTab] = useState('general')
+  const [tab, setTab] = useState(() => new URLSearchParams(window.location.search).get('tab') || 'general')
   const settings = boot?.settings || {}
 
   const [org, setOrg] = useState(settings.org || {})
@@ -87,6 +88,23 @@ export default function SettingsPage() {
 
   const loadWebhooks = () => api.get('/api/webhooks').then(setWebhooks).catch(() => {})
 
+  const [sheetsConfig, setSheetsConfig] = useState(null)
+  const [sheetsClientId, setSheetsClientId] = useState('')
+  const [sheetsClientSecret, setSheetsClientSecret] = useState('')
+  const [sheetsSheetId, setSheetsSheetId] = useState('')
+  const [sheetsSheetTab, setSheetsSheetTab] = useState('')
+  const [sheetsSyncing, setSheetsSyncing] = useState(false)
+  const [sheetsSyncResult, setSheetsSyncResult] = useState(null)
+  const [sheetsLogs, setSheetsLogs] = useState(null)
+  const [sheetsLogsOpen, setSheetsLogsOpen] = useState(false)
+
+  const loadSheetsConfig = () => api.get('/api/google-sheets/config').then(c => {
+    setSheetsConfig(c)
+    setSheetsClientId(c.clientId || '')
+    setSheetsSheetId(c.sheetId || '')
+    setSheetsSheetTab(c.sheetTab || '')
+  }).catch(() => {})
+
   useEffect(() => {
     if (boot?.settings) {
       setOrg(boot.settings.org || {})
@@ -122,7 +140,20 @@ export default function SettingsPage() {
       setMailSet(m => ({ ...m, host: s.host || '', fromEmail: s.fromEmail || '', enabled: s.enabled === true }))
     }).catch(() => {})
     loadWebhooks()
+    loadSheetsConfig()
   }, [boot])
+
+  // OAuth redirect lands back on ?tab=integrations&googleSheets=connected|error
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const status = params.get('googleSheets')
+    if (!status) return
+    if (status === 'connected') { toast('Google account connected'); loadSheetsConfig() }
+    else if (status === 'error') toast(params.get('message') || 'Google connection failed', 'error')
+    params.delete('googleSheets'); params.delete('message')
+    const qs = params.toString()
+    window.history.replaceState({}, '', qs ? `?${qs}` : window.location.pathname)
+  }, [])
 
   const saveSettings = async (extra = {}) => {
     try {
@@ -301,6 +332,66 @@ export default function SettingsPage() {
       const logs = await api.get(`/api/webhooks/${id}/logs`)
       setWebhookLogs(l => ({ ...l, [id]: logs }))
     } catch (e) { toast(e.message, 'error') }
+  }
+
+  const saveSheetsCredentials = async () => {
+    try {
+      await api.put('/api/google-sheets/config', { clientId: sheetsClientId.trim(), clientSecret: sheetsClientSecret.trim() })
+      setSheetsClientSecret('')
+      loadSheetsConfig()
+      toast('Google OAuth client saved')
+    } catch (e) { toast(e.message, 'error') }
+  }
+
+  const saveSheetTarget = async () => {
+    try {
+      await api.put('/api/google-sheets/config', { sheetId: sheetsSheetId.trim(), sheetTab: sheetsSheetTab.trim() })
+      loadSheetsConfig()
+      toast('Sheet saved')
+    } catch (e) { toast(e.message, 'error') }
+  }
+
+  const saveSheetsMapping = async (fieldMapping) => {
+    try {
+      await api.put('/api/google-sheets/config', { fieldMapping })
+      loadSheetsConfig()
+      toast('Field mapping saved')
+    } catch (e) { toast(e.message, 'error') }
+  }
+
+  const saveSheetsDefaults = async (defaults) => {
+    try {
+      await api.put('/api/google-sheets/config', { defaults })
+      loadSheetsConfig()
+      toast('Defaults saved')
+    } catch (e) { toast(e.message, 'error') }
+  }
+
+  const connectGoogle = () => { window.location.href = '/api/google-sheets/oauth/start' }
+
+  const disconnectGoogle = async () => {
+    if (!window.confirm('Disconnect this Google account? Syncing will stop until reconnected.')) return
+    try { await api.post('/api/google-sheets/disconnect', {}); loadSheetsConfig(); toast('Google account disconnected') }
+    catch (e) { toast(e.message, 'error') }
+  }
+
+  const syncSheetNow = async () => {
+    setSheetsSyncing(true); setSheetsSyncResult(null)
+    try {
+      const counts = await api.post('/api/google-sheets/sync-now', {})
+      setSheetsSyncResult({ ok: true, ...counts })
+      loadSheetsConfig()
+      toast(`Synced — ${counts.created} new lead${counts.created === 1 ? '' : 's'}`)
+    } catch (e) {
+      setSheetsSyncResult({ ok: false, error: e.message })
+      toast(e.message, 'error')
+    } finally { setSheetsSyncing(false) }
+  }
+
+  const toggleSheetsLogs = async () => {
+    if (sheetsLogsOpen) { setSheetsLogsOpen(false); return }
+    setSheetsLogsOpen(true)
+    try { setSheetsLogs(await api.get('/api/google-sheets/logs')) } catch (e) { toast(e.message, 'error') }
   }
 
   const copyWebhookUrl = (url) => {
@@ -708,6 +799,77 @@ export default function SettingsPage() {
                 {!webhooks.length && <p className="text-[11.5px] text-slate-500">No webhook integrations yet — create one above to get a URL you can paste into any form tool.</p>}
               </div>
             </Section>
+
+            <Section icon={<Sheet size={15} className={sheetsConfig?.connected ? 'text-emerald-400' : 'text-slate-500'} />} title="Google Sheets lead import" desc="Connect a Google account and pull new lead rows from a spreadsheet, deduplicated against existing leads.">
+              {sheetsConfig?.connected ? (
+                <span className="chip bg-emerald-500/10 text-emerald-300 border border-emerald-400/20"><ShieldCheck size={11} /> Connected · {sheetsConfig.connectedEmail}</span>
+              ) : (
+                <span className="chip bg-white/5 border border-white/10 text-slate-400">Not connected</span>
+              )}
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
+                <div><label className="label">Google Cloud OAuth Client ID</label><input className="input" value={sheetsClientId} onChange={e => setSheetsClientId(e.target.value)} placeholder="….apps.googleusercontent.com" /></div>
+                <div><label className="label">Client secret</label><input className="input" type="password" value={sheetsClientSecret} onChange={e => setSheetsClientSecret(e.target.value)} placeholder={sheetsConfig?.hasClientSecret ? '•••••••• (stored)' : 'GOCSPX-…'} /></div>
+              </div>
+              <p className="text-[11px] text-slate-500 mt-2">Create an OAuth client in Google Cloud Console (APIs & Services → Credentials), then add this redirect URI: <code className="text-slate-300">{window.location.origin}/api/google-sheets/oauth/callback</code></p>
+              <div className="flex items-center gap-3 mt-3">
+                <button className="btn btn-primary" onClick={saveSheetsCredentials}>Save OAuth client</button>
+                {sheetsConfig?.connected ? (
+                  <button className="btn btn-ghost text-rose-300" onClick={disconnectGoogle}>Disconnect</button>
+                ) : (
+                  <button className="btn btn-soft" onClick={connectGoogle} disabled={!sheetsConfig?.clientId}><Link2 size={13} /> Connect Google Account</button>
+                )}
+              </div>
+
+              {sheetsConfig?.connected && (
+                <>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-4">
+                    <div><label className="label">Sheet ID</label><input className="input" value={sheetsSheetId} onChange={e => setSheetsSheetId(e.target.value)} placeholder="from the sheet's URL between /d/ and /edit" /></div>
+                    <div><label className="label">Tab name</label><input className="input" value={sheetsSheetTab} onChange={e => setSheetsSheetTab(e.target.value)} placeholder="e.g. Form Responses 1" /></div>
+                  </div>
+                  <div className="flex items-center gap-3 mt-3">
+                    <button className="btn btn-primary" onClick={saveSheetTarget}>Save sheet</button>
+                    <button className="btn btn-soft" onClick={syncSheetNow} disabled={sheetsSyncing || !sheetsConfig?.sheetId}>{sheetsSyncing ? <Spinner size={14} /> : <RefreshCcw size={13} />} Sync now</button>
+                    <button className="btn btn-ghost !py-2" onClick={toggleSheetsLogs}><ScrollText size={14} /> {sheetsLogsOpen ? 'Hide log' : 'View sync log'}</button>
+                  </div>
+                  {sheetsSyncResult && (
+                    sheetsSyncResult.ok
+                      ? <p className="mt-3 text-[12.5px] text-emerald-400">✓ {sheetsSyncResult.created} created · {sheetsSyncResult.duplicates} duplicate · {sheetsSyncResult.skipped} skipped</p>
+                      : <p className="mt-3 text-[12.5px] text-rose-400">✕ {sheetsSyncResult.error}</p>
+                  )}
+                  {sheetsConfig?.lastSyncAt && (
+                    <p className="mt-1 text-[11px] text-slate-500">Last synced {new Date(sheetsConfig.lastSyncAt).toLocaleString()}
+                      {sheetsConfig.lastSyncCounts && ` — ${sheetsConfig.lastSyncCounts.created} created, ${sheetsConfig.lastSyncCounts.duplicates} duplicate, ${sheetsConfig.lastSyncCounts.skipped} skipped`}. Also syncs automatically every 5 minutes.
+                    </p>
+                  )}
+
+                  <div className="mt-4 space-y-4">
+                    <FieldMappingEditor
+                      fieldMapping={sheetsConfig.fieldMapping}
+                      defaults={sheetsConfig.defaults}
+                      onSaveMapping={saveSheetsMapping}
+                      onSaveDefaults={saveSheetsDefaults}
+                      keyLabel="sheet column header"
+                      keyPlaceholder="column header, e.g. Full Name"
+                    />
+                  </div>
+
+                  {sheetsLogsOpen && (
+                    <div className="mt-3 rounded-lg bg-black/20 border border-white/6 p-2.5 max-h-52 overflow-y-auto">
+                      {!sheetsLogs && <p className="text-[11px] text-slate-500">Loading…</p>}
+                      {sheetsLogs && !sheetsLogs.length && <p className="text-[11px] text-slate-500">No syncs yet.</p>}
+                      {sheetsLogs && sheetsLogs.map(l => (
+                        <div key={l.id} className="flex items-center gap-2 text-[11px] py-1 border-b border-white/5 last:border-0">
+                          <span className="mono text-slate-500">{new Date(l.ts).toLocaleString()}</span>
+                          <OutcomeChip outcome={l.outcome} />
+                          {l.detail && <span className="text-slate-500 truncate">{l.detail}</span>}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </>
+              )}
+            </Section>
           </>
         )}
 
@@ -931,66 +1093,15 @@ function ThemeCard({ active, onClick, title, sub, swatch }) {
   )
 }
 
-const LEAD_FIELD_OPTIONS = [
-  { id: 'fullName', label: 'Full name' },
-  { id: 'firstName', label: 'First name' },
-  { id: 'lastName', label: 'Last name' },
-  { id: 'email', label: 'Email' },
-  { id: 'phone', label: 'Phone' },
-  { id: 'source', label: 'Source' },
-  { id: 'notes', label: 'Notes' },
-  { id: 'classType', label: 'Class type' },
-  { id: 'channel', label: 'Channel' },
-  { id: 'stage', label: 'Stage' },
-  { id: 'status', label: 'Status' },
-  { id: 'valueEstimate', label: 'Value estimate' },
-  { id: 'associateId', label: 'Associate ID' },
-  { id: 'associateName', label: 'Associate name' },
-  { id: 'locationId', label: 'Location ID' },
-  { id: 'center', label: 'Center' },
-  { id: 'memberId', label: 'Member ID' },
-  { id: 'hostId', label: 'Host ID' },
-  { id: 'period', label: 'Period' },
-  { id: 'purchasesMade', label: 'Purchases made' },
-  { id: 'visits', label: 'Visits' },
-  { id: 'trialStatus', label: 'Trial status' },
-  { id: 'conversionStatus', label: 'Conversion status' },
-  { id: 'retentionStatus', label: 'Retention status' }
-]
-
 const WEBHOOK_METHODS = ['POST', 'PUT', 'GET']
 
 function WebhookRow({ webhook, logs, logsOpen, onToggleLogs, onRename, onSaveMapping, onSaveDefaults, onSaveMethod, onTest, onRegenerate, onDelete, onCopy }) {
   const [nameDraft, setNameDraft] = useState(webhook.name)
-  const [mapping, setMapping] = useState(() => Object.entries(webhook.fieldMapping || {}).map(([k, v]) => ({ key: k, field: v })))
-  const [mappingDirty, setMappingDirty] = useState(false)
-  const [defaults, setDefaults] = useState(() => Object.entries(webhook.defaults || {}).map(([k, v]) => ({ field: k, value: v })))
-  const [defaultsDirty, setDefaultsDirty] = useState(false)
   const [testOpen, setTestOpen] = useState(false)
   const [testPayload, setTestPayload] = useState('{\n  "name": "Jane Doe",\n  "phone_number": "9876543210",\n  "email": "jane@example.com"\n}')
   const [testResult, setTestResult] = useState(null)
   const [testError, setTestError] = useState('')
   const [testing, setTesting] = useState(false)
-
-  const addRow = () => { setMapping(m => [...m, { key: '', field: 'fullName' }]); setMappingDirty(true) }
-  const updateRow = (i, patch) => { setMapping(m => m.map((r, idx) => idx === i ? { ...r, ...patch } : r)); setMappingDirty(true) }
-  const removeRow = (i) => { setMapping(m => m.filter((_, idx) => idx !== i)); setMappingDirty(true) }
-  const saveMapping = () => {
-    const obj = {}
-    for (const r of mapping) if (r.key.trim()) obj[r.key.trim()] = r.field
-    onSaveMapping(obj)
-    setMappingDirty(false)
-  }
-
-  const addDefault = () => { setDefaults(d => [...d, { field: 'source', value: '' }]); setDefaultsDirty(true) }
-  const updateDefault = (i, patch) => { setDefaults(d => d.map((r, idx) => idx === i ? { ...r, ...patch } : r)); setDefaultsDirty(true) }
-  const removeDefault = (i) => { setDefaults(d => d.filter((_, idx) => idx !== i)); setDefaultsDirty(true) }
-  const saveDefaults = () => {
-    const obj = {}
-    for (const r of defaults) if (r.field && String(r.value).trim()) obj[r.field] = r.value
-    onSaveDefaults(obj)
-    setDefaultsDirty(false)
-  }
 
   const runTest = async () => {
     setTesting(true); setTestError(''); setTestResult(null)
@@ -1023,47 +1134,14 @@ function WebhookRow({ webhook, logs, logsOpen, onToggleLogs, onRename, onSaveMap
       </div>
       {webhook.method === 'GET' && <p className="text-[11px] text-amber-400/90">GET mode — send lead fields as query params on this URL, not a body.</p>}
 
-      <div>
-        <div className="text-[10.5px] uppercase tracking-wider text-slate-500 font-semibold mb-1.5">Field mapping — incoming payload key → lead field</div>
-        <div className="space-y-1.5">
-          {mapping.map((r, i) => (
-            <div key={i} className="flex items-center gap-2">
-              <input className="input !py-1.5 !text-[12px] flex-1" placeholder="incoming JSON key, e.g. full_name" value={r.key} onChange={e => updateRow(i, { key: e.target.value })} />
-              <span className="text-slate-600 text-[11px]">→</span>
-              <select className="input !py-1.5 !text-[12px] !w-auto" value={r.field} onChange={e => updateRow(i, { field: e.target.value })}>
-                {LEAD_FIELD_OPTIONS.map(f => <option key={f.id} value={f.id}>{f.label}</option>)}
-              </select>
-              <button className="btn btn-ghost !p-1.5 text-rose-400" onClick={() => removeRow(i)}><X size={12} /></button>
-            </div>
-          ))}
-          {!mapping.length && <p className="text-[11px] text-slate-600">No manual mapping — common key spellings (name/full_name, phone/mobile, email, etc.) are auto-detected.</p>}
-        </div>
-        <div className="flex items-center gap-2 mt-2">
-          <button className="btn btn-ghost !py-1.5 !text-[12px]" onClick={addRow}><Plus size={12} /> Add field</button>
-          {mappingDirty && <button className="btn btn-soft !py-1.5 !text-[12px]" onClick={saveMapping}><Save size={12} /> Save mapping</button>}
-        </div>
-      </div>
-
-      <div>
-        <div className="text-[10.5px] uppercase tracking-wider text-slate-500 font-semibold mb-1.5">Default values — used when the payload omits a field</div>
-        <div className="space-y-1.5">
-          {defaults.map((r, i) => (
-            <div key={i} className="flex items-center gap-2">
-              <select className="input !py-1.5 !text-[12px] !w-auto" value={r.field} onChange={e => updateDefault(i, { field: e.target.value })}>
-                {LEAD_FIELD_OPTIONS.map(f => <option key={f.id} value={f.id}>{f.label}</option>)}
-              </select>
-              <span className="text-slate-600 text-[11px]">=</span>
-              <input className="input !py-1.5 !text-[12px] flex-1" placeholder="fixed value" value={r.value} onChange={e => updateDefault(i, { value: e.target.value })} />
-              <button className="btn btn-ghost !p-1.5 text-rose-400" onClick={() => removeDefault(i)}><X size={12} /></button>
-            </div>
-          ))}
-          {!defaults.length && <p className="text-[11px] text-slate-600">No defaults set.</p>}
-        </div>
-        <div className="flex items-center gap-2 mt-2">
-          <button className="btn btn-ghost !py-1.5 !text-[12px]" onClick={addDefault}><Plus size={12} /> Add default</button>
-          {defaultsDirty && <button className="btn btn-soft !py-1.5 !text-[12px]" onClick={saveDefaults}><Save size={12} /> Save defaults</button>}
-        </div>
-      </div>
+      <FieldMappingEditor
+        fieldMapping={webhook.fieldMapping}
+        defaults={webhook.defaults}
+        onSaveMapping={onSaveMapping}
+        onSaveDefaults={onSaveDefaults}
+        keyLabel="incoming payload key"
+        keyPlaceholder="incoming JSON key, e.g. full_name"
+      />
 
       <div>
         <button className="btn btn-ghost !py-1.5 !text-[12px]" onClick={() => setTestOpen(o => !o)}><TestTube2 size={12} /> {testOpen ? 'Hide test tool' : 'Test this webhook'}</button>
@@ -1114,7 +1192,9 @@ function OutcomeChip({ outcome }) {
     duplicate: 'bg-amber-500/15 text-amber-300',
     validation_failed: 'bg-rose-500/15 text-rose-300',
     invalid_body: 'bg-rose-500/15 text-rose-300',
-    rate_limited: 'bg-rose-500/15 text-rose-300'
+    rate_limited: 'bg-rose-500/15 text-rose-300',
+    synced: 'bg-emerald-500/15 text-emerald-300',
+    error: 'bg-rose-500/15 text-rose-300'
   }
   return <span className={`chip !px-1.5 !py-0.5 text-[10px] ${styles[outcome] || 'bg-white/10 text-slate-300'}`}>{outcome}</span>
 }
