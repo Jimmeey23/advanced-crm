@@ -1934,6 +1934,33 @@ app.post('/api/respondio/test', async (req, res) => {
   }
 })
 
+// Proactively resolves + caches respondId for every lead with an email or
+// phone, so conversation history is linked up front instead of only on the
+// first time each lead's drawer happens to be opened — a real backfill for
+// "sync everything Respond.io already has," not just per-lead lazy pull.
+// Sequential (not Promise.all) to respect Respond.io's small per-second rate
+// limit across what can be thousands of leads; a manual admin action, not
+// something run automatically.
+app.post('/api/respondio/sync-all-contacts', async (req, res) => {
+  if (!respondio.isConfigured(db)) return res.status(400).json({ error: 'Respond.io is not configured.' })
+  const candidates = db.leads.filter(l => !l.respondId && respondio.leadIdentifier(db, l))
+  let linked = 0, checked = 0
+  for (const lead of candidates) {
+    checked++
+    try {
+      const contact = await respondio.findContact(db, { lead })
+      if (contact?.id) {
+        lead.respondId = contact.id
+        markDirty(lead.id)
+        linked++
+      }
+    } catch (e) { /* skip this lead, keep going */ }
+  }
+  if (linked) save()
+  log('respondio', `Synced Respond.io contacts: ${linked} linked of ${checked} checked`)
+  res.json({ checked, linked, totalLeads: db.leads.length, alreadyLinked: db.leads.length - candidates.length })
+})
+
 app.get('/api/respondio/conversations/:leadId', async (req, res) => {
   const lead = leadById(req.params.leadId)
   if (!lead) return res.status(404).json({ error: 'Lead not found' })

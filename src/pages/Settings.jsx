@@ -65,6 +65,18 @@ export default function SettingsPage() {
 
   const [respSet, setRespSet] = useState({ apiKey: '', workspaceId: '' })
   const [respStatus, setRespStatus] = useState(null)
+  const [syncingContacts, setSyncingContacts] = useState(false)
+  const [syncContactsResult, setSyncContactsResult] = useState(null)
+
+  const syncAllRespondioContacts = async () => {
+    setSyncingContacts(true); setSyncContactsResult(null)
+    try {
+      const result = await api.post('/api/respondio/sync-all-contacts', {})
+      setSyncContactsResult(result)
+      toast(`Linked ${result.linked} of ${result.checked} leads to their Respond.io conversation`)
+    } catch (e) { toast(e.message, 'error') }
+    finally { setSyncingContacts(false) }
+  }
   const [testResp, setTestResp] = useState(false)
   const [testRespResult, setTestRespResult] = useState(null)
   const [wabaTemplates, setWabaTemplates] = useState([
@@ -732,6 +744,21 @@ export default function SettingsPage() {
                     <code className="input !py-1.5 flex-1 !text-[11.5px] overflow-x-auto whitespace-nowrap">{respStatus.inboundWebhookUrl}</code>
                     <button className="btn btn-ghost !py-1.5" onClick={() => navigator.clipboard?.writeText(respStatus.inboundWebhookUrl).then(() => toast('URL copied')).catch(() => toast('Could not copy — copy manually', 'error'))}><Copy size={13} /> Copy</button>
                   </div>
+                </div>
+              )}
+
+              {respStatus?.configured && (
+                <div className="mt-4 rounded-xl bg-white/[0.03] border border-white/6 px-4 py-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <div className="text-[12.5px] font-semibold text-white">Sync past conversations</div>
+                      <div className="text-[11px] text-slate-500 mt-0.5">Links every lead to its existing Respond.io contact up front (by email/phone), so full conversation history is ready the first time you open a lead — not just for messages sent after today.</div>
+                    </div>
+                    <button className="btn btn-soft !py-1.5 !text-[12px] shrink-0" onClick={syncAllRespondioContacts} disabled={syncingContacts}>
+                      {syncingContacts ? <Spinner size={13} /> : <RefreshCcw size={13} />} Sync now
+                    </button>
+                  </div>
+                  {syncContactsResult && <p className="mt-2 text-[11.5px] text-emerald-400">✓ Linked {syncContactsResult.linked} of {syncContactsResult.checked} checked ({syncContactsResult.alreadyLinked} were already linked)</p>}
                 </div>
               )}
 

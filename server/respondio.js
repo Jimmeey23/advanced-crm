@@ -376,11 +376,33 @@ export async function sendTemplateMessage(db, lead, template) {
   return pickContact(data) || data
 }
 
-export async function listContactMessages(db, lead, limit = 100) {
+// Paginates through a contact's ENTIRE message history — the old version
+// fetched only the first page (capped at `limit`), so any lead with more
+// than ~100 messages silently lost its older history every time the drawer
+// opened. Same cursor-following pattern as listTemplates(). Capped at 40
+// pages (~4000 messages at the API's max page size) as a runaway backstop,
+// not an expected ceiling.
+export async function listContactMessages(db, lead, pageSize = 100) {
   const identifier = leadIdentifier(db, lead)
   if (!identifier) return []
-  const data = await api(db, `/contact/${identifier}/message/list?limit=${limit}`)
-  return asList(data)
+  const out = []
+  let path = `/contact/${identifier}/message/list?limit=${pageSize}`
+  let guard = 0
+  while (path && guard < 40) {
+    guard++
+    const data = await api(db, path)
+    out.push(...asList(data))
+    const next = data?.pagination?.next || data?.pagination?.nextCursor || data?.nextPage || data?.next || null
+    if (!next) break
+    if (/^https?:\/\//i.test(next)) {
+      path = next.replace(BASE, '')
+    } else if (String(next).startsWith('/')) {
+      path = next
+    } else {
+      path = `/contact/${identifier}/message/list?limit=${pageSize}&cursor=${encodeURIComponent(next)}`
+    }
+  }
+  return out
 }
 
 export async function syncLeadConversations(db, lead) {
