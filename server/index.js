@@ -2468,7 +2468,18 @@ app.get('/api/events', (req, res) => {
   req.on('close', () => sseClients.delete(res))
 })
 
-onRemoteChange(() => broadcastChange('remote-change'))
+// A bulk write (a big Google Sheets sync, a Force full resync, a Momence
+// contact backfill) can produce thousands of individual Supabase Realtime
+// change events in a burst. Un-debounced, each one broadcast an SSE message
+// immediately, and every connected tab's client refetched the ENTIRE
+// bootstrap (every lead) per message — thousands of full refetches for one
+// bulk operation, which is what actually exhausted the browser's connection
+// pool (ERR_INSUFFICIENT_RESOURCES). Coalesce a burst into one broadcast.
+let remoteChangeBroadcastTimer = null
+onRemoteChange(() => {
+  clearTimeout(remoteChangeBroadcastTimer)
+  remoteChangeBroadcastTimer = setTimeout(() => broadcastChange('remote-change'), 800)
+})
 
 // ---------- static hosting ----------
 
