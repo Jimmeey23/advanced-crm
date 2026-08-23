@@ -616,8 +616,8 @@ function TableGrid({ items, boot, lookup, openLead, changeStage, toggleManualFla
                 {visibleCols.map(c => {
                   if (c.field === 'source') {
                     return (
-                      <td key={c.id} className={`px-4 ${py}`}>
-                        {l.sourceName ? <span className="source-chip">{l.sourceName}</span> : <span className="text-slate-600">—</span>}
+                      <td key={c.id} className={`px-4 ${py} text-[12.5px] text-slate-400 truncate`}>
+                        {l.sourceName || '—'}
                       </td>
                     )
                   }
@@ -638,21 +638,21 @@ function TableGrid({ items, boot, lookup, openLead, changeStage, toggleManualFla
                     </td>
                   )
                 })}
-                <td className={`px-4 ${py} min-w-[190px]`}>
+                <td className={`px-4 ${py} w-[200px]`}>
                   {nextFu ? (
-                    <div>
-                      <span className={`followup-date-pill ${dueIn < 0 ? 'is-overdue' : dueIn === 0 ? 'is-today' : ''}`}>
-                        <Clock size={10} /> {dueIn === 0 ? 'Today' : fmtDate(nextFu.date)}{dueIn < 0 ? ` · ${-dueIn}d overdue` : ''}
+                    <div className="min-w-0">
+                      <span className={`inline-flex items-center gap-1 text-[12.5px] whitespace-nowrap ${dueIn < 0 ? 'text-rose-400 font-semibold' : dueIn === 0 ? 'text-amber-400 font-semibold' : 'text-slate-300'}`}>
+                        <Clock size={11} className="shrink-0" /> {dueIn === 0 ? 'Today' : fmtDate(nextFu.date)}{dueIn < 0 ? ` · ${-dueIn}d overdue` : ''}
                       </span>
                       {(l.fu?.missedCount > 0 || (l.status === 'open' && l.fu?.lastOutreachDays > cadenceDays)) && (
-                        <div className="mt-1 flex flex-wrap gap-1">
+                        <div className="mt-1 flex flex-nowrap gap-1">
                           {l.fu?.missedCount > 0 && (
-                            <span className="chip !px-1.5 !py-0.5 text-[9px] bg-rose-500/20 text-rose-300" title="Cadence deviation — follow-up tasks missed">
+                            <span className="chip !px-1.5 !py-0.5 text-[9px] bg-rose-500/20 text-rose-300 whitespace-nowrap" title="Cadence deviation — follow-up tasks missed">
                               {l.fu.missedCount} missed
                             </span>
                           )}
                           {l.status === 'open' && l.fu?.lastOutreachDays > cadenceDays && (
-                            <span className="chip !px-1.5 !py-0.5 text-[9px] bg-amber-500/15 text-amber-300 border border-amber-400/20" title={`No outreach in ${l.fu.lastOutreachDays}d (cadence ${cadenceDays}d)`}>
+                            <span className="chip !px-1.5 !py-0.5 text-[9px] bg-amber-500/15 text-amber-300 border border-amber-400/20 whitespace-nowrap" title={`No outreach in ${l.fu.lastOutreachDays}d (cadence ${cadenceDays}d)`}>
                               idle {l.fu.lastOutreachDays}d
                             </span>
                           )}
@@ -660,13 +660,13 @@ function TableGrid({ items, boot, lookup, openLead, changeStage, toggleManualFla
                       )}
                     </div>
                   ) : (
-                    <div>
-                      <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-white/5 border border-white/10 text-slate-500" title="No follow-up scheduled yet">
-                        <Clock size={10} />
+                    <div className="min-w-0">
+                      <span className="inline-flex items-center gap-1 text-[12.5px] text-slate-500 whitespace-nowrap" title="No follow-up scheduled yet">
+                        <Clock size={11} className="shrink-0" /> Not scheduled
                       </span>
                       {l.status === 'open' && l.fu?.lastOutreachDays > cadenceDays && (
                         <div className="mt-1">
-                          <span className="chip !px-1.5 !py-0.5 text-[9px] bg-amber-500/15 text-amber-300 border border-amber-400/20" title={`No outreach in ${l.fu.lastOutreachDays}d (cadence ${cadenceDays}d)`}>
+                          <span className="chip !px-1.5 !py-0.5 text-[9px] bg-amber-500/15 text-amber-300 border border-amber-400/20 whitespace-nowrap" title={`No outreach in ${l.fu.lastOutreachDays}d (cadence ${cadenceDays}d)`}>
                             idle {l.fu.lastOutreachDays}d
                           </span>
                         </div>
@@ -739,7 +739,7 @@ function FuCell({ lead, ch }) {
     : hasOverduePending
       ? 'border-rose-400/50 bg-rose-400/15'
       : 'border-white/8 bg-white/[0.03]'
-  const iconColor = filled ? (isMissed ? '#fb7185' : '#34d399') : hasOverduePending ? '#fb7185' : '#64748b'
+  const iconColor = filled ? (isMissed ? 'var(--fu-rose)' : 'var(--fu-emerald)') : hasOverduePending ? 'var(--fu-rose)' : 'var(--fu-slate)'
   const title = filled
     ? `Last ${CHANNELS[ch].label}: ${o.date} — click to log another`
     : hasOverduePending

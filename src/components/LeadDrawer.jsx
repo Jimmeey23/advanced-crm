@@ -167,6 +167,7 @@ export default function LeadDrawer() {
 
   const m = lead.momence
   const classesAttended = m?.classHistory?.filter(c => c.checkedIn).length || 0
+  const classesCancelled = m?.classHistory?.filter(c => !c.checkedIn && /cancel/i.test(c.status || '')).length || 0
 
   // A follow-up slot with neither a real date nor a comment is a blank
   // placeholder row (common in imported data with a fixed number of
@@ -189,7 +190,7 @@ export default function LeadDrawer() {
     <>
       <div className="fixed inset-0 z-[80] flex justify-end">
       <div className="absolute inset-0 bg-black/55 backdrop-blur-[2px]" onClick={closeLead} />
-      <aside className="lead-drawer lead-detail-panel relative w-full max-w-[700px] h-full bg-[linear-gradient(180deg,rgba(15,18,32,0.98),rgba(9,12,22,0.98))] border-l border-white/10 flex flex-col shadow-2xl" style={{ animation: 'slideIn .2s ease' }}>
+      <aside className="lead-drawer lead-detail-panel relative w-full max-w-[700px] h-full border-l border-white/10 flex flex-col shadow-2xl" style={{ animation: 'slideIn .2s ease' }}>
         {/* header */}
         <div className="lead-detail-header px-6 pt-5 pb-4 border-b border-white/8 bg-white/[0.02] backdrop-blur-xl">
           <div className="flex items-start gap-3">
@@ -252,11 +253,12 @@ export default function LeadDrawer() {
         )}
 
         {/* body */}
-        <div className="lead-detail-body flex-1 overflow-y-auto scrollbar-thin px-6 py-5 space-y-5">
+        <div className="lead-detail-body flex-1 overflow-y-auto scrollbar-thin px-6 py-5">
+        <div className="modern-card !rounded-2xl lead-detail-consolidated">
           {/* AI panel */}
-          <section className="modern-card ai-panel !rounded-2xl p-5 border-fuchsia-400/15" style={{ background: 'linear-gradient(135deg, rgba(139,92,246,0.14), rgba(255,255,255,0.03))' }}>
+          <section className="lead-section ai-panel">
             <div className="flex items-center gap-2 mb-3">
-              <Sparkles size={14} className="text-fuchsia-400" />
+              <Sparkles size={14} className="lead-section-icon" />
               <h3 className="font-display font-semibold text-white text-[13px]">AI lead intelligence</h3>
               <span className="chip ml-auto bg-white/5 border border-white/10 text-slate-400">auto</span>
             </div>
@@ -268,30 +270,30 @@ export default function LeadDrawer() {
               <div className="flex-1 space-y-1.5 text-[12px]">
                 <div className="flex items-center gap-2"><TrendingUp size={12} className="text-emerald-400" /> Sentiment: <b className="text-slate-200 capitalize">{lead.ai.sentiment}</b></div>
                 <div className="flex items-center gap-2"><Clock size={12} className="text-amber-400" /> Best time: <b className="text-slate-200">{lead.ai.bestContactTime}</b></div>
-                <div className="flex items-center gap-2"><Send size={12} className="text-cyan-400" /> Next move: <b className="text-slate-200">{lead.ai.nextAction.label}</b></div>
+                <div className="flex items-center gap-2"><Send size={12} className="lead-accent-icon" /> Next move: <b className="text-slate-200">{lead.ai.nextAction.label}</b></div>
               </div>
             </div>
             <div className="rounded-xl bg-white/[0.04] border border-white/10 p-3">
-              <div className="text-[11px] font-semibold text-fuchsia-300 mb-1 flex items-center gap-1.5"><Lightbulb size={12} /> Suggested action</div>
+              <div className="text-[11px] font-semibold lead-accent mb-1 flex items-center gap-1.5"><Lightbulb size={12} /> Suggested action</div>
               <p className="text-[12.5px] text-slate-200 leading-relaxed">{lead.ai.nextAction.text}</p>
             </div>
             <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-1.5">
               {(lead.ai?.insights || []).map((ins, i) => (
-                <div key={i} className="flex items-start gap-1.5 text-[11.5px] text-slate-400"><span className="text-fuchsia-400 mt-0.5">•</span>{ins}</div>
+                <div key={i} className="flex items-start gap-1.5 text-[11.5px] text-slate-400"><span className="lead-accent mt-0.5">•</span>{ins}</div>
               ))}
             </div>
           </section>
 
           {/* summary */}
-          <section className="modern-card !rounded-2xl p-5">
+          <section className="lead-section">
             <h3 className="font-display font-semibold text-white text-[13px] mb-2">AI summary</h3>
             <p className="text-[12.5px] text-slate-300 leading-relaxed">{lead.ai.summary}</p>
           </section>
 
           {/* GPT enrichment */}
-          <section className="modern-card gpt-panel !rounded-2xl p-5 border-cyan-400/15">
+          <section className="lead-section gpt-panel">
             <div className="flex items-center gap-2 mb-3">
-              <Bot size={14} className="text-cyan-400" />
+              <Bot size={14} className="lead-accent-icon" />
               <h3 className="font-display font-semibold text-white text-[13px]">GPT deep-dive</h3>
               {lead.gpt?.generatedAt && <span className="chip ml-auto bg-white/5 border border-white/10 text-slate-400">{timeAgo(lead.gpt.generatedAt)}</span>}
             </div>
@@ -299,7 +301,7 @@ export default function LeadDrawer() {
             {lead.gpt ? (
               <div className="space-y-2.5">
                 <div className="rounded-xl bg-white/[0.04] border border-white/10 p-3">
-                  <div className="text-[11px] font-semibold text-cyan-300 mb-1 flex items-center gap-1.5"><Lightbulb size={12} /> GPT summary</div>
+                  <div className="text-[11px] font-semibold lead-accent mb-1 flex items-center gap-1.5"><Lightbulb size={12} /> GPT summary</div>
                   <p className="text-[12.5px] text-slate-200 leading-relaxed">{lead.gpt.summary}</p>
                 </div>
                 <div className="flex flex-wrap gap-1.5">
@@ -307,19 +309,19 @@ export default function LeadDrawer() {
                     <TrendingUp size={10} /> sentiment: {lead.gpt.sentiment}
                   </span>
                   <span className="chip bg-white/5 border border-white/10 text-slate-300"><Clock size={10} /> best time: {lead.gpt.bestContactTime || '—'}</span>
-                  {lead.gpt.nextAction && <span className="chip bg-cyan-500/10 text-cyan-300 border border-cyan-400/20"><Send size={10} /> {lead.gpt.nextAction.label}</span>}
+                  {lead.gpt.nextAction && <span className="chip lead-accent-chip"><Send size={10} /> {lead.gpt.nextAction.label}</span>}
                 </div>
                 {lead.gpt.nextAction?.text && <p className="text-[12px] text-slate-300 leading-relaxed">{lead.gpt.nextAction.text}</p>}
                 {(lead.gpt.insights || []).length > 0 && (
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
                     {(lead.gpt.insights || []).map((ins, i) => (
-                      <div key={i} className="flex items-start gap-1.5 text-[11.5px] text-slate-400"><span className="text-cyan-400 mt-0.5">•</span>{ins}</div>
+                      <div key={i} className="flex items-start gap-1.5 text-[11.5px] text-slate-400"><span className="lead-accent mt-0.5">•</span>{ins}</div>
                     ))}
                   </div>
                 )}
                 {(lead.gpt.followupSuggestions || []).length > 0 && (
                   <div>
-                    <div className="text-[10.5px] uppercase tracking-wider text-cyan-300 font-semibold mb-1.5 flex items-center gap-1"><Sparkles size={10} /> GPT suggested messages</div>
+                    <div className="text-[10.5px] uppercase tracking-wider lead-accent font-semibold mb-1.5 flex items-center gap-1"><Sparkles size={10} /> GPT suggested messages</div>
                     <div className="space-y-1.5">
                       {lead.gpt.followupSuggestions.map((s, i) => (
                         <button key={i} className="w-full text-left modern-card !rounded-xl px-3 py-2.5 hover:scale-[1.01] transition-transform" onClick={() => { setComposeOpen(true) }}>
@@ -347,7 +349,7 @@ export default function LeadDrawer() {
           </section>
 
           {/* Respond.io conversations */}
-          <section className="modern-card !rounded-2xl p-5">
+          <section className="lead-section">
             <div className="flex items-center gap-2 mb-3">
               <MessageCircle size={14} className={boot?.integrations?.respondio ? 'text-emerald-400' : 'text-slate-500'} />
               <h3 className="font-display font-semibold text-white text-[13px]">Respond.io conversation</h3>
@@ -371,7 +373,7 @@ export default function LeadDrawer() {
                     </div>
                     <div className="max-h-[240px] overflow-y-auto scrollbar-thin p-2.5 space-y-1.5">
                       {(c.messages || []).slice().reverse().map(m => (
-                        <div key={m.id} className={`max-w-[85%] rounded-xl px-2.5 py-1.5 text-[12px] leading-relaxed ${m.direction === 'inbound' ? 'bg-white/6 border border-white/8 text-slate-200' : 'ml-auto bg-cyan-500/10 border border-cyan-400/20 text-slate-200'}`}>
+                        <div key={m.id} className={`max-w-[85%] rounded-xl px-2.5 py-1.5 text-[12px] leading-relaxed ${m.direction === 'inbound' ? 'bg-white/6 border border-white/8 text-slate-200' : 'ml-auto bg-white/10 border border-white/14 text-slate-200'}`}>
                           <div className="text-[9.5px] text-slate-500 mb-0.5 flex items-center gap-1.5">{m.direction === 'inbound' ? 'incoming' : 'you'} · {fmtDateTime(m.sentAt)}</div>
                           {m.content || m.text}
                         </div>
@@ -398,7 +400,7 @@ export default function LeadDrawer() {
           </section>
 
           {/* Momence */}
-          <section className="modern-card !rounded-2xl p-5">
+          <section className="lead-section">
             <div className="flex items-center gap-2 mb-3">
               <Link2 size={14} className="text-emerald-400" />
               <h3 className="font-display font-semibold text-white text-[13px]">Momence · sales & class history</h3>
@@ -454,9 +456,10 @@ export default function LeadDrawer() {
             ) : (
               <div>
                 {m.member && (
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-3">
+                  <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 mb-3">
                     <Stat label="Home location" value={m.member.homeLocationName || m.member.homeLocation || m.member.locationName || loc?.name?.split(',')[0] || '—'} />
-                    <Stat label="Classes attended" value={classesAttended} />
+                    <Stat label="Sessions completed" value={classesAttended} />
+                    <Stat label="Sessions cancelled" value={classesCancelled} />
                     <Stat label="Active plans" value={m.memberships.length} />
                     <Stat label="First seen" value={fmtDate(m.member.firstSeen)} />
                   </div>
@@ -503,19 +506,19 @@ export default function LeadDrawer() {
                   </div>
                   <div key="plans">
                     {(m?.memberships || []).map((p, i) => (
-                      <Row key={i} icon={<CalendarPlus size={13} className={p.isFrozen ? 'text-amber-400' : 'text-cyan-400'} />} title={p.name} sub={[String(p.type || '').replace(/-/g, ' '), p.locationName].filter(Boolean).join(' · ')} right={p.isFrozen ? 'Frozen' : (p.endDate ? `until ${fmtDate(p.endDate)}` : 'active')} meta={`${p.eventCreditsLeft ?? p.remainingCredits ?? '—'} left · ${p.usedSessions ?? '—'} used`} />
+                      <Row key={i} icon={<CalendarPlus size={13} className={p.isFrozen ? 'text-amber-400' : 'lead-accent-icon'} />} title={p.name} sub={[String(p.type || '').replace(/-/g, ' '), p.locationName].filter(Boolean).join(' · ')} right={p.isFrozen ? 'Frozen' : (p.endDate ? `until ${fmtDate(p.endDate)}` : 'active')} meta={`${p.eventCreditsLeft ?? p.remainingCredits ?? '—'} left · ${p.usedSessions ?? '—'} used`} />
                     ))}
                     {!m.memberships?.length && <EmptyNote text="No active memberships." />}
                   </div>
                   <div key="appointments">
                     {(m?.appointments || []).slice(0, 8).map((a, i) => (
-                      <Row key={i} icon={<Clock size={13} className={a.status === 'cancelled' ? 'text-slate-500' : 'text-cyan-400'} />} title={a.name} sub={a.staff} right={a.status === 'cancelled' ? 'Cancelled' : 'Booked'} meta={fmtDateTime(a.startsAt)} />
+                      <Row key={i} icon={<Clock size={13} className={a.status === 'cancelled' ? 'text-slate-500' : 'lead-accent-icon'} />} title={a.name} sub={a.staff} right={a.status === 'cancelled' ? 'Cancelled' : 'Booked'} meta={fmtDateTime(a.startsAt)} />
                     ))}
                     {!m.appointments?.length && <EmptyNote text="No appointments found for this member." />}
                   </div>
                   <div key="notes">
                     {(m?.notes || []).slice(0, 8).map((n, i) => (
-                      <Row key={i} icon={<MessageSquare size={13} className="text-fuchsia-400" />} title={(n.note || 'Note').replace(/<[^>]+>/g, ' ').trim()} sub="" right="" meta={fmtDateTime(n.createdAt)} />
+                      <Row key={i} icon={<MessageSquare size={13} className="text-slate-400" />} title={(n.note || 'Note').replace(/<[^>]+>/g, ' ').trim()} sub="" right="" meta={fmtDateTime(n.createdAt)} />
                     ))}
                     {!m.notes?.length && <EmptyNote text="No notes recorded on this member's Momence profile." />}
                   </div>
@@ -526,14 +529,14 @@ export default function LeadDrawer() {
           </section>
 
           {/* remarks */}
-          <section className="modern-card !rounded-2xl p-5">
+          <section className="lead-section">
             <h3 className="font-display font-semibold text-white text-[13px] mb-2">Remarks</h3>
             <textarea className="input resize-none" rows={3} value={remarkDraft} onChange={e => setRemarkDraft(e.target.value)} placeholder="Notes from conversations…" />
             <button className="btn btn-ghost !py-1.5 !text-[12px] mt-2" onClick={() => remarkDraft !== lead.remarks && patch({ remarks: remarkDraft }, 'Remarks updated')}>Save remarks</button>
           </section>
 
           {/* follow-ups */}
-          <section className="card !rounded-2xl p-4">
+          <section className="lead-section lead-section-last">
             <div className="flex items-center gap-2 mb-3">
               <MessageSquare size={14} className="text-amber-400" />
               <h3 className="font-display font-semibold text-white text-[13px]">Follow-up timeline</h3>
@@ -562,7 +565,7 @@ export default function LeadDrawer() {
             </form>
             {lead.ai?.followupSuggestions?.length > 0 && (
               <div className="mt-3">
-                <div className="text-[10.5px] uppercase tracking-wider text-fuchsia-300 font-semibold mb-1.5 flex items-center gap-1"><Sparkles size={10} /> AI suggested messages — tap to use</div>
+                <div className="text-[10.5px] uppercase tracking-wider lead-accent font-semibold mb-1.5 flex items-center gap-1"><Sparkles size={10} /> AI suggested messages — tap to use</div>
                 <div className="space-y-1.5">
                   {lead.ai.followupSuggestions.map((s, i) => (
                     <button key={i} className="w-full text-left card !rounded-xl px-2.5 py-2 hover:bg-white/5 transition-colors" onClick={() => fillSuggestion(s)}>
@@ -574,6 +577,7 @@ export default function LeadDrawer() {
               </div>
             )}
           </section>
+        </div>
         </div>
       </aside>
       </div>

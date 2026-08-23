@@ -89,7 +89,7 @@ function leadById(id) {
 
 function safePatch(lead, body) {
   const allowed = ['fullName', 'phone', 'email', 'stage', 'status', 'associateId', 'locationId',
-    'sourceName', 'sourceId', 'remarks', 'classType', 'center', 'channel', 'memberId', 'valueEstimate', 'convertedAt']
+    'sourceName', 'sourceId', 'remarks', 'classType', 'center', 'channel', 'memberId', 'valueEstimate', 'convertedAt', 'manualFlags']
   for (const key of allowed) {
     if (key in body) lead[key] = body[key]
   }
@@ -2538,17 +2538,20 @@ const PORT = process.env.PORT || 3001
 // filenames expected. Only sets photoUrl if not already set, so it never
 // overwrites a photo someone picked via Settings.
 const ASSOCIATE_PHOTOS = {
-  'nadiya shaikh': '/avatars/nadiya-shaikh.jpg',
+  'nadiya shaikh': '/avatars/nadiya-shaikh.png',
   'shipra bhika': '/avatars/shipra-bhika.jpg',
   'imran shaikh': '/avatars/imran-shaikh.jpg',
-  'deesha changwani': '/avatars/deesha-changwani.jpg'
+  'deesha changwani': '/avatars/deesha-changwani.png'
 }
 function backfillAssociatePhotos(db) {
   let changed = false
   for (const a of db.associates) {
-    if (a.photoUrl) continue
     const photo = ASSOCIATE_PHOTOS[String(a.name || '').trim().toLowerCase()]
-    if (photo) { a.photoUrl = photo; changed = true }
+    if (!photo) continue
+    // Earlier deploy wrote these paths with a stale/wrong extension before the
+    // real files existed — only skip if photoUrl is a genuine custom override.
+    if (a.photoUrl && a.photoUrl !== photo && !a.photoUrl.startsWith('/avatars/')) continue
+    if (a.photoUrl !== photo) { a.photoUrl = photo; changed = true }
   }
   if (changed) save()
 }
