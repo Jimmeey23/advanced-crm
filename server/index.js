@@ -2382,35 +2382,43 @@ async function backfillContactMessages(key, contactId) {
 // records, since that's the source of truth for who owns a conversation.
 app.post('/api/inbox/sync', async (req, res) => {
   if (!respondio.isConfigured(db)) return res.status(400).json({ error: 'Respond.io is not configured.' })
+  let matched = 0, unmatched = 0, processed = 0
   try {
-    const contacts = await respondio.listContacts(db, { pageSize: 100 })
-    let matched = 0, unmatched = 0
-    for (const contact of contacts) {
-      const assigneeId = inbox.resolveAssigneeId(db.associates, contact.assignee?.email)
-      const lead = inbox.matchLeadFromWebhook(db, { contact })
-      if (lead) {
-        matched++
-        if (contact.id && !lead.respondId) lead.respondId = contact.id
-        if (assigneeId) inbox.assign(db, lead.id, assigneeId)
-        if (contact.status === 'open' || contact.status === 'closed') inbox.setStatus(db, lead.id, contact.status)
-        await backfillLeadMessages(lead)
-        markDirty(lead.id)
-      } else if (contact.id) {
-        unmatched++
-        const key = inbox.contactKey(contact.id)
-        inbox.setContactInfo(db, key, { ...inbox.contactDisplayInfo(contact), assigneeId })
-        await backfillContactMessages(key, contact.id)
+    await respondio.listContacts(db, {
+      pageSize: 100,
+      // Process and checkpoint page-by-page instead of collecting the
+      // whole contact list first — a large workspace (5000+ contacts, one
+      // rate-limited message-history call each) can take a long time, and
+      // save()'s debounced write can lose most of an in-memory batch if
+      // the process restarts before it's had a chance to flush. Awaiting
+      // saveNow() after every page means at most one page's worth of work
+      // is ever at risk, not the whole run.
+      onPage: async (page) => {
+        for (const contact of page) {
+          const assigneeId = inbox.resolveAssigneeId(db.associates, contact.assignee?.email)
+          const lead = inbox.matchLeadFromWebhook(db, { contact })
+          if (lead) {
+            matched++
+            if (contact.id && !lead.respondId) lead.respondId = contact.id
+            if (assigneeId) inbox.assign(db, lead.id, assigneeId)
+            if (contact.status === 'open' || contact.status === 'closed') inbox.setStatus(db, lead.id, contact.status)
+            await backfillLeadMessages(lead)
+            markDirty(lead.id)
+          } else if (contact.id) {
+            unmatched++
+            const key = inbox.contactKey(contact.id)
+            inbox.setContactInfo(db, key, { ...inbox.contactDisplayInfo(contact), assigneeId })
+            await backfillContactMessages(key, contact.id)
+          }
+          processed++
+        }
+        await saveNow()
+        broadcastChange('respondio-message')
       }
-    }
-    // A full-workspace sync touches thousands of rows in one go — save()'s
-    // debounced write can lose most of it if the process restarts (or the
-    // request otherwise ends) before the delayed Supabase upsert fires.
-    // Await the real write so the response only returns once it's durable.
-    await saveNow()
-    broadcastChange('respondio-message')
-    res.json({ ok: true, contactsFound: contacts.length, matched, unmatched })
+    })
+    res.json({ ok: true, contactsFound: processed, matched, unmatched })
   } catch (e) {
-    res.status(502).json({ error: e.message })
+    res.status(502).json({ error: e.message, contactsFound: processed, matched, unmatched })
   }
 })
 

@@ -433,20 +433,23 @@ export async function listContactMessages(db, lead, pageSize = 100) {
 // everything" shape. Paginates by following the response's own
 // `pagination.next` URL (which carries respond.io's cursorId), same as the
 // other v2 list endpoints, capped at 50 pages as a runaway backstop.
-export async function listContacts(db, { pageSize = 100 } = {}) {
+export async function listContacts(db, { pageSize = 100, onPage } = {}) {
   const timezone = db?.settings?.org?.timezone || 'Asia/Kolkata'
   const out = []
   let path = `/contact/list?limit=${pageSize}`
   let guard = 0
-  while (path && guard < 50) {
+  const PAGE_CAP = 2000 // 200k contacts at 100/page — a real workspace was already seen to exceed the old 50-page (5000 contact) cap, which silently truncated the sync
+  while (path && guard < PAGE_CAP) {
     guard++
     const data = await api(db, path, { method: 'POST', body: { search: '', filter: { $and: [] }, timezone } })
     const list = asList(data)
     out.push(...list)
+    if (onPage) await onPage(list, out.length)
     const next = data?.pagination?.next || null
     if (!next) break
     path = next.replace(BASE, '')
   }
+  if (guard >= PAGE_CAP) console.error(`[respondio] listContacts hit its ${PAGE_CAP}-page safety cap — workspace has more contacts than were fetched`)
   return out
 }
 
