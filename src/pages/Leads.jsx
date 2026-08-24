@@ -170,12 +170,6 @@ export default function Leads({ initialSearch = '' }) {
     n.has(id) ? n.delete(id) : n.add(id)
     return n
   })
-  const toggleSelectAll = () => {
-    setSelectAllMatching(false)
-    setSelected(s => s.size === items.length ? new Set() : new Set(items.map(l => l.id)))
-  }
-  const clearSelection = () => { setSelected(new Set()); setSelectAllMatching(false) }
-
   const selectAllMatchingFilter = async () => {
     setSelectAllBusy(true)
     try {
@@ -185,6 +179,18 @@ export default function Leads({ initialSearch = '' }) {
     } catch (e) { toast(e.message, 'error') }
     setSelectAllBusy(false)
   }
+
+  const toggleSelectAll = () => {
+    if (selected.size > 0) { clearSelection(); return }
+    // More filtered leads exist beyond this page — go straight to selecting
+    // all of them rather than only the current page, which previously took
+    // a second click on a separate "select all matching" button most people
+    // never noticed.
+    if ((data?.total || 0) > items.length) { selectAllMatchingFilter(); return }
+    setSelectAllMatching(false)
+    setSelected(new Set(items.map(l => l.id)))
+  }
+  const clearSelection = () => { setSelected(new Set()); setSelectAllMatching(false) }
 
   const bulkChangeStage = async (stage) => {
     if (!stage || !selected.size) return
