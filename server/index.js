@@ -425,10 +425,11 @@ function createLeadFrom(payload) {
   if (lead.status === 'won') { lead.convertedAt = lead.convertedAt || new Date().toISOString().slice(0, 10) }
   if (!lead.associateId && payload.associateName) {
     const asn = db.associates.find(a => a.name.toLowerCase() === String(payload.associateName).toLowerCase())
-    if (asn) { lead.associateId = asn.id; lead.locationId = asn.locationId }
-  } else if (lead.associateId) {
-    const asn = db.associates.find(a => a.id === lead.associateId)
-    if (asn) lead.locationId = asn.locationId
+    // Only fall back to the associate's home location when the sheet/payload
+    // didn't already supply one of its own — a sheet's location column is
+    // the actual studio the lead belongs to, which can differ from wherever
+    // the assigned associate happens to be based.
+    if (asn) { lead.associateId = asn.id; if (!payload.locationId) lead.locationId = asn.locationId }
   }
   return lead
 }
@@ -466,12 +467,17 @@ function updateLeadFromPayload(lead, payload) {
   const stage = normalizeStage(payload.stage, db.stages)
   if (stage) set('stage', stage)
   if (payload.stage || payload.status) set('status', normalizeStatus(payload.stage, payload.status))
+  set('locationId', payload.locationId)
   if (payload.associateId && db.associates.some(a => a.id === payload.associateId) && lead.associateId !== payload.associateId) {
     const asn = db.associates.find(a => a.id === payload.associateId)
-    lead.associateId = asn.id; lead.locationId = asn.locationId; changed = true
+    lead.associateId = asn.id; changed = true
+    if (!payload.locationId) { lead.locationId = asn.locationId }
   } else if (payload.associateName) {
     const asn = db.associates.find(a => a.name.toLowerCase() === String(payload.associateName).toLowerCase())
-    if (asn && lead.associateId !== asn.id) { lead.associateId = asn.id; lead.locationId = asn.locationId; changed = true }
+    if (asn && lead.associateId !== asn.id) {
+      lead.associateId = asn.id; changed = true
+      if (!payload.locationId) { lead.locationId = asn.locationId }
+    }
   }
   if (changed) lead.lastActivityAt = nowIso()
   return changed
