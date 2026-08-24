@@ -154,18 +154,36 @@ async function getAccessToken(db) {
 // A permission/not-found error from Sheets comes back as JSON with a
 // `.error.message` — surface that verbatim rather than a generic 500, same
 // spirit as LeadDrawer's humanMomenceError translator for Momence.
+//
+// The Sheets API enforces a per-minute write quota per user/project. A large
+// sheet's sync flushes a batchUpdate every FLUSH_EVERY rows — on a big sheet
+// (or two syncs racing) that can burst past the limit and 429. Google's own
+// guidance for this is client-side exponential backoff, not failing the
+// whole sync outright, so retry a handful of times before giving up.
+const MAX_RETRIES = 5
+const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms))
+
 async function sheetsFetch(db, url, opts = {}) {
-  const token = await getAccessToken(db)
-  const res = await fetch(url, {
-    ...opts,
-    headers: { ...(opts.headers || {}), Authorization: `Bearer ${token}` }
-  })
-  const data = await res.json().catch(() => ({}))
-  if (!res.ok) {
-    const msg = data.error?.message || res.statusText
-    throw new Error(`Google Sheets API error: ${msg}`)
+  for (let attempt = 0; ; attempt++) {
+    const token = await getAccessToken(db)
+    const res = await fetch(url, {
+      ...opts,
+      headers: { ...(opts.headers || {}), Authorization: `Bearer ${token}` }
+    })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) {
+      const isQuota = res.status === 429 || data.error?.status === 'RESOURCE_EXHAUSTED'
+      if (isQuota && attempt < MAX_RETRIES) {
+        // Exponential backoff with jitter: 1s, 2s, 4s, 8s, 16s (+/- jitter).
+        const delay = Math.round((2 ** attempt) * 1000 * (0.5 + Math.random()))
+        await sleep(delay)
+        continue
+      }
+      const msg = data.error?.message || res.statusText
+      throw new Error(`Google Sheets API error: ${msg}`)
+    }
+    return data
   }
-  return data
 }
 
 export async function readSheetRows(db) {

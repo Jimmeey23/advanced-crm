@@ -444,6 +444,7 @@ export default function SettingsPage() {
       const counts = await api.post('/api/google-sheets/sync-now', { force: !!force })
       setSheetsSyncResult({ ok: true, ...counts })
       loadSheetsConfig()
+      refreshData()
       toast(`Synced — ${counts.created} new lead${counts.created === 1 ? '' : 's'}${counts.updated ? `, ${counts.updated} updated` : ''}`)
     } catch (e) {
       setSheetsSyncResult({ ok: false, error: e.message })
@@ -917,58 +918,102 @@ export default function SettingsPage() {
             </Section>
 
             <Section icon={<Sheet size={15} className={sheetsConfig?.connected ? 'text-emerald-400' : 'text-slate-500'} />} title="Google Sheets lead import" desc="Connect a Google account and pull new lead rows from a spreadsheet, deduplicated against existing leads.">
-              {sheetsConfig?.connected ? (
-                <span className="chip bg-emerald-500/10 text-emerald-300 border border-emerald-400/20"><ShieldCheck size={11} /> Connected · {sheetsConfig.connectedEmail}</span>
-              ) : (
-                <span className="chip bg-white/5 border border-white/10 text-slate-400">Not connected</span>
-              )}
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
-                <div><label className="label">Google Cloud OAuth Client ID</label><input className="input" value={sheetsClientId} onChange={e => setSheetsClientId(e.target.value)} placeholder="….apps.googleusercontent.com" /></div>
-                <div><label className="label">Client secret</label><input className="input" type="password" value={sheetsClientSecret} onChange={e => setSheetsClientSecret(e.target.value)} placeholder={sheetsConfig?.hasClientSecret ? '•••••••• (stored)' : 'GOCSPX-…'} /></div>
-              </div>
-              <p className="text-[11px] text-slate-500 mt-2">Create an OAuth client in Google Cloud Console (APIs & Services → Credentials), then add this redirect URI: <code className="text-slate-300">{window.location.origin}/api/google-sheets/oauth/callback</code></p>
-              <div className="flex items-center gap-3 mt-3">
-                <button className="btn btn-primary" onClick={saveSheetsCredentials}>Save OAuth client</button>
+              <div className="flex items-center justify-between rounded-xl bg-white/[0.03] border border-white/6 px-4 py-3">
+                <div className="flex items-center gap-2.5">
+                  <span className={`w-2 h-2 rounded-full shrink-0 ${sheetsConfig?.connected ? 'bg-emerald-400' : 'bg-slate-600'}`} />
+                  {sheetsConfig?.connected ? (
+                    <span className="text-[12.5px] text-slate-200">Connected as <span className="font-medium text-white">{sheetsConfig.connectedEmail}</span></span>
+                  ) : (
+                    <span className="text-[12.5px] text-slate-500">Not connected</span>
+                  )}
+                </div>
                 {sheetsConfig?.connected ? (
-                  <button className="btn btn-ghost text-rose-300" onClick={disconnectGoogle}>Disconnect</button>
+                  <span className="chip bg-emerald-500/10 text-emerald-300 border border-emerald-400/20"><ShieldCheck size={11} /> Active</span>
                 ) : (
-                  <button className="btn btn-soft" onClick={connectGoogle} disabled={!sheetsConfig?.clientId}><Link2 size={13} /> Connect Google Account</button>
+                  <span className="chip bg-white/5 border border-white/10 text-slate-400">Setup needed</span>
                 )}
+              </div>
+
+              <div className="mt-4 rounded-xl border border-white/6 p-4">
+                <div className="flex items-center gap-2 mb-3">
+                  <span className="w-5 h-5 rounded-full bg-white/10 text-[10px] font-semibold text-slate-300 flex items-center justify-center shrink-0">1</span>
+                  <h4 className="text-[12.5px] font-semibold text-slate-200">OAuth client</h4>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div><label className="label">Google Cloud OAuth Client ID</label><input className="input" value={sheetsClientId} onChange={e => setSheetsClientId(e.target.value)} placeholder="….apps.googleusercontent.com" /></div>
+                  <div><label className="label">Client secret</label><input className="input" type="password" value={sheetsClientSecret} onChange={e => setSheetsClientSecret(e.target.value)} placeholder={sheetsConfig?.hasClientSecret ? '•••••••• (stored)' : 'GOCSPX-…'} /></div>
+                </div>
+                <p className="text-[11px] text-slate-500 mt-2">Create an OAuth client in Google Cloud Console (APIs & Services → Credentials), then add this redirect URI: <code className="text-slate-300 bg-black/20 rounded px-1 py-0.5">{window.location.origin}/api/google-sheets/oauth/callback</code></p>
+                <div className="flex items-center gap-3 mt-3">
+                  <button className="btn btn-primary" onClick={saveSheetsCredentials}>Save OAuth client</button>
+                  {sheetsConfig?.connected ? (
+                    <button className="btn btn-ghost text-rose-300" onClick={disconnectGoogle}>Disconnect</button>
+                  ) : (
+                    <button className="btn btn-soft" onClick={connectGoogle} disabled={!sheetsConfig?.clientId}><Link2 size={13} /> Connect Google Account</button>
+                  )}
+                </div>
               </div>
 
               {sheetsConfig?.connected && (
                 <>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-4">
-                    <div><label className="label">Sheet ID</label><input className="input" value={sheetsSheetId} onChange={e => setSheetsSheetId(e.target.value)} placeholder="from the sheet's URL between /d/ and /edit" /></div>
-                    <div><label className="label">Tab name</label><input className="input" value={sheetsSheetTab} onChange={e => setSheetsSheetTab(e.target.value)} placeholder="e.g. Form Responses 1" /></div>
-                  </div>
-                  <div className="flex items-center gap-3 mt-3">
-                    <button className="btn btn-primary" onClick={saveSheetTarget}>Save sheet</button>
-                    <button className="btn btn-soft" onClick={() => syncSheetNow(false)} disabled={sheetsSyncing || !sheetsConfig?.sheetId}>{sheetsSyncing ? <Spinner size={14} /> : <RefreshCcw size={13} />} Sync now</button>
-                    <button className="btn btn-ghost !text-[12px]" onClick={() => syncSheetNow(true)} disabled={sheetsSyncing || !sheetsConfig?.sheetId} title="Ignore the sheet's already-imported markers and re-pull every row">Force full resync</button>
-                    <button className="btn btn-ghost !py-2" onClick={toggleSheetsLogs}><ScrollText size={14} /> {sheetsLogsOpen ? 'Hide log' : 'View sync log'}</button>
-                  </div>
-                  {sheetsSyncResult && (
-                    sheetsSyncResult.ok
-                      ? <p className="mt-3 text-[12.5px] text-emerald-400">✓ {sheetsSyncResult.created} created · {sheetsSyncResult.updated || 0} updated · {sheetsSyncResult.duplicates} duplicate · {sheetsSyncResult.skipped} skipped
-                          {sheetsSyncResult.skipped > 0 && <span className="text-slate-500"> ({sheetsSyncResult.alreadyImported || 0} already imported, {sheetsSyncResult.blankRows || 0} blank, {sheetsSyncResult.missingFields || 0} missing name/contact)</span>}
-                        </p>
-                      : <p className="mt-3 text-[12.5px] text-rose-400">✕ {sheetsSyncResult.error}</p>
-                  )}
-                  {sheetsConfig?.lastSyncAt && (
-                    <p className="mt-1 text-[11px] text-slate-500">Last synced {new Date(sheetsConfig.lastSyncAt).toLocaleString()}
-                      {sheetsConfig.lastSyncCounts && ` — ${sheetsConfig.lastSyncCounts.created} created, ${sheetsConfig.lastSyncCounts.updated || 0} updated, ${sheetsConfig.lastSyncCounts.duplicates} duplicate, ${sheetsConfig.lastSyncCounts.skipped} skipped`}. Also syncs automatically every 30 minutes.
-                    </p>
-                  )}
+                  <div className="mt-3 rounded-xl border border-white/6 p-4">
+                    <div className="flex items-center gap-2 mb-3">
+                      <span className="w-5 h-5 rounded-full bg-white/10 text-[10px] font-semibold text-slate-300 flex items-center justify-center shrink-0">2</span>
+                      <h4 className="text-[12.5px] font-semibold text-slate-200">Sheet to sync</h4>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div><label className="label">Sheet ID</label><input className="input" value={sheetsSheetId} onChange={e => setSheetsSheetId(e.target.value)} placeholder="from the sheet's URL between /d/ and /edit" /></div>
+                      <div><label className="label">Tab name</label><input className="input" value={sheetsSheetTab} onChange={e => setSheetsSheetTab(e.target.value)} placeholder="e.g. Form Responses 1" /></div>
+                    </div>
+                    <div className="flex items-center gap-3 mt-3 flex-wrap">
+                      <button className="btn btn-primary" onClick={saveSheetTarget}>Save sheet</button>
+                      <button className="btn btn-soft" onClick={() => syncSheetNow(false)} disabled={sheetsSyncing || !sheetsConfig?.sheetId}>{sheetsSyncing ? <Spinner size={14} /> : <RefreshCcw size={13} />} Sync now</button>
+                      <button className="btn btn-ghost !text-[12px]" onClick={() => syncSheetNow(true)} disabled={sheetsSyncing || !sheetsConfig?.sheetId} title="Ignore the sheet's already-imported markers and re-pull every row">Force full resync</button>
+                      <button className="btn btn-ghost !py-2" onClick={toggleSheetsLogs}><ScrollText size={14} /> {sheetsLogsOpen ? 'Hide log' : 'View sync log'}</button>
+                    </div>
 
-                  <div className="mt-4 space-y-4">
-                    <div className="flex items-center justify-between">
-                      <div className="text-[11px] text-slate-500">Columns are matched to lead fields automatically by name — review and adjust below.</div>
+                    {sheetsSyncResult && (
+                      <div className={`mt-3 rounded-lg px-3 py-2.5 border text-[12.5px] ${sheetsSyncResult.ok ? 'bg-emerald-500/10 border-emerald-400/20 text-emerald-300' : 'bg-rose-500/10 border-rose-400/20 text-rose-300'}`}>
+                        {sheetsSyncResult.ok ? (
+                          <>
+                            <span className="font-medium">✓ Synced</span> — {sheetsSyncResult.created} created · {sheetsSyncResult.updated || 0} updated · {sheetsSyncResult.duplicates} duplicate · {sheetsSyncResult.skipped} skipped
+                            {sheetsSyncResult.skipped > 0 && <span className="text-emerald-400/70"> ({sheetsSyncResult.alreadyImported || 0} already imported, {sheetsSyncResult.blankRows || 0} blank, {sheetsSyncResult.missingFields || 0} missing name/contact)</span>}
+                          </>
+                        ) : <><span className="font-medium">✕ Sync failed</span> — {sheetsSyncResult.error}</>}
+                      </div>
+                    )}
+                    {sheetsConfig?.lastSyncAt && (
+                      <p className="mt-2 text-[11px] text-slate-500">Last synced {new Date(sheetsConfig.lastSyncAt).toLocaleString()}
+                        {sheetsConfig.lastSyncCounts && ` — ${sheetsConfig.lastSyncCounts.created} created, ${sheetsConfig.lastSyncCounts.updated || 0} updated, ${sheetsConfig.lastSyncCounts.duplicates} duplicate, ${sheetsConfig.lastSyncCounts.skipped} skipped`}. Also syncs automatically every 30 minutes.
+                      </p>
+                    )}
+
+                    {sheetsLogsOpen && (
+                      <div className="mt-3 rounded-lg bg-black/20 border border-white/6 p-2.5 max-h-52 overflow-y-auto">
+                        {!sheetsLogs && <p className="text-[11px] text-slate-500">Loading…</p>}
+                        {sheetsLogs && !sheetsLogs.length && <p className="text-[11px] text-slate-500">No syncs yet.</p>}
+                        {sheetsLogs && sheetsLogs.map(l => (
+                          <div key={l.id} className="flex items-center gap-2 text-[11px] py-1 border-b border-white/5 last:border-0">
+                            <span className="mono text-slate-500">{new Date(l.ts).toLocaleString()}</span>
+                            <OutcomeChip outcome={l.outcome} />
+                            {l.detail && <span className="text-slate-500 truncate">{l.detail}</span>}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="mt-3 rounded-xl border border-white/6 p-4">
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="flex items-center gap-2">
+                        <span className="w-5 h-5 rounded-full bg-white/10 text-[10px] font-semibold text-slate-300 flex items-center justify-center shrink-0">3</span>
+                        <h4 className="text-[12.5px] font-semibold text-slate-200">Field mapping</h4>
+                      </div>
                       <button className="btn btn-ghost !py-1.5 !text-[12px]" onClick={() => detectMapping(false)} disabled={detectingMapping}>
                         {detectingMapping ? <Spinner size={12} /> : <Sparkles size={12} />} Re-detect from sheet
                       </button>
                     </div>
+                    <p className="text-[11px] text-slate-500 mb-3">Columns are matched to lead fields automatically by name — review and adjust below.</p>
                     <FieldMappingEditor
                       key={sheetsMappingVersion}
                       fieldMapping={sheetsConfig.fieldMapping}
@@ -979,20 +1024,6 @@ export default function SettingsPage() {
                       keyPlaceholder="column header, e.g. Full Name"
                     />
                   </div>
-
-                  {sheetsLogsOpen && (
-                    <div className="mt-3 rounded-lg bg-black/20 border border-white/6 p-2.5 max-h-52 overflow-y-auto">
-                      {!sheetsLogs && <p className="text-[11px] text-slate-500">Loading…</p>}
-                      {sheetsLogs && !sheetsLogs.length && <p className="text-[11px] text-slate-500">No syncs yet.</p>}
-                      {sheetsLogs && sheetsLogs.map(l => (
-                        <div key={l.id} className="flex items-center gap-2 text-[11px] py-1 border-b border-white/5 last:border-0">
-                          <span className="mono text-slate-500">{new Date(l.ts).toLocaleString()}</span>
-                          <OutcomeChip outcome={l.outcome} />
-                          {l.detail && <span className="text-slate-500 truncate">{l.detail}</span>}
-                        </div>
-                      ))}
-                    </div>
-                  )}
                 </>
               )}
             </Section>
