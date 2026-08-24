@@ -305,7 +305,7 @@ async function runSyncInner(db, { createLeadFrom, updateLeadFromPayload, findDup
     // presence, and rejects the row rather than creating an unreachable lead.
     if (!name || (!isValidEmail(email) && !isValidPhone(phone))) { missingFields++; skipped++; continue }
 
-    const dup = findDuplicateLead(email, phone)
+    const dup = findDuplicateLead(email, phone, name)
     if (dup) {
       // A row synced before can still change in the sheet afterwards (stage
       // moved, notes added, a purchase logged) — re-applying it here keeps

@@ -600,13 +600,26 @@ function buildWebhookLeadPayload(resolved, integ, record) {
   return buildLeadPayloadFromResolved(resolved, db, integ.name, record)
 }
 
-function findDuplicateLead(email, phone) {
+// A shared phone number alone (family/office landline, a placeholder typed
+// into many sheet rows) is common enough that matching on phone by itself
+// was collapsing distinct people into one "duplicate" lead. Email match is
+// specific enough to stand alone; a phone match additionally requires the
+// first name to agree, so two different people sharing a number no longer
+// merge.
+function firstNameNorm(name) {
+  return String(name || '').trim().toLowerCase().split(/\s+/)[0] || ''
+}
+
+function findDuplicateLead(email, phone, name) {
   const emailNorm = email ? String(email).trim().toLowerCase() : ''
   const phoneNorm = phone ? String(phone).replace(/\D/g, '') : ''
+  const nameNorm = firstNameNorm(name)
   if (!emailNorm && !phoneNorm) return null
   return db.leads.find(l => {
     if (emailNorm && l.email && l.email !== '-' && String(l.email).trim().toLowerCase() === emailNorm) return true
-    if (phoneNorm && l.phone && String(l.phone).replace(/\D/g, '') === phoneNorm) return true
+    if (phoneNorm && l.phone && String(l.phone).replace(/\D/g, '') === phoneNorm) {
+      return nameNorm && nameNorm === firstNameNorm(l.fullName)
+    }
     return false
   })
 }
@@ -774,7 +787,7 @@ app.all('/api/webhooks/leads/:key', (req, res) => {
 
   integ.lastUsedAt = nowIso()
 
-  const dup = findDuplicateLead(email, phone)
+  const dup = findDuplicateLead(email, phone, name)
   if (dup) {
     dup.followUps = dup.followUps || []
     dup.followUps.push({
