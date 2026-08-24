@@ -3,12 +3,12 @@
 @theme {
   --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
   --font-display: "Fraunces", ui-serif, Georgia, serif;
-  --color-ink-950: #080a12;
-  --color-ink-900: #0b0e1a;
-  --color-ink-850: #0f1220;
-  --color-ink-800: #141829;
-  --color-ink-700: #1c2136;
-  --color-ink-600: #2a3050;
+  --color-ink-950: #0a0a0a;
+  --color-ink-900: #111111;
+  --color-ink-850: #161616;
+  --color-ink-800: #1c1c1c;
+  --color-ink-700: #242424;
+  --color-ink-600: #323232;
   --color-brand-400: #fb7185;
   --color-brand-500: #f43f5e;
   --color-brand-600: #e11d48;
@@ -20,14 +20,14 @@ html, body, #root { height: 100%; }
 
 body {
   margin: 0;
-  background: #080a12;
+  background: #0a0a0a;
   color: #e6e8f0;
   font-family: var(--font-sans);
   font-size: 14px;
   -webkit-font-smoothing: antialiased;
   background-image:
-    radial-gradient(1100px 500px at 85% -10%, rgba(244, 63, 94, 0.09), transparent 60%),
-    radial-gradient(900px 420px at 5% 0%, rgba(139, 92, 246, 0.08), transparent 55%);
+    radial-gradient(1100px 500px at 85% -10%, rgba(244, 63, 94, 0.05), transparent 60%),
+    radial-gradient(900px 420px at 5% 0%, rgba(148, 148, 148, 0.04), transparent 55%);
   background-attachment: fixed;
 }
 
@@ -528,15 +528,15 @@ html[data-accent="emerald"] { --brand-start: #10b981; --brand-end: #059669; --br
 [data-theme="light"] .risk-lost { background: rgba(100,116,139,0.16); color: #64748b; }
 
 /* chrome surfaces */
-[data-theme="light"] .bg-\[\#080a12\]\/70 { background: rgba(255,255,255,0.72); }
-[data-theme="light"] .bg-\[\#0a0d18\]\/80 { background: rgba(255,255,255,0.85); }
+[data-theme="light"] .bg-\[\#0a0a0a\]\/70 { background: rgba(255,255,255,0.72); }
+[data-theme="light"] .bg-\[\#0c0c0c\]\/80 { background: rgba(255,255,255,0.85); }
 [data-theme="light"] .bg-\[\#0b0e1a\] { background: #ffffff; }
 
 /* ============================================================
    Design tokens (shared by charts, tables, tooltips)
    ============================================================ */
 :root {
-  --tt-bg: #13172a;
+  --tt-bg: #161616;
   --tt-border: rgba(255, 255, 255, 0.14);
   --tt-color: #e6e8f0;
   --axis: #5b6278;
@@ -544,7 +544,7 @@ html[data-accent="emerald"] { --brand-start: #10b981; --brand-end: #059669; --br
   --tbl-head-bg: transparent;
   --tbl-border: rgba(255, 255, 255, 0.06);
   --tbl-hover: rgba(255, 255, 255, 0.035);
-  --app-bg: #080a12;
+  --app-bg: #0a0a0a;
 }
 
 html[data-theme="light"] {
@@ -602,7 +602,7 @@ html[data-theme="light"] {
 .data-table thead { position: sticky; top: 0; z-index: 35; }
 .data-table thead.is-unpinned { position: static; }
 .data-table thead th {
-  background: rgba(13, 16, 29, 0.99);
+  background: rgba(17, 17, 17, 0.99);
   backdrop-filter: blur(18px) saturate(150%);
   box-shadow: inset 0 -1px 0 rgba(255,255,255,.09);
 }
@@ -616,7 +616,7 @@ html[data-theme="light"] {
 @keyframes tblHeaderSweep { 0% { background-position: 0% 0; } 100% { background-position: 400% 0; } }
 @media (prefers-reduced-motion: reduce) { .data-table thead tr::after { animation: none; background-position: 0 0; } }
 .table-sticky-surface {
-  background: #0d101d !important;
+  background: #121212 !important;
   backdrop-filter: blur(14px);
   box-shadow: inset -1px 0 0 rgba(255,255,255,0.09);
   background-clip: padding-box;
@@ -637,7 +637,7 @@ html[data-theme="light"] {
 html[data-theme="light"] .table-sticky-edge {
   box-shadow: inset -1px 0 0 rgba(15,23,42,0.18), 8px 0 18px rgba(15,23,42,.08);
 }
-.leads-data-table tbody .table-sticky-surface { background: #0d101d !important; }
+.leads-data-table tbody .table-sticky-surface { background: #121212 !important; }
 .leads-data-table tbody tr:hover .table-sticky-surface { background: #171a28 !important; }
 .leads-data-table tbody tr[class*="bg-rose"] .table-sticky-surface { background: #24131e !important; }
 .leads-data-table thead .table-sticky-surface { background: #101422 !important; }
@@ -881,15 +881,15 @@ html[data-theme="light"] .text-violet-300 { color: #1d4ed8; }
 html[data-theme="light"] .text-cyan-300 { color: #1d4ed8; }
 html[data-theme="light"] .text-emerald-200 { color: #047857; }
 
-html[data-theme="light"] .bg-\[\#0b0e1a\] { background: #ffffff; }
-html[data-theme="light"] .bg-\[\#0a0d18\]\/80 { background: rgba(255, 255, 255, 0.88); }
-html[data-theme="light"] .bg-\[\#080a12\]\/70 { background: rgba(255, 255, 255, 0.78); }
+html[data-theme="light"] .bg-\[\#111111\] { background: #ffffff; }
+html[data-theme="light"] .bg-\[\#0c0c0c\]\/80 { background: rgba(255, 255, 255, 0.88); }
+html[data-theme="light"] .bg-\[\#0a0a0a\]\/70 { background: rgba(255, 255, 255, 0.78); }
 
 /* Glossy chrome for the light shell */
-html[data-theme="light"] .bg-\[\#0a0d18\]\/80 {
+html[data-theme="light"] .bg-\[\#0c0c0c\]\/80 {
   box-shadow: 1px 0 0 rgba(15, 23, 42, 0.06);
 }
-html[data-theme="light"] .bg-\[\#080a12\]\/70 {
+html[data-theme="light"] .bg-\[\#0a0a0a\]\/70 {
   box-shadow: 0 1px 0 rgba(15, 23, 42, 0.06);
 }
 
@@ -1937,7 +1937,7 @@ html[data-theme="light"] .lead-group-table {
   padding: 12px 10px 4px;
   border: 1px solid rgba(255,255,255,.08);
   border-radius: 14px;
-  background: #0b0e1a;
+  background: #121212;
   transform: none;
 }
 .lead-chart-3d .recharts-bar-rectangle {
@@ -1954,7 +1954,7 @@ html[data-theme="light"] .lead-group-table {
   place-items: center;
   border: 1px solid rgba(148,163,184,.12);
   border-radius: 14px;
-  background: #0b0e1a;
+  background: #121212;
 }
 .source-donut > .recharts-responsive-container {
   grid-area: 1 / 1;
@@ -2003,7 +2003,7 @@ html[data-theme="light"] .lead-group-table {
   padding: 8px 10px 12px;
   border: 1px solid rgba(148,163,184,.14);
   border-radius: 16px;
-  background: #0b0e1a;
+  background: #121212;
 }
 .lead-deck-orbit { display: none; }
 .lead-deck-stage {
@@ -2454,7 +2454,7 @@ html[data-theme="light"] .source-rank-row:hover {
   align-items: center;
   justify-content: center;
   border: 1px solid rgba(148,163,184,.14);
-  background: #020617;
+  background: #0d0d0d;
   color: #e2e8f0;
   font: 850 10.5px/1 var(--font-display);
   letter-spacing: .02em;
@@ -2481,7 +2481,7 @@ html[data-theme="light"] .source-rank-row:hover {
   align-items: center;
   justify-content: center;
   border: 1px solid rgba(148,163,184,.18);
-  background: #020617;
+  background: #0d0d0d;
   box-shadow: inset 0 1px 0 rgba(255,255,255,.05);
 }
 .ai-action-score strong {

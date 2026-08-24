@@ -43,7 +43,7 @@ function Sidebar() {
   const highCount = alerts.filter(a => a.level === 'high').length
 
   return (
-    <aside className={`${sidebarCollapsed ? 'w-[72px]' : 'w-[248px]'} shrink-0 h-full flex flex-col border-r border-white/6 bg-[#0a0d18]/80 backdrop-blur-xl transition-[width] duration-200`}>
+    <aside className={`${sidebarCollapsed ? 'w-[72px]' : 'w-[248px]'} shrink-0 h-full flex flex-col border-r border-white/6 bg-[#0c0c0c]/80 backdrop-blur-xl transition-[width] duration-200`}>
       <div className={`px-5 pt-6 pb-5 flex items-center gap-3 ${sidebarCollapsed ? '!px-0 justify-center' : ''}`}>
         <button type="button" onClick={() => navigate('dashboard')} className="rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-400" aria-label="Go to dashboard" title="Home">
           <Logo size={40} />
@@ -120,7 +120,7 @@ function Topbar({ onAdd }) {
   const title = NAV.find(n => n.id === view)?.title || 'Executive Overview'
 
   return (
-    <header className="relative z-30 h-[74px] shrink-0 flex items-center gap-4 px-6 border-b border-white/6 bg-[#080a12]/70 backdrop-blur-xl">
+    <header className="relative z-30 h-[74px] shrink-0 flex items-center gap-4 px-6 border-b border-white/6 bg-[#0a0a0a]/70 backdrop-blur-xl">
       <div className="app-page-title flex-1" key={view}>
         <span className="app-page-title-icon"><Activity size={15} /></span>
         <div>

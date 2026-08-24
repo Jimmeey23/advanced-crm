@@ -444,7 +444,7 @@ export default function SettingsPage() {
       const counts = await api.post('/api/google-sheets/sync-now', { force: !!force })
       setSheetsSyncResult({ ok: true, ...counts })
       loadSheetsConfig()
-      toast(`Synced — ${counts.created} new lead${counts.created === 1 ? '' : 's'}`)
+      toast(`Synced — ${counts.created} new lead${counts.created === 1 ? '' : 's'}${counts.updated ? `, ${counts.updated} updated` : ''}`)
     } catch (e) {
       setSheetsSyncResult({ ok: false, error: e.message })
       toast(e.message, 'error')
@@ -951,14 +951,14 @@ export default function SettingsPage() {
                   </div>
                   {sheetsSyncResult && (
                     sheetsSyncResult.ok
-                      ? <p className="mt-3 text-[12.5px] text-emerald-400">✓ {sheetsSyncResult.created} created · {sheetsSyncResult.duplicates} duplicate · {sheetsSyncResult.skipped} skipped
+                      ? <p className="mt-3 text-[12.5px] text-emerald-400">✓ {sheetsSyncResult.created} created · {sheetsSyncResult.updated || 0} updated · {sheetsSyncResult.duplicates} duplicate · {sheetsSyncResult.skipped} skipped
                           {sheetsSyncResult.skipped > 0 && <span className="text-slate-500"> ({sheetsSyncResult.alreadyImported || 0} already imported, {sheetsSyncResult.blankRows || 0} blank, {sheetsSyncResult.missingFields || 0} missing name/contact)</span>}
                         </p>
                       : <p className="mt-3 text-[12.5px] text-rose-400">✕ {sheetsSyncResult.error}</p>
                   )}
                   {sheetsConfig?.lastSyncAt && (
                     <p className="mt-1 text-[11px] text-slate-500">Last synced {new Date(sheetsConfig.lastSyncAt).toLocaleString()}
-                      {sheetsConfig.lastSyncCounts && ` — ${sheetsConfig.lastSyncCounts.created} created, ${sheetsConfig.lastSyncCounts.duplicates} duplicate, ${sheetsConfig.lastSyncCounts.skipped} skipped`}. Also syncs automatically every 30 minutes.
+                      {sheetsConfig.lastSyncCounts && ` — ${sheetsConfig.lastSyncCounts.created} created, ${sheetsConfig.lastSyncCounts.updated || 0} updated, ${sheetsConfig.lastSyncCounts.duplicates} duplicate, ${sheetsConfig.lastSyncCounts.skipped} skipped`}. Also syncs automatically every 30 minutes.
                     </p>
                   )}
 

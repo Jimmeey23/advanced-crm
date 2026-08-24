@@ -2,20 +2,28 @@ import React, { useEffect, useState } from 'react'
 import { X } from 'lucide-react'
 import { AVATAR_COLORS, initials } from './lib.js'
 
-export function Avatar({ name, color, size = 30, className = '', photoUrl }) {
+export function Avatar({ name, color, size = 30, className = '', photoUrl, photoZoom, photoPosX, photoPosY }) {
   const c = color || AVATAR_COLORS[(name || '').length % AVATAR_COLORS.length]
   const [broken, setBroken] = useState(false)
   const src = normalizePhotoUrl(photoUrl)
   if (src && !broken) {
+    const zoom = Number(photoZoom) > 0 ? Number(photoZoom) : 100
+    const posX = photoPosX !== undefined && photoPosX !== null ? Number(photoPosX) : 50
+    const posY = photoPosY !== undefined && photoPosY !== null ? Number(photoPosY) : 50
     return (
-      <img
-        src={src}
-        alt={name}
-        title={name}
-        className={`inline-block rounded-full object-cover shrink-0 ${className}`}
+      <span
+        className={`inline-block rounded-full shrink-0 overflow-hidden ${className}`}
         style={{ width: size, height: size, border: `1px solid ${c}55` }}
-        onError={() => setBroken(true)}
-      />
+      >
+        <img
+          src={src}
+          alt={name}
+          title={name}
+          className="w-full h-full object-cover"
+          style={{ objectPosition: `${posX}% ${posY}%`, transform: `scale(${zoom / 100})`, transformOrigin: `${posX}% ${posY}%` }}
+          onError={() => setBroken(true)}
+        />
+      </span>
     )
   }
   return (

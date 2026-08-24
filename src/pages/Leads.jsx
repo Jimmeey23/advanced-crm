@@ -709,7 +709,7 @@ function TableGrid({ items, boot, lookup, openLead, changeStage, toggleManualFla
                     return (
                       <td key={c.id} className={`px-4 ${py}`}>
                         <div className="flex items-center gap-2 min-w-0">
-                          <Avatar name={owner?.name || '?'} color={owner?.color} photoUrl={owner?.photoUrl} size={28} />
+                          <Avatar name={owner?.name || '?'} color={owner?.color} photoUrl={owner?.photoUrl} photoZoom={owner?.photoZoom} photoPosX={owner?.photoPosX} photoPosY={owner?.photoPosY} size={28} />
                           <span className="text-[12px] text-slate-300 truncate max-w-[110px]">{owner?.name || 'Unassigned'}</span>
                         </div>
                       </td>

@@ -28,7 +28,32 @@ export function ensure(db) {
   if (!db.settings.inbox) db.settings.inbox = { snippets: defaultSnippets() }
   if (!Array.isArray(db.settings.inbox.snippets)) db.settings.inbox.snippets = defaultSnippets()
   if (!db.inbox.sentAtMigrated) migrateSentAt(db)
+  if (!db.inbox.dedupedMessagesV2) dedupeMessages(db)
   return db.inbox
+}
+
+// One-time cleanup for messages inserted by repeated syncs before dedup
+// switched to respond.io's stable messageId — the old timestamp-based key
+// never matched across sync passes for inbound messages (no per-message
+// timestamp from respond.io, see normalizeSentAt), so every re-sync
+// re-inserted the same conversation's history. Groups strictly by
+// (key, direction, content) — NOT by sourceId — because the duplicates
+// straddle the format change: an original copy with no sourceId and a
+// later re-inserted copy that does have one would look like two different
+// messages if grouped by whichever key each happens to carry. Keeps
+// whichever copy in a group has a sourceId (more useful going forward),
+// falling back to the earliest by sentAt.
+function dedupeMessages(db) {
+  const groups = new Map()
+  for (const m of db.inbox.messages) {
+    const groupKey = `${m.key}:${m.direction}:${m.content}`
+    const existing = groups.get(groupKey)
+    if (!existing) { groups.set(groupKey, m); continue }
+    const preferNew = (m.sourceId && !existing.sourceId) || (!!m.sourceId === !!existing.sourceId && m.sentAt < existing.sentAt)
+    if (preferNew) groups.set(groupKey, m)
+  }
+  db.inbox.messages = [...groups.values()]
+  db.inbox.dedupedMessagesV2 = true
 }
 
 // One-time fixup for conversations synced before sentAt was normalized to
@@ -100,16 +125,48 @@ export function normalizeSentAt(input) {
 
 // Appends a message to the store and updates the conversation's rollup
 // fields. Inbound messages bump unreadCount; outbound ones don't.
-export function recordMessage(db, key, { direction, channel, type = 'text', content = '', templateName = '', sentAt } = {}) {
+// `sourceId` is respond.io's own messageId when the caller has one (from a
+// backfill) — pass it so a re-sync can dedupe by stable id instead of
+// content+timestamp, which breaks for inbound messages (see hasReliableTime
+// below).
+export function recordMessage(db, key, { direction, channel, type = 'text', content = '', templateName = '', sentAt, sourceId = null } = {}) {
   ensure(db)
   const when = normalizeSentAt(sentAt)
-  const message = { id: uid('imsg'), key, direction, channel: channel || 'whatsapp', type, content, templateName, sentAt: when }
+  const message = { id: uid('imsg'), sourceId, key, direction, channel: channel || 'whatsapp', type, content, templateName, sentAt: when }
   db.inbox.messages.push(message)
   const c = conv(db, key)
   c.lastMessageAt = when
   c.status = 'open'
   if (direction === 'inbound') c.unreadCount = (c.unreadCount || 0) + 1
   return message
+}
+
+// Set of identifiers already recorded for `key`, for a caller merging in a
+// fresh backfill. Every stored message contributes ITS content+direction
+// key AND, when it has one, its respond.io messageId key — a message
+// recorded before sourceId existed only has the content form; the same
+// message re-fetched now (with a real sourceId) needs to match it via that
+// shared content form, not just its own id form, or every legacy message
+// gets treated as new the first time a backfill runs under the new dedupe
+// logic and re-inserted once under an id key nothing else has.
+// Never keys on sentAt — respond.io's message history gives inbound
+// messages no per-message timestamp (see normalizeSentAt), so it's
+// Date.now() at record time and changes every sync pass.
+export function knownMessageKeys(db, key) {
+  ensure(db)
+  const set = new Set()
+  for (const m of db.inbox.messages) {
+    if (m.key !== key) continue
+    set.add(`${m.direction}:${m.content}`)
+    if (m.sourceId) set.add(`id:${m.sourceId}`)
+  }
+  return set
+}
+
+export function messageDedupeKeys(sourceId, direction, content) {
+  const keys = [`${direction}:${content}`]
+  if (sourceId) keys.push(`id:${sourceId}`)
+  return keys
 }
 
 export function listMessages(db, key) {
@@ -259,6 +316,7 @@ export function extractInboundMessage(payload) {
     type: m.type || 'text',
     content: m.text || m.template?.name || '',
     templateName: m.template?.name || '',
-    sentAt: payload?.timestamp || payload?.createdAt || new Date().toISOString()
+    sentAt: payload?.timestamp || payload?.createdAt || new Date().toISOString(),
+    sourceId: payload?.messageId || m.messageId || null
   }
 }

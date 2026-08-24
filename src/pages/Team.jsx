@@ -63,7 +63,7 @@ export default function Team() {
                   const stats = team?.find(t => t.associateId === a.id)
                   return (
                     <button key={a.id} type="button" className="w-full text-left flex items-center gap-2.5 rounded-xl bg-white/[0.03] border border-white/6 px-3 py-2 hover:bg-white/[0.06] transition-colors" onClick={() => setEditAsn(a)}>
-                      <Avatar name={a.name} color={a.color} photoUrl={a.photoUrl} size={26} />
+                      <Avatar name={a.name} color={a.color} photoUrl={a.photoUrl} photoZoom={a.photoZoom} photoPosX={a.photoPosX} photoPosY={a.photoPosY} size={26} />
                       <div className="flex-1 min-w-0">
                         <div className="text-[12.5px] font-semibold text-slate-200 truncate">{a.name}</div>
                         <div className="text-[10.5px] text-slate-500">{a.role}</div>
@@ -183,33 +183,65 @@ function AssociateModal({ modal, onClose, onSaved }) {
 
 function EditAssociateModal({ associate, onClose, onSaved }) {
   const [photoUrl, setPhotoUrl] = useState('')
+  const [photoZoom, setPhotoZoom] = useState(100)
+  const [photoPosX, setPhotoPosX] = useState(50)
+  const [photoPosY, setPhotoPosY] = useState(50)
   const [saving, setSaving] = useState(false)
   const [err, setErr] = useState('')
 
-  React.useEffect(() => { if (associate) setPhotoUrl(associate.photoUrl || '') }, [associate])
+  React.useEffect(() => {
+    if (!associate) return
+    setPhotoUrl(associate.photoUrl || '')
+    setPhotoZoom(associate.photoZoom || 100)
+    setPhotoPosX(associate.photoPosX ?? 50)
+    setPhotoPosY(associate.photoPosY ?? 50)
+  }, [associate])
 
   if (!associate) return null
   const submit = async (e) => {
     e.preventDefault()
     setSaving(true); setErr('')
     try {
-      await api.patch(`/api/associates/${associate.id}`, { photoUrl: photoUrl.trim() || null })
+      await api.patch(`/api/associates/${associate.id}`, {
+        photoUrl: photoUrl.trim() || null,
+        photoZoom: Number(photoZoom),
+        photoPosX: Number(photoPosX),
+        photoPosY: Number(photoPosY)
+      })
       onSaved()
       onClose()
     } catch (x) { setErr(x.message) }
     finally { setSaving(false) }
   }
+  const reset = () => { setPhotoZoom(100); setPhotoPosX(50); setPhotoPosY(50) }
   return (
     <Modal open={!!associate} onClose={onClose} width={420}>
       <ModalHeader title={associate.name} subtitle="Edit thumbnail" onClose={onClose} />
       <form onSubmit={submit} className="space-y-3">
         <div className="flex items-center gap-3">
-          <Avatar name={associate.name} color={associate.color} photoUrl={photoUrl} size={48} />
+          <Avatar name={associate.name} color={associate.color} photoUrl={photoUrl} photoZoom={photoZoom} photoPosX={photoPosX} photoPosY={photoPosY} size={64} />
           <div className="flex-1">
             <label className="label">Photo URL</label>
             <input className="input" value={photoUrl} onChange={e => setPhotoUrl(e.target.value)} placeholder="/avatars/name.jpg or https://…" />
           </div>
         </div>
+        {photoUrl && (
+          <div className="space-y-2.5 pt-1">
+            <div>
+              <div className="flex items-center justify-between"><label className="label !mb-0">Zoom</label><span className="text-[11px] text-slate-500">{photoZoom}%</span></div>
+              <input type="range" min={100} max={250} step={1} value={photoZoom} onChange={e => setPhotoZoom(Number(e.target.value))} className="w-full" />
+            </div>
+            <div>
+              <div className="flex items-center justify-between"><label className="label !mb-0">Horizontal position</label><span className="text-[11px] text-slate-500">{photoPosX}%</span></div>
+              <input type="range" min={0} max={100} step={1} value={photoPosX} onChange={e => setPhotoPosX(Number(e.target.value))} className="w-full" />
+            </div>
+            <div>
+              <div className="flex items-center justify-between"><label className="label !mb-0">Vertical position</label><span className="text-[11px] text-slate-500">{photoPosY}%</span></div>
+              <input type="range" min={0} max={100} step={1} value={photoPosY} onChange={e => setPhotoPosY(Number(e.target.value))} className="w-full" />
+            </div>
+            <button type="button" className="btn btn-ghost !py-1.5 !text-[11.5px]" onClick={reset}>Reset crop</button>
+          </div>
+        )}
         <p className="text-[11px] text-slate-500">A file under <code>public/avatars/</code> (e.g. <code>/avatars/jane.jpg</code>) or any hosted image URL. Leave blank to use initials.</p>
         {err && <p className="text-[12px] text-rose-400">{err}</p>}
         <div className="flex justify-end gap-2 pt-1">

@@ -430,6 +430,47 @@ function createLeadFrom(payload) {
   return lead
 }
 
+// Applies a re-resolved payload (built the same way as a freshly-created
+// lead's) onto an existing lead found as a duplicate during a Google Sheets
+// sync — so a row edited in the sheet after its first import (stage moved,
+// notes updated, a follow-up logged elsewhere in the sheet) is reflected on
+// the existing lead instead of being silently ignored on every later sync.
+// Only overwrites a field when the sheet actually supplied a non-empty
+// value, so blank cells never wipe out data the CRM has since gathered.
+function updateLeadFromPayload(lead, payload) {
+  let changed = false
+  const set = (key, value) => {
+    if (value === undefined || value === null || value === '') return
+    if (lead[key] !== value) { lead[key] = value; changed = true }
+  }
+  set('fullName', payload.fullName?.trim())
+  set('phone', payload.phone)
+  if (payload.email && payload.email !== '-') set('email', payload.email)
+  set('remarks', payload.remarks)
+  set('classType', payload.classType)
+  set('channel', payload.channel)
+  set('center', payload.center)
+  set('memberId', payload.memberId)
+  set('hostId', payload.hostId)
+  set('period', payload.period)
+  set('trialStatus', payload.trialStatus)
+  set('conversionStatus', payload.conversionStatus)
+  set('retentionStatus', payload.retentionStatus)
+  set('convertedAt', payload.convertedAt)
+  if (payload.valueEstimate !== undefined) set('valueEstimate', Number(payload.valueEstimate))
+  if (payload.purchasesMade !== undefined) set('purchasesMade', Number(payload.purchasesMade))
+  if (payload.visits !== undefined) set('visits', Number(payload.visits))
+  const stage = normalizeStage(payload.stage, db.stages)
+  if (stage) set('stage', stage)
+  if (payload.stage || payload.status) set('status', normalizeStatus(payload.stage, payload.status))
+  if (payload.associateName) {
+    const asn = db.associates.find(a => a.name.toLowerCase() === String(payload.associateName).toLowerCase())
+    if (asn && lead.associateId !== asn.id) { lead.associateId = asn.id; lead.locationId = asn.locationId; changed = true }
+  }
+  if (changed) lead.lastActivityAt = nowIso()
+  return changed
+}
+
 app.post('/api/leads', (req, res) => {
   const lead = createLeadFrom(req.body)
   const settings = db.settings.roundRobin
@@ -844,7 +885,7 @@ app.post('/api/google-sheets/disconnect', (req, res) => {
 
 app.post('/api/google-sheets/sync-now', async (req, res) => {
   try {
-    const counts = await googleSheets.runSync(db, { createLeadFrom, findDuplicateLead, assignLead, markDirty, logSync: logSheetSync, force: req.body?.force === true })
+    const counts = await googleSheets.runSync(db, { createLeadFrom, updateLeadFromPayload, findDuplicateLead, assignLead, markDirty, logSync: logSheetSync, force: req.body?.force === true })
     save()
     res.json(counts)
   } catch (e) {
@@ -861,7 +902,7 @@ app.get('/api/google-sheets/logs', (req, res) => {
 // without blocking anything — failures are logged, never thrown.
 setInterval(() => {
   if (!db || !googleSheets.isConfigured(db)) return
-  googleSheets.runSync(db, { createLeadFrom, findDuplicateLead, assignLead, markDirty, logSync: logSheetSync })
+  googleSheets.runSync(db, { createLeadFrom, updateLeadFromPayload, findDuplicateLead, assignLead, markDirty, logSync: logSheetSync })
     .then(() => save())
     .catch(e => logSheetSync('error', e.message))
 }, 30 * 60 * 1000)
@@ -1080,7 +1121,7 @@ app.get('/api/analytics/team', (req, res) => {
     const won = owned.filter(l => l.status === 'won')
     const revenue = won.reduce((s, l) => s + (l.valueEstimate || 0), 0)
     return {
-      associateId: a.id, name: a.name, locationId: a.locationId, color: a.color, photoUrl: a.photoUrl,
+      associateId: a.id, name: a.name, locationId: a.locationId, color: a.color, photoUrl: a.photoUrl, photoZoom: a.photoZoom, photoPosX: a.photoPosX, photoPosY: a.photoPosY,
       open: owned.filter(l => l.status === 'open').length,
       won: won.length,
       revenue,
@@ -2176,7 +2217,7 @@ app.get('/api/analytics/associate/:id/scorecard', (req, res) => {
 
   res.json({
     associate: {
-      id: associate.id, name: associate.name, color: associate.color, photoUrl: associate.photoUrl,
+      id: associate.id, name: associate.name, color: associate.color, photoUrl: associate.photoUrl, photoZoom: associate.photoZoom, photoPosX: associate.photoPosX, photoPosY: associate.photoPosY,
       locationId: associate.locationId, locationName: loc?.name || '',
       active: associate.active !== false, targetMonthly: target
     },
@@ -2295,19 +2336,18 @@ app.post('/api/respondio/webhook/:key', (req, res) => {
 })
 
 // Pulls a lead's respond.io message history into the local inbox store,
-// merging with anything already recorded locally (dedup by direction +
-// timestamp + content, since respond.io has no stable message id in this
-// history payload).
+// merging with anything already recorded locally. Dedupes by content (and,
+// when respond.io provides one, its messageId too — see
+// inbox.knownMessageKeys for why a message needs to match on either form).
 async function backfillLeadMessages(lead) {
   try {
     const remote = await respondio.syncLeadConversations(db, lead)
-    const known = new Set(inbox.listMessages(db, lead.id).map(m => `${m.direction}:${m.sentAt}:${m.content}`))
+    const known = inbox.knownMessageKeys(db, lead.id)
     for (const m of remote?.conversations?.[0]?.messages || []) {
-      const sentAt = inbox.normalizeSentAt(m.sentAt)
-      const dedupeKey = `${m.direction}:${sentAt}:${m.content}`
-      if (!known.has(dedupeKey)) {
-        inbox.recordMessage(db, lead.id, { direction: m.direction, channel: 'whatsapp', type: m.type, content: m.content, sentAt })
-        known.add(dedupeKey)
+      const keys = inbox.messageDedupeKeys(m.id, m.direction, m.content)
+      if (!keys.some(k => known.has(k))) {
+        inbox.recordMessage(db, lead.id, { direction: m.direction, channel: 'whatsapp', type: m.type, content: m.content, sentAt: inbox.normalizeSentAt(m.sentAt), sourceId: m.id || null })
+        keys.forEach(k => known.add(k))
       }
     }
   } catch (e) { /* backfill is best-effort */ }
@@ -2318,16 +2358,16 @@ async function backfillLeadMessages(lead) {
 // id instead of going through leadIdentifier().
 async function backfillContactMessages(key, contactId) {
   try {
-    const known = new Set(inbox.listMessages(db, key).map(m => `${m.direction}:${m.sentAt}:${m.content}`))
+    const known = inbox.knownMessageKeys(db, key)
     const raw = await respondio.listMessagesByIdentifier(db, `id:${contactId}`, 100)
     for (const m of raw) {
       const content = m.message?.text || m.message?.template?.name || ''
-      const sentAt = inbox.normalizeSentAt(m.timestamp || m.sentAt || m.createdAt || m.status?.[0]?.timestamp || null)
       const direction = m.traffic === 'incoming' ? 'inbound' : 'outbound'
-      const dedupeKey = `${direction}:${sentAt}:${content}`
-      if (!known.has(dedupeKey)) {
-        inbox.recordMessage(db, key, { direction, channel: 'whatsapp', type: m.message?.type || 'text', content, sentAt })
-        known.add(dedupeKey)
+      const keys = inbox.messageDedupeKeys(m.messageId, direction, content)
+      if (!keys.some(k => known.has(k))) {
+        const sentAt = inbox.normalizeSentAt(m.timestamp || m.sentAt || m.createdAt || m.status?.[0]?.timestamp || null)
+        inbox.recordMessage(db, key, { direction, channel: 'whatsapp', type: m.message?.type || 'text', content, sentAt, sourceId: m.messageId || null })
+        keys.forEach(k => known.add(k))
       }
     }
   } catch (e) { /* backfill is best-effort */ }

@@ -425,7 +425,7 @@ export default function Dashboard() {
             {topHalf.map((t, i) => (
               <button key={t.associateId} className="associate-rank-row" onClick={() => setScorecardId(t.associateId)}>
                 <span className={`associate-rank-number ${i === 0 ? 'is-gold' : i === 1 ? 'is-silver' : i === 2 ? 'is-bronze' : 'is-good'}`}>{i + 1}</span>
-                <Avatar name={t.name} color={t.color} photoUrl={t.photoUrl} size={30} />
+                <Avatar name={t.name} color={t.color} photoUrl={t.photoUrl} photoZoom={t.photoZoom} photoPosX={t.photoPosX} photoPosY={t.photoPosY} size={30} />
                 <div className="min-w-0 flex-1">
                   <div className="associate-rank-name">{t.name}</div>
                   <div className="associate-rank-sub">{boot?.locations.find(l => l.id === t.locationId)?.name?.split(',')[0] || ''}</div>
@@ -457,7 +457,7 @@ export default function Dashboard() {
             {bottomHalf.map((t, i) => (
               <button key={t.associateId} className="associate-rank-row" onClick={() => setScorecardId(t.associateId)}>
                 <span className={`associate-rank-number ${i === 0 ? 'is-bad' : ''}`}>{i + 1}</span>
-                <Avatar name={t.name} color={t.color} photoUrl={t.photoUrl} size={30} />
+                <Avatar name={t.name} color={t.color} photoUrl={t.photoUrl} photoZoom={t.photoZoom} photoPosX={t.photoPosX} photoPosY={t.photoPosY} size={30} />
                 <div className="min-w-0 flex-1">
                   <div className="associate-rank-name">{t.name}</div>
                   <div className="associate-rank-sub">{boot?.locations.find(l => l.id === t.locationId)?.name?.split(',')[0] || ''}</div>

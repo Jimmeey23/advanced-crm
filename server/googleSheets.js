@@ -220,18 +220,18 @@ async function writeStatusColumn(db, statusColIndex, rowUpdates) {
 // rows) easily takes long enough for this to happen in practice.
 let syncInFlight = false
 
-export async function runSync(db, { createLeadFrom, findDuplicateLead, assignLead, markDirty, logSync, force = false }) {
+export async function runSync(db, { createLeadFrom, updateLeadFromPayload, findDuplicateLead, assignLead, markDirty, logSync, force = false }) {
   if (!isConfigured(db)) throw new Error('Google Sheets is not fully configured yet.')
   if (syncInFlight) throw new Error('A sync is already in progress — wait for it to finish before starting another.')
   syncInFlight = true
   try {
-    return await runSyncInner(db, { createLeadFrom, findDuplicateLead, assignLead, markDirty, logSync, force })
+    return await runSyncInner(db, { createLeadFrom, updateLeadFromPayload, findDuplicateLead, assignLead, markDirty, logSync, force })
   } finally {
     syncInFlight = false
   }
 }
 
-async function runSyncInner(db, { createLeadFrom, findDuplicateLead, assignLead, markDirty, logSync, force = false }) {
+async function runSyncInner(db, { createLeadFrom, updateLeadFromPayload, findDuplicateLead, assignLead, markDirty, logSync, force = false }) {
   const c = config(db)
   const { header, rows } = await readSheetRows(db)
   if (!header.length) return { created: 0, duplicates: 0, skipped: 0 }
@@ -249,7 +249,7 @@ async function runSyncInner(db, { createLeadFrom, findDuplicateLead, assignLead,
     })
   }
 
-  let created = 0, duplicates = 0, skipped = 0
+  let created = 0, updated = 0, duplicates = 0, skipped = 0
   let alreadyImported = 0, blankRows = 0, missingFields = 0
   let toMarkImported = []
   // Flushed periodically rather than once at the very end — on a very large
@@ -272,7 +272,7 @@ async function runSyncInner(db, { createLeadFrom, findDuplicateLead, assignLead,
     // it) can already be full of unrelated values, and skipping every row
     // that merely has *something* in that column was skipping the entire
     // sheet on the very first sync.
-    if (!force && existingStatus.startsWith(IMPORTED_MARK)) { alreadyImported++; skipped++; continue }
+    const wasImported = !force && existingStatus.startsWith(IMPORTED_MARK)
 
     const record = {}
     header.forEach((h, idx) => { if (h) record[String(h).trim()] = row[idx] })
@@ -288,8 +288,24 @@ async function runSyncInner(db, { createLeadFrom, findDuplicateLead, assignLead,
     if (!name || (!isValidEmail(email) && !isValidPhone(phone))) { missingFields++; skipped++; continue }
 
     const dup = findDuplicateLead(email, phone)
-    if (dup) { duplicates++; toMarkImported.push({ sheetRowNumber }) }
-    else {
+    if (dup) {
+      // A row synced before can still change in the sheet afterwards (stage
+      // moved, notes added, a purchase logged) — re-applying it here keeps
+      // the existing lead current instead of the sheet only ever being able
+      // to create leads once and never touch them again.
+      if (updateLeadFromPayload) {
+        const payload = buildLeadPayloadFromResolved(resolved, db, 'Google Sheets', record)
+        if (updateLeadFromPayload(dup, payload)) { updated++; markDirty(dup.id) }
+      }
+      duplicates++
+      if (wasImported) { alreadyImported++ } else { toMarkImported.push({ sheetRowNumber }) }
+    } else if (wasImported) {
+      // Marked imported previously but no matching lead exists anymore
+      // (deleted since) — leave it alone unless this is an explicit force
+      // re-pull, which already ignores the marker entirely.
+      alreadyImported++
+      skipped++
+    } else {
       const lead = createLeadFrom(buildLeadPayloadFromResolved(resolved, db, 'Google Sheets', record))
       if (!lead.associateId && db.settings.roundRobin?.enabled) assignLead(db, lead)
       db.leads.push(lead)
@@ -303,9 +319,9 @@ async function runSyncInner(db, { createLeadFrom, findDuplicateLead, assignLead,
 
   await flush()
 
-  const counts = { created, duplicates, skipped, alreadyImported, blankRows, missingFields }
+  const counts = { created, updated, duplicates, skipped, alreadyImported, blankRows, missingFields }
   db.settings.googleSheets.lastSyncAt = nowIso()
   db.settings.googleSheets.lastSyncCounts = counts
-  logSync('synced', `${created} created, ${duplicates} duplicate, ${skipped} skipped (${alreadyImported} already imported, ${blankRows} blank, ${missingFields} missing name/contact)`)
+  logSync('synced', `${created} created, ${updated} updated, ${duplicates} duplicate, ${skipped} skipped (${alreadyImported} already imported, ${blankRows} blank, ${missingFields} missing name/contact)`)
   return counts
 }
