@@ -110,6 +110,8 @@ export default function Inbox() {
   const [templateValues, setTemplateValues] = useState([])
 
   const threadEndRef = useRef(null)
+  const [syncing, setSyncing] = useState(false)
+  const autoSyncedRef = useRef(false)
 
   const loadList = async () => {
     setLoadingList(true)
@@ -119,13 +121,37 @@ export default function Inbox() {
         ...(channel ? { channel } : {}), ...(status ? { status } : {}), ...(unreadOnly ? { unread: '1' } : {})
       }))
       setRows(r.conversations || [])
+      return r
     } catch (e) { /* toast avoided on background refresh */ } finally { setLoadingList(false) }
   }
 
   const loadSnippets = () => api.get('/api/inbox/snippets').then(setSnippets).catch(() => {})
 
+  const syncFromRespondio = async () => {
+    setSyncing(true)
+    try {
+      await api.post('/api/inbox/sync')
+      await loadList()
+      toast('Synced conversations from Respond.io')
+    } catch (e) {
+      toast(e.message)
+    } finally { setSyncing(false) }
+  }
+
   useEffect(() => { loadList() }, [q, studio, associate, channel, status, unreadOnly])
   useEffect(() => { loadSnippets() }, [])
+
+  // First time the inbox is opened with nothing in the local store yet,
+  // pull the existing respond.io conversation history once automatically —
+  // otherwise the page looks empty until someone finds the Sync button.
+  useEffect(() => {
+    if (autoSyncedRef.current || loadingList) return
+    if (rows.length === 0 && boot?.integrations?.respondio) {
+      autoSyncedRef.current = true
+      syncFromRespondio()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loadingList, rows.length, boot])
 
   const selected = rows.find(r => r.leadId === selectedLeadId) || null
 
@@ -247,6 +273,14 @@ export default function Inbox() {
             >
               Unread
             </button>
+            <button
+              className="btn btn-ghost !py-1.5 !px-2.5 !text-[11.5px]"
+              onClick={syncFromRespondio}
+              disabled={syncing}
+              title="Pull every existing conversation from Respond.io"
+            >
+              {syncing ? <Spinner size={12} /> : <Sparkles size={12} />} Sync
+            </button>
           </div>
           {showFilters && (
             <div className="space-y-1.5">
@@ -299,18 +333,24 @@ export default function Inbox() {
                 <div className="text-[13px] font-semibold text-white truncate">{selected.lead.fullName}</div>
                 <div className="text-[11px] text-slate-500 truncate">{selected.lead.phone || selected.lead.email}</div>
               </div>
-              <select
-                className="input select-strong !py-1.5 !text-[11.5px] !w-[150px]"
-                value={selected.assigneeId || ''}
-                onChange={e => setAssignee(e.target.value || null)}
-                title="Assign conversation"
-              >
-                <option value="">Unassigned</option>
-                {(boot?.associates || []).map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
-              </select>
-              <button className="btn btn-ghost !py-1.5 !px-2.5 !text-[11.5px]" onClick={toggleStatus}>
-                {selected.status === 'closed' ? <><Circle size={12} /> Reopen</> : <><CheckCircle2 size={12} /> Close</>}
-              </button>
+              {selected.unmatched ? (
+                <span className="chip bg-amber-500/10 text-amber-400 border border-amber-400/20 !text-[10.5px]">No matching lead</span>
+              ) : (
+                <>
+                  <select
+                    className="input select-strong !py-1.5 !text-[11.5px] !w-[150px]"
+                    value={selected.assigneeId || ''}
+                    onChange={e => setAssignee(e.target.value || null)}
+                    title="Assign conversation"
+                  >
+                    <option value="">Unassigned</option>
+                    {(boot?.associates || []).map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+                  </select>
+                  <button className="btn btn-ghost !py-1.5 !px-2.5 !text-[11.5px]" onClick={toggleStatus}>
+                    {selected.status === 'closed' ? <><Circle size={12} /> Reopen</> : <><CheckCircle2 size={12} /> Close</>}
+                  </button>
+                </>
+              )}
             </div>
 
             <div className="flex-1 overflow-y-auto scrollbar-thin p-4 space-y-2.5">
@@ -319,6 +359,11 @@ export default function Inbox() {
               <div ref={threadEndRef} />
             </div>
 
+            {selected.unmatched ? (
+              <div className="border-t border-white/8 p-3 text-[11.5px] text-slate-500 text-center">
+                This respond.io contact isn't linked to a CRM lead yet — add them as a lead to reply here.
+              </div>
+            ) : (
             <div className="border-t border-white/8 p-3 space-y-2">
               <div className="flex gap-1.5">
                 {Object.entries(CHANNEL_META).map(([k, m]) => {
@@ -398,6 +443,7 @@ export default function Inbox() {
                 </button>
               </div>
             </div>
+            )}
           </>
         )}
       </div>

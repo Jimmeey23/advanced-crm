@@ -2264,22 +2264,109 @@ app.post('/api/respondio/webhook/:key', (req, res) => {
   if (!db.settings.respondio?.inboundWebhookKey || req.params.key !== db.settings.respondio.inboundWebhookKey) {
     return res.status(404).json({ error: 'Unknown webhook' })
   }
+  const contact = req.body?.contact || req.body?.data?.contact || {}
   const lead = inbox.matchLeadFromWebhook(db, req.body)
+  const extracted = inbox.extractInboundMessage(req.body)
+  const assigneeId = inbox.resolveAssigneeId(db.associates, contact.assignee?.email)
   if (lead) {
-    if (!lead.respondId) {
-      const contactId = req.body?.contact?.id || req.body?.contact?.contactId
-      if (contactId) lead.respondId = contactId
-    }
-    const extracted = inbox.extractInboundMessage(req.body)
+    if (!lead.respondId && contact.id) lead.respondId = contact.id
     inbox.recordMessage(db, lead.id, { direction: 'inbound', ...extracted })
+    if (assigneeId) inbox.assign(db, lead.id, assigneeId)
     lead.lastActivityAt = nowIso()
     markDirty(lead.id)
     save()
     broadcastChange('respondio-message', { leadId: lead.id })
   } else {
-    broadcastChange('respondio-message')
+    // No CRM lead matches this contact — still record it under a
+    // contact-scoped key so "all messages from all members" holds even for
+    // respond.io conversations that never became a lead in this CRM.
+    const info = inbox.contactDisplayInfo(contact)
+    if (info.contactId) {
+      const key = inbox.contactKey(info.contactId)
+      inbox.setContactInfo(db, key, { ...info, assigneeId })
+      inbox.recordMessage(db, key, { direction: 'inbound', ...extracted })
+      save()
+      broadcastChange('respondio-message', { leadId: key })
+    } else {
+      broadcastChange('respondio-message')
+    }
   }
   res.json({ ok: true })
+})
+
+// Pulls a lead's respond.io message history into the local inbox store,
+// merging with anything already recorded locally (dedup by direction +
+// timestamp + content, since respond.io has no stable message id in this
+// history payload).
+async function backfillLeadMessages(lead) {
+  try {
+    const remote = await respondio.syncLeadConversations(db, lead)
+    const known = new Set(inbox.listMessages(db, lead.id).map(m => `${m.direction}:${m.sentAt}:${m.content}`))
+    for (const m of remote?.conversations?.[0]?.messages || []) {
+      const dedupeKey = `${m.direction}:${m.sentAt}:${m.content}`
+      if (!known.has(dedupeKey)) {
+        inbox.recordMessage(db, lead.id, { direction: m.direction, channel: 'whatsapp', type: m.type, content: m.content, sentAt: m.sentAt })
+        known.add(dedupeKey)
+      }
+    }
+  } catch (e) { /* backfill is best-effort */ }
+}
+
+// Same idea as backfillLeadMessages, but for a contact-scoped key with no
+// matching lead — pulls straight from message/list by respond.io contact
+// id instead of going through leadIdentifier().
+async function backfillContactMessages(key, contactId) {
+  try {
+    const known = new Set(inbox.listMessages(db, key).map(m => `${m.direction}:${m.sentAt}:${m.content}`))
+    const raw = await respondio.listMessagesByIdentifier(db, `id:${contactId}`, 100)
+    for (const m of raw) {
+      const content = m.message?.text || m.message?.template?.name || ''
+      const sentAt = m.timestamp || m.sentAt || m.createdAt || m.status?.[0]?.timestamp || null
+      const direction = m.traffic === 'incoming' ? 'inbound' : 'outbound'
+      const dedupeKey = `${direction}:${sentAt}:${content}`
+      if (!known.has(dedupeKey)) {
+        inbox.recordMessage(db, key, { direction, channel: 'whatsapp', type: m.message?.type || 'text', content, sentAt })
+        known.add(dedupeKey)
+      }
+    }
+  } catch (e) { /* backfill is best-effort */ }
+}
+
+// Full workspace sync for the Inbox page: pulls every respond.io contact
+// (POST /contact/list) and, for each, backfills its message history —
+// matched to a CRM lead when possible, kept as a contact-only row
+// otherwise — so "all messages from all members" holds even for
+// respond.io conversations that never became a lead. Also reconciles
+// status (open/closed) and the assigned agent from respond.io's own
+// records, since that's the source of truth for who owns a conversation.
+app.post('/api/inbox/sync', async (req, res) => {
+  if (!respondio.isConfigured(db)) return res.status(400).json({ error: 'Respond.io is not configured.' })
+  try {
+    const contacts = await respondio.listContacts(db, { pageSize: 100 })
+    let matched = 0, unmatched = 0
+    for (const contact of contacts) {
+      const assigneeId = inbox.resolveAssigneeId(db.associates, contact.assignee?.email)
+      const lead = inbox.matchLeadFromWebhook(db, { contact })
+      if (lead) {
+        matched++
+        if (contact.id && !lead.respondId) lead.respondId = contact.id
+        if (assigneeId) inbox.assign(db, lead.id, assigneeId)
+        if (contact.status === 'open' || contact.status === 'closed') inbox.setStatus(db, lead.id, contact.status)
+        await backfillLeadMessages(lead)
+        markDirty(lead.id)
+      } else if (contact.id) {
+        unmatched++
+        const key = inbox.contactKey(contact.id)
+        inbox.setContactInfo(db, key, { ...inbox.contactDisplayInfo(contact), assigneeId })
+        await backfillContactMessages(key, contact.id)
+      }
+    }
+    save()
+    broadcastChange('respondio-message')
+    res.json({ ok: true, contactsFound: contacts.length, matched, unmatched })
+  } catch (e) {
+    res.status(502).json({ error: e.message })
+  }
 })
 
 app.post('/api/respondio/test', async (req, res) => {
@@ -2447,35 +2534,38 @@ app.get('/api/inbox', (req, res) => {
   res.json({ configured: respondio.isConfigured(db), conversations: rows })
 })
 
-app.get('/api/inbox/:leadId/messages', async (req, res) => {
-  const lead = leadById(req.params.leadId)
+// :key is either a lead id or contact:<respondio-contact-id> — the latter
+// for a respond.io contact with no matching CRM lead (see inbox.js). Those
+// rows are read-only (no lead to send/assign against), so only /messages
+// and /read need to handle both; /status and /assign require a real lead.
+app.get('/api/inbox/:key/messages', async (req, res) => {
+  const key = req.params.key
+  if (key.startsWith('contact:')) {
+    if (respondio.isConfigured(db)) {
+      const contactId = key.slice('contact:'.length)
+      await backfillContactMessages(key, contactId)
+      save()
+    }
+    return res.json({ messages: inbox.listMessages(db, key) })
+  }
+  const lead = leadById(key)
   if (!lead) return res.status(404).json({ error: 'Lead not found' })
   inbox.ensure(db)
   // Backfill from Respond.io once so a conversation that predates this
   // store's rollout still shows its history, then merge with anything
   // already recorded locally.
   if (respondio.isConfigured(db)) {
-    try {
-      const remote = await respondio.syncLeadConversations(db, lead)
-      const known = new Set(inbox.listMessages(db, lead.id).map(m => `${m.direction}:${m.sentAt}:${m.content}`))
-      for (const m of remote?.conversations?.[0]?.messages || []) {
-        const key = `${m.direction}:${m.sentAt}:${m.content}`
-        if (!known.has(key)) {
-          inbox.recordMessage(db, lead.id, { direction: m.direction, channel: 'whatsapp', type: m.type, content: m.content, sentAt: m.sentAt })
-          known.add(key)
-        }
-      }
-      markDirty(lead.id)
-      save()
-    } catch (e) { /* backfill is best-effort */ }
+    await backfillLeadMessages(lead)
+    markDirty(lead.id)
+    save()
   }
   res.json({ messages: inbox.listMessages(db, lead.id) })
 })
 
-app.post('/api/inbox/:leadId/read', (req, res) => {
-  const lead = leadById(req.params.leadId)
-  if (!lead) return res.status(404).json({ error: 'Lead not found' })
-  res.json(inbox.markRead(db, lead.id))
+app.post('/api/inbox/:key/read', (req, res) => {
+  const key = req.params.key
+  if (!key.startsWith('contact:') && !leadById(key)) return res.status(404).json({ error: 'Lead not found' })
+  res.json(inbox.markRead(db, key))
   save()
 })
 

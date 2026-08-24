@@ -92,9 +92,14 @@ export async function persistState(state, dirtyLeadIds = [], deletedLeadIds = []
       // large or contains an awkward imported id, Supabase can reject the path
       // before the request reaches the table. Retrying one id at a time keeps
       // the sync moving and preserves the exact failing id in the error.
+      // A single unresolvable id (bad characters, already gone) must not
+      // throw here — this delete step runs before the settings/leads
+      // upsert below, so throwing would silently block every future sync
+      // (including unrelated settings saves) until the process restarts.
+      // Log and move on instead.
       for (const id of batch) {
         const single = await c.from(LEADS_TABLE).delete().eq('id', id)
-        if (single.error) throw new Error(`supabase delete lead ${id}: ${single.error.message}`)
+        if (single.error) console.error(`[supabase] could not delete lead ${id}: ${single.error.message} — skipping`)
       }
     }
   }

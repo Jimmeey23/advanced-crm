@@ -1,13 +1,25 @@
 // Unified Inbox: persisted, webhook-fed store of every Respond.io message
-// across every lead, so the Inbox page shows a live multi-conversation view
-// without re-pulling respond.io's API (rate-limited) on every load.
+// across every member, so the Inbox page shows a live multi-conversation
+// view without re-pulling respond.io's API (rate-limited) on every load.
+//
+// Conversations are keyed by a `key` — a lead's id when the respond.io
+// contact matches a CRM lead, or `contact:<respondio-contact-id>` when it
+// doesn't (a respond.io contact with no matching lead still needs to show up
+// — "all messages from all members from respond.io" isn't limited to
+// contacts we happen to have linked). Unmatched rows carry their own
+// `contactInfo` (name/phone/email) instead of a lead lookup, and are
+// read-only in the UI since there's no lead to send/assign against.
 //
 // db.inbox shape:
-//   messages: [{ id, leadId, direction, channel, type, content, templateName, sentAt }]
-//   conversations: { [leadId]: { status, unreadCount, lastMessageAt, assigneeId } }
+//   messages: [{ id, key, direction, channel, type, content, templateName, sentAt }]
+//   conversations: { [key]: { status, unreadCount, lastMessageAt, assigneeId, contactId, contactInfo? } }
 // db.settings.inbox.snippets: [{ id, label, text }]
 
 import { uid } from './db.js'
+
+export function contactKey(contactId) {
+  return `contact:${contactId}`
+}
 
 export function ensure(db) {
   if (!db.inbox) db.inbox = { messages: [], conversations: {} }
@@ -26,69 +38,90 @@ function defaultSnippets() {
   ]
 }
 
-function conv(db, leadId) {
+function conv(db, key) {
   ensure(db)
-  if (!db.inbox.conversations[leadId]) {
-    db.inbox.conversations[leadId] = { status: 'open', unreadCount: 0, lastMessageAt: null, assigneeId: null }
+  if (!db.inbox.conversations[key]) {
+    db.inbox.conversations[key] = { status: 'open', unreadCount: 0, lastMessageAt: null, assigneeId: null }
   }
-  return db.inbox.conversations[leadId]
+  return db.inbox.conversations[key]
+}
+
+// Records that `key` (a lead id or contact:<id>) corresponds to a
+// respond.io contact with no matching lead, so the list can render it
+// without a lead lookup.
+export function setContactInfo(db, key, { contactId, fullName, phone, email, respondioStatus, assigneeId } = {}) {
+  const c = conv(db, key)
+  c.contactId = contactId ?? c.contactId ?? null
+  c.contactInfo = { fullName: fullName || 'Unknown contact', phone: phone || '', email: email || '' }
+  // A respond.io-side assignment always wins over whatever's already
+  // stored — it's the source of truth for who actually owns this contact.
+  if (assigneeId) c.assigneeId = assigneeId
+  if (respondioStatus === 'closed' || respondioStatus === 'open') c.status = respondioStatus
+  return c
 }
 
 // Appends a message to the store and updates the conversation's rollup
 // fields. Inbound messages bump unreadCount; outbound ones don't.
-export function recordMessage(db, leadId, { direction, channel, type = 'text', content = '', templateName = '', sentAt } = {}) {
+export function recordMessage(db, key, { direction, channel, type = 'text', content = '', templateName = '', sentAt } = {}) {
   ensure(db)
   const when = sentAt || new Date().toISOString()
-  const message = { id: uid('imsg'), leadId, direction, channel: channel || 'whatsapp', type, content, templateName, sentAt: when }
+  const message = { id: uid('imsg'), key, direction, channel: channel || 'whatsapp', type, content, templateName, sentAt: when }
   db.inbox.messages.push(message)
-  const c = conv(db, leadId)
+  const c = conv(db, key)
   c.lastMessageAt = when
   c.status = 'open'
   if (direction === 'inbound') c.unreadCount = (c.unreadCount || 0) + 1
   return message
 }
 
-export function listMessages(db, leadId) {
+export function listMessages(db, key) {
   ensure(db)
-  return db.inbox.messages.filter(m => m.leadId === leadId).sort((a, b) => String(a.sentAt).localeCompare(String(b.sentAt)))
+  return db.inbox.messages.filter(m => m.key === key).sort((a, b) => String(a.sentAt).localeCompare(String(b.sentAt)))
 }
 
-export function markRead(db, leadId) {
-  const c = conv(db, leadId)
+export function markRead(db, key) {
+  const c = conv(db, key)
   c.unreadCount = 0
   return c
 }
 
-export function setStatus(db, leadId, status) {
+export function setStatus(db, key, status) {
   if (!['open', 'closed'].includes(status)) throw new Error('status must be open or closed')
-  const c = conv(db, leadId)
+  const c = conv(db, key)
   c.status = status
   return c
 }
 
-export function assign(db, leadId, associateId) {
-  const c = conv(db, leadId)
+export function assign(db, key, associateId) {
+  const c = conv(db, key)
   c.assigneeId = associateId || null
   return c
 }
 
-// Builds the inbox list: one row per lead that has at least one message or
-// conversation record, newest activity first, with optional filters.
+// Builds the inbox list: one row per key that has a conversation record,
+// newest activity first, with optional filters. Rows with no matching lead
+// (an unmatched respond.io contact) get a synthetic `lead`-shaped object
+// built from the stored contactInfo, and are flagged `unmatched: true`.
 export function listConversations(db, leads, { studio, associate, channel, status, unreadOnly, q } = {}) {
   ensure(db)
   const leadsById = new Map(leads.map(l => [l.id, l]))
   const rows = Object.entries(db.inbox.conversations)
-    .map(([leadId, c]) => {
-      const lead = leadsById.get(leadId)
-      if (!lead) return null
-      const msgs = db.inbox.messages.filter(m => m.leadId === leadId)
+    .map(([key, c]) => {
+      const lead = leadsById.get(key)
+      const unmatched = !lead
+      if (unmatched && !c.contactInfo) return null
+      const leadLike = lead
+        ? { id: lead.id, fullName: lead.fullName, phone: lead.phone, email: lead.email, locationId: lead.locationId, associateId: lead.associateId }
+        : { id: key, fullName: c.contactInfo.fullName, phone: c.contactInfo.phone, email: c.contactInfo.email, locationId: null, associateId: null }
+      const msgs = db.inbox.messages.filter(m => m.key === key)
       const last = msgs[msgs.length - 1] || null
       return {
-        leadId,
-        lead: { id: lead.id, fullName: lead.fullName, phone: lead.phone, email: lead.email, locationId: lead.locationId, associateId: lead.associateId },
+        leadId: key,
+        unmatched,
+        lead: leadLike,
         status: c.status || 'open',
         unreadCount: c.unreadCount || 0,
-        assigneeId: c.assigneeId || lead.associateId || null,
+        assigneeId: c.assigneeId || lead?.associateId || null,
         lastMessage: last ? { content: last.content, direction: last.direction, channel: last.channel, sentAt: last.sentAt, templateName: last.templateName } : null,
         lastMessageAt: c.lastMessageAt || last?.sentAt || null
       }
@@ -152,6 +185,30 @@ export function matchLeadFromWebhook(db, payload) {
     if (byPhone) return byPhone
   }
   return null
+}
+
+// Pulls display fields off a respond.io contact object for an unmatched row.
+export function contactDisplayInfo(contact) {
+  const name = [contact?.firstName, contact?.lastName].filter(Boolean).join(' ').trim()
+  return {
+    contactId: contact?.id || contact?.contactId || null,
+    fullName: name || contact?.email || contact?.phone || 'Unknown contact',
+    phone: contact?.phone || '',
+    email: contact?.email || '',
+    respondioStatus: contact?.status || null,
+    assigneeEmail: contact?.assignee?.email || null
+  }
+}
+
+// Maps a respond.io contact's assigned agent (by email) to a local
+// associate id, so the inbox row shows the same person who actually owns
+// the conversation on respond.io's side rather than whatever the CRM lead
+// happens to be assigned to.
+export function resolveAssigneeId(associates, assigneeEmail) {
+  if (!assigneeEmail) return null
+  const email = String(assigneeEmail).trim().toLowerCase()
+  const match = (associates || []).find(a => String(a.email || '').trim().toLowerCase() === email)
+  return match?.id || null
 }
 
 // Extracts the message fields we care about from a Respond.io "Message

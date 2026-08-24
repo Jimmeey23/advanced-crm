@@ -169,6 +169,25 @@ export async function listChannels(db) {
   return asList(c)
 }
 
+// List every user (agent) in the workspace (GET /space/user), so a
+// contact's `assignee.id` can be resolved to a real name/email instead of
+// just a numeric id. Paginated via cursorId, same next-URL-following
+// pattern as the other v2 list endpoints.
+export async function listUsers(db) {
+  const out = []
+  let path = '/space/user?limit=100'
+  let guard = 0
+  while (path && guard < 10) {
+    guard++
+    const data = await api(db, path)
+    out.push(...asList(data))
+    const next = data?.pagination?.next || null
+    if (!next) break
+    path = next.replace(BASE, '')
+  }
+  return out
+}
+
 // Respond.io's documented `source` enum (whatsapp, whatsapp_cloud,
 // 360dialog_whatsapp, ...) doesn't cover every value workspaces actually get
 // back — e.g. a Meta-managed WABA channel reports source "whatsapp_business".
@@ -382,8 +401,7 @@ export async function sendTemplateMessage(db, lead, template) {
 // opened. Same cursor-following pattern as listTemplates(). Capped at 40
 // pages (~4000 messages at the API's max page size) as a runaway backstop,
 // not an expected ceiling.
-export async function listContactMessages(db, lead, pageSize = 100) {
-  const identifier = leadIdentifier(db, lead)
+export async function listMessagesByIdentifier(db, identifier, pageSize = 100) {
   if (!identifier) return []
   const out = []
   let path = `/contact/${identifier}/message/list?limit=${pageSize}`
@@ -401,6 +419,33 @@ export async function listContactMessages(db, lead, pageSize = 100) {
     } else {
       path = `/contact/${identifier}/message/list?limit=${pageSize}&cursor=${encodeURIComponent(next)}`
     }
+  }
+  return out
+}
+
+export async function listContactMessages(db, lead, pageSize = 100) {
+  return listMessagesByIdentifier(db, leadIdentifier(db, lead), pageSize)
+}
+
+// Lists every contact in the workspace (POST /contact/list). The endpoint
+// requires `search`/`filter`/`timezone` in the body even for an
+// unfiltered listing — `filter: { $and: [] }` is the documented "match
+// everything" shape. Paginates by following the response's own
+// `pagination.next` URL (which carries respond.io's cursorId), same as the
+// other v2 list endpoints, capped at 50 pages as a runaway backstop.
+export async function listContacts(db, { pageSize = 100 } = {}) {
+  const timezone = db?.settings?.org?.timezone || 'Asia/Kolkata'
+  const out = []
+  let path = `/contact/list?limit=${pageSize}`
+  let guard = 0
+  while (path && guard < 50) {
+    guard++
+    const data = await api(db, path, { method: 'POST', body: { search: '', filter: { $and: [] }, timezone } })
+    const list = asList(data)
+    out.push(...list)
+    const next = data?.pagination?.next || null
+    if (!next) break
+    path = next.replace(BASE, '')
   }
   return out
 }
