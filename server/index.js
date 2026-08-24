@@ -423,9 +423,12 @@ function createLeadFrom(payload) {
     createdAtByImport: payload._imported || false
   }
   if (lead.status === 'won') { lead.convertedAt = lead.convertedAt || new Date().toISOString().slice(0, 10) }
-  if (payload.associateName) {
+  if (!lead.associateId && payload.associateName) {
     const asn = db.associates.find(a => a.name.toLowerCase() === String(payload.associateName).toLowerCase())
     if (asn) { lead.associateId = asn.id; lead.locationId = asn.locationId }
+  } else if (lead.associateId) {
+    const asn = db.associates.find(a => a.id === lead.associateId)
+    if (asn) lead.locationId = asn.locationId
   }
   return lead
 }
@@ -463,7 +466,10 @@ function updateLeadFromPayload(lead, payload) {
   const stage = normalizeStage(payload.stage, db.stages)
   if (stage) set('stage', stage)
   if (payload.stage || payload.status) set('status', normalizeStatus(payload.stage, payload.status))
-  if (payload.associateName) {
+  if (payload.associateId && db.associates.some(a => a.id === payload.associateId) && lead.associateId !== payload.associateId) {
+    const asn = db.associates.find(a => a.id === payload.associateId)
+    lead.associateId = asn.id; lead.locationId = asn.locationId; changed = true
+  } else if (payload.associateName) {
     const asn = db.associates.find(a => a.name.toLowerCase() === String(payload.associateName).toLowerCase())
     if (asn && lead.associateId !== asn.id) { lead.associateId = asn.id; lead.locationId = asn.locationId; changed = true }
   }
