@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import { X, Info, ArrowUpRight, ArrowDownRight } from 'lucide-react'
+import { ChevronRight, Info, ArrowUpRight, ArrowDownRight } from 'lucide-react'
 
 /**
  * Shared flip metric card.
@@ -24,7 +24,6 @@ export default function MetricCard({
     ? trend.reduce((bi, t, i, arr) => (Math.abs(t.value) > Math.abs(arr[bi].value) ? i : bi), 0)
     : -1
   const lastIdx = trend.length - 1
-  const lastUp = lastIdx > 0 && trend[lastIdx].value >= trend[lastIdx - 1].value
   const analysis = buildAnalysis(title, trend, mom, yoy)
 
   const toggle = () => setFlipped(f => !f)
@@ -33,6 +32,7 @@ export default function MetricCard({
     <div
       role="button"
       tabIndex={0}
+      aria-pressed={flipped}
       className="flip-card w-full text-left"
       onClick={toggle}
       onKeyDown={(e) => {
@@ -41,14 +41,13 @@ export default function MetricCard({
           toggle()
         }
       }}
-      title="Click for more analytics"
       style={{ '--metric-accent': color }}
     >
-      <div className={`flip-card-inner card reference-metric-card metric-card-v2 ${flipped ? 'is-flipped' : ''}`}>
+      <div className={`flip-card-inner card metric-card-v2 ${flipped ? 'is-flipped' : ''}`}>
         <div className="flip-face metric-card-front">
           <div className="flex items-center justify-between">
             <span className="metric-card-title">{title}</span>
-            <span className="metric-card-x"><X size={12} /></span>
+            <span className="metric-card-x" aria-hidden="true"><ChevronRight size={15} /></span>
           </div>
           <div className="metric-card-value">{value}</div>
           {hasTrend && (
@@ -77,18 +76,16 @@ export default function MetricCard({
 
         <div className="flip-face flip-face-back metric-card-back">
           <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2 min-w-0">
+            <div className="metric-card-back-headline min-w-0">
               <span className="metric-card-icon" style={{ background: `${color}22`, color }}>
                 {Icon ? <Icon size={14} /> : null}
               </span>
               <span className="metric-card-back-title truncate">{title}</span>
-              <Info size={12} className="text-slate-500 shrink-0" />
+              <Info size={13} className="metric-card-info shrink-0" />
             </div>
             <span className="metric-card-value metric-card-value-sm">{value}</span>
           </div>
-          <div className="metric-card-desc">
-            <strong>Summary:</strong> {description || defaultSummary(title, value)}
-          </div>
+          <div className="metric-card-desc">{description || defaultSummary(title, value)}</div>
           <div className="metric-card-calc">
             <strong>Calculation:</strong> {calculation || defaultCalculation(title)}
           </div>

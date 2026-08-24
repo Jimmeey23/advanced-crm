@@ -104,7 +104,7 @@ export default function Leads({ initialSearch = '' }) {
   const [pinnedCols, setPinnedCols] = useState(() => {
     try {
       const savedCount = Number(localStorage.getItem('p57_leads_pin_count')) || 1
-      return savedCount > 0 ? ['select', 'lead'] : []
+      return savedCount > 0 ? ['select', 'lead', ...(savedCount > 1 ? ['stage'] : [])] : []
     } catch (e) { return ['select', 'lead'] }
   })
   const [headerPinned, setHeaderPinned] = useState(() => localStorage.getItem('p57_leads_header_pinned') !== 'false')

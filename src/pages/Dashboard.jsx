@@ -6,14 +6,14 @@ import {
   Phone, MessageCircle, MessageSquareText, Mail
 } from 'lucide-react'
 import {
-  ResponsiveContainer, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip,
-  PieChart, Pie, Cell
+  ResponsiveContainer, ComposedChart, Bar, Line, Area, XAxis, YAxis, CartesianGrid, Tooltip,
+  PieChart, Pie, Cell, Legend
 } from 'recharts'
 import { useApp } from '../store.jsx'
 import { useFetch } from '../hooks.js'
 import { api } from '../api.js'
-import { money, stageClass, riskClass, fmtDate, timeAgo } from '../lib.js'
-import { Avatar, ScorePill, Empty } from '../ui.jsx'
+import { money, stageClass, riskClass, fmtDate, timeAgo, initials } from '../lib.js'
+import { Avatar, Empty } from '../ui.jsx'
 import AssociateCompareModal from '../components/AssociateCompareModal.jsx'
 import AssociateScorecardModal from '../components/AssociateScorecardModal.jsx'
 import PerformanceModal from '../components/PerformanceModal.jsx'
@@ -35,15 +35,15 @@ function momPct(series) {
   if (series.length < 2) return null
   const prev = series[series.length - 2].value
   const cur = series[series.length - 1].value
-  if (!prev) return null
+  if (!prev) return cur ? 100 : null
   return ((cur - prev) / prev) * 100
 }
 
 function yoyPct(series) {
   if (series.length < 12) return null
-  const prev = series[series.length - 12].value
+  const prev = series[0].value
   const cur = series[series.length - 1].value
-  if (!prev) return null
+  if (!prev) return cur ? 100 : null
   return ((cur - prev) / prev) * 100
 }
 
@@ -55,18 +55,21 @@ const AXIS = { fill: 'var(--axis)', fontSize: 11 }
 
 export default function Dashboard() {
   const { openLead, refreshData, boot, dataVersion } = useApp()
-  const { data: ov, loading: l1, error: e1, reload: r1 } = useFetch(() => api.get('/api/analytics/overview'), [])
-  const { data: tl, loading: l2 } = useFetch(() => api.get('/api/analytics/timeline'), [])
-  const { data: sources, loading: l4 } = useFetch(() => api.get('/api/analytics/sources'), [])
-  const { data: team, loading: l5 } = useFetch(() => api.get('/api/analytics/team'), [])
-  const { data: hotResp } = useFetch(() => api.get('/api/leads?risk=hot&pageSize=50'), [])
+  const { data: ov, loading: l1, error: e1, reload: r1 } = useFetch(() => api.get('/api/analytics/overview'), [dataVersion])
+  const { data: tl, loading: l2 } = useFetch(() => api.get('/api/analytics/timeline'), [dataVersion])
+  const { data: sources, loading: l4 } = useFetch(() => api.get('/api/analytics/sources'), [dataVersion])
+  const { data: team, loading: l5 } = useFetch(() => api.get('/api/analytics/team'), [dataVersion])
+  const { data: hotResp } = useFetch(() => api.get('/api/leads?risk=hot&pageSize=50'), [dataVersion])
   const { alerts } = useApp()
 
   const [perfRange, setPerfRange] = React.useState('month')
   const [compareOpen, setCompareOpen] = React.useState(false)
   const [perfOpen, setPerfOpen] = React.useState(false)
+  const [sourceMetric, setSourceMetric] = React.useState('count')
   const [sourceView, setSourceView] = React.useState('top')
   const [leadChartMode, setLeadChartMode] = React.useState('combined')
+  const [leadChartRange, setLeadChartRange] = React.useState(12)
+  const [leadChartCumulative, setLeadChartCumulative] = React.useState(false)
   const [perfSeries, setPerfSeries] = React.useState({ newLeads: true, won: true, missed: true })
   const [composeLead, setComposeLead] = React.useState(null)
   const [composeChannel, setComposeChannel] = React.useState('whatsapp')
@@ -83,7 +86,11 @@ export default function Dashboard() {
   const { data: perf } = useFetch(() => api.get(`/api/analytics/performance?range=${perfRange}`), [perfRange, dataVersion])
 
   const hot = (hotResp?.items || []).slice().sort((a, b) => b.ai.score - a.ai.score).slice(0, 5)
-  const srcData = (sources || []).slice(0, 7)
+  const srcData = (sources || []).slice(0, 7).map(s => ({
+    ...s,
+    rate: s.count ? Math.round((s.won / s.count) * 100) : 0,
+    chartValue: sourceMetric === 'won' ? s.won : sourceMetric === 'rate' ? (s.count ? Math.round((s.won / s.count) * 100) : 0) : s.count
+  }))
   const perfBuckets = perf?.buckets || []
   const perfTotals = perf?.totals || {}
 
@@ -94,12 +101,33 @@ export default function Dashboard() {
   const conversionTrend = (tl || []).map(m => ({ label: m.month, value: m.newLeads ? Math.round((m.won / m.newLeads) * 100) : 0 }))
   const avgDealTrend = (tl || []).map(m => ({ label: m.month, value: m.won ? m.revenue / m.won : 0 }))
   const openLeadsTrend = (tl || []).map(m => ({ label: m.month, value: m.openLeads }))
+  const leadChartData = React.useMemo(() => {
+    let runningLeads = 0
+    let runningWins = 0
+    return (tl || []).slice(-leadChartRange).map(m => {
+      runningLeads += m.newLeads || 0
+      runningWins += m.won || 0
+      const newLeads = leadChartCumulative ? runningLeads : (m.newLeads || 0)
+      const won = leadChartCumulative ? runningWins : (m.won || 0)
+      return {
+        ...m,
+        newLeads,
+        won,
+        conversion: m.newLeads ? Math.round(((m.won || 0) / m.newLeads) * 100) : 0
+      }
+    })
+  }, [tl, leadChartRange, leadChartCumulative])
 
   const sourceRanked = (sources || []).slice().sort((a, b) => b.count - a.count)
   const topSources = sourceRanked.slice(0, 5)
   const bottomSources = sourceRanked.slice(-5).reverse()
   const shownSources = sourceView === 'top' ? topSources : bottomSources
   const shownMax = Math.max(...shownSources.map(s => s.count), 1)
+  const teamRows = team || []
+  const topAssociates = teamRows.slice(0, 3)
+  const remainingAssociates = teamRows.slice(3)
+  const bestAssociate = teamRows[0]
+  const avgTeamConversion = teamRows.length ? Math.round(teamRows.reduce((sum, row) => sum + (row.conversion || 0), 0) / teamRows.length) : 0
 
   if (l1) return <Loading />
   if (e1 || !ov) {
@@ -114,48 +142,55 @@ export default function Dashboard() {
   }
 
   return (
-    <div className="dashboard-page p-6 space-y-5">
-      <div className="flex items-center justify-between">
-        <div>
-          <p className="text-slate-400 text-[12.5px]">Overview · {(boot?.locations || []).length} studio locations</p>
-        </div>
-        <button className="btn btn-ghost !py-1.5 text-[12px]" onClick={reload}>Refresh</button>
-      </div>
-
+    <div className="dashboard-page p-6 pt-4 space-y-5">
       {/* KPI row */}
       <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-6 gap-3">
         <MetricCard icon={Users} title="Total leads" value={ov.totalLeads} color="var(--accent)"
-          description="All-time leads captured across every source." trend={newLeadsTrend} mom={momPct(newLeadsTrend)} yoy={yoyPct(newLeadsTrend)} />
+          description="All-time leads captured across every source." calculation="Total count of lead records in the CRM, regardless of current pipeline stage."
+          trend={newLeadsTrend} mom={momPct(newLeadsTrend)} yoy={yoyPct(newLeadsTrend)} />
         <MetricCard icon={UserPlus} title="Open leads" value={ov.openLeads} color="var(--dashboard-secondary)"
           description={`${ov.hotLeads} hot right now. Active leads that are not won or lost.`}
-          calculation="Count of leads where status is open."
+          calculation="Count of leads whose status is still open, excluding won and lost records."
           trend={openLeadsTrend} mom={momPct(openLeadsTrend)} yoy={yoyPct(openLeadsTrend)} />
         <MetricCard icon={TrendingUp} title="Conversion" value={`${ov.conversionRate}%`} color="var(--dashboard-secondary)"
-          description={`${ov.won} leads won out of all leads created.`} trend={conversionTrend} mom={momPct(conversionTrend)} yoy={yoyPct(conversionTrend)} />
+          description={`${ov.won} leads won out of all leads created.`} calculation="Closed-won leads divided by total leads, shown as a percentage."
+          trend={conversionTrend} mom={momPct(conversionTrend)} yoy={yoyPct(conversionTrend)} />
         <MetricCard icon={Target} title="New this month" value={ov.newThisMonth} color="var(--accent)"
-          description="New leads created in the current calendar month." trend={newLeadsTrend} mom={ov.newDeltaPct} yoy={yoyPct(newLeadsTrend)} />
+          description="New leads created in the current calendar month." calculation="Lead records with a creation date inside the current calendar month."
+          trend={newLeadsTrend} mom={ov.newDeltaPct} yoy={yoyPct(newLeadsTrend)} />
         <MetricCard icon={IndianRupee} title="Revenue (month)" value={money(ov.revenueThisMonth)} color="var(--dashboard-secondary)"
-          description="Estimated revenue from deals won this month." trend={revenueTrend} mom={ov.revenueDeltaPct} yoy={yoyPct(revenueTrend)} />
+          description="Estimated revenue from deals won this month." calculation="Sum of estimated deal values for leads closed-won during the current month."
+          trend={revenueTrend} mom={ov.revenueDeltaPct} yoy={yoyPct(revenueTrend)} />
         <MetricCard icon={Flame} title="Avg deal value" value={money(ov.avgDealValue)} color="var(--accent)"
-          description="Average estimated value per won lead." trend={avgDealTrend} mom={momPct(avgDealTrend)} yoy={yoyPct(avgDealTrend)} />
+          description="Average estimated value per won lead." calculation="Revenue from won leads divided by the number of won leads."
+          trend={avgDealTrend} mom={momPct(avgDealTrend)} yoy={yoyPct(avgDealTrend)} />
       </div>
 
       {/* row 2: timeline + sources */}
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
         <div className="card p-5 xl:col-span-2 lead-performance-panel">
-          <div className="flex items-center justify-between mb-4">
+          <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
             <div>
               <h3 className="font-display font-semibold text-white text-[15px]">Lead volume & wins</h3>
-              <p className="text-[11.5px] text-slate-500 mt-0.5">Last 12 months</p>
+              <p className="text-[11.5px] text-slate-500 mt-0.5">{leadChartCumulative ? 'Cumulative pipeline movement' : `Last ${leadChartRange} months`}</p>
             </div>
-            <div className="lead-chart-controls">
-              {[
-                { id: 'combined', label: 'Combined' },
-                { id: 'leads', label: 'Leads' },
-                { id: 'wins', label: 'Wins' }
-              ].map(btn => (
-                <button key={btn.id} className={leadChartMode === btn.id ? 'is-active' : ''} onClick={() => setLeadChartMode(btn.id)}>{btn.label}</button>
-              ))}
+            <div className="lead-control-stack">
+              <div className="lead-chart-controls">
+                {[
+                  { id: 'combined', label: 'Combined' },
+                  { id: 'leads', label: 'Leads' },
+                  { id: 'wins', label: 'Wins' },
+                  { id: 'conversion', label: 'Rate' }
+                ].map(btn => (
+                  <button key={btn.id} className={leadChartMode === btn.id ? 'is-active' : ''} onClick={() => setLeadChartMode(btn.id)}>{btn.label}</button>
+                ))}
+              </div>
+              <div className="lead-chart-controls is-compact">
+                {[6, 12].map(range => (
+                  <button key={range} className={leadChartRange === range ? 'is-active' : ''} onClick={() => setLeadChartRange(range)}>{range}M</button>
+                ))}
+                <button className={leadChartCumulative ? 'is-active' : ''} onClick={() => setLeadChartCumulative(v => !v)}>Cum.</button>
+              </div>
             </div>
           </div>
           <div className="lead-chart-stats">
@@ -165,7 +200,7 @@ export default function Dashboard() {
           </div>
           <div className="lead-chart-3d h-[250px]">
             <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={tl || []} margin={{ top: 8, right: 8, left: -18, bottom: 0 }}>
+              <ComposedChart data={leadChartData} margin={{ top: 8, right: 12, left: -18, bottom: 0 }}>
                 <defs>
                   <linearGradient id="gNew" x1="0" y1="0" x2="0" y2="1">
                     <stop offset="0%" stopColor="var(--accent)" stopOpacity={0.58} />
@@ -180,27 +215,49 @@ export default function Dashboard() {
                 </defs>
                 <CartesianGrid stroke="rgba(148,163,184,0.12)" vertical={false} strokeDasharray="4 6" />
                 <XAxis dataKey="month" tick={AXIS} axisLine={false} tickLine={false} />
-                <YAxis tick={AXIS} axisLine={false} tickLine={false} />
+                <YAxis yAxisId="left" tick={AXIS} axisLine={false} tickLine={false} />
+                <YAxis yAxisId="right" orientation="right" tick={AXIS} axisLine={false} tickLine={false} tickFormatter={v => `${v}%`} hide={leadChartMode !== 'conversion'} />
                 <Tooltip contentStyle={tooltipStyle()} cursor={{ stroke: 'var(--accent)', strokeOpacity: 0.35, strokeWidth: 1 }} />
-                {leadChartMode !== 'wins' && <Area type="monotone" dataKey="newLeads" name="New leads" stroke="var(--accent)" fill="url(#gNew)" strokeWidth={2.6} activeDot={{ r: 5, strokeWidth: 2, stroke: 'var(--surface)' }} />}
-                {leadChartMode !== 'leads' && <Area type="monotone" dataKey="won" name="Won" stroke="var(--dashboard-secondary)" fill="url(#gWon)" strokeWidth={2.6} activeDot={{ r: 5, strokeWidth: 2, stroke: 'var(--surface)' }} />}
-              </AreaChart>
+                <Legend verticalAlign="top" height={24} iconType="circle" wrapperStyle={{ fontSize: 11, color: 'var(--axis)' }} />
+                {(leadChartMode === 'combined' || leadChartMode === 'leads') && <Bar yAxisId="left" dataKey="newLeads" name={leadChartCumulative ? 'Cumulative leads' : 'New leads'} fill="var(--accent)" radius={[7, 7, 2, 2]} barSize={20} />}
+                {(leadChartMode === 'combined' || leadChartMode === 'wins') && <Line yAxisId="left" type="monotone" dataKey="won" name={leadChartCumulative ? 'Cumulative wins' : 'Won'} stroke="var(--dashboard-secondary)" strokeWidth={3} dot={{ r: 3, strokeWidth: 2, fill: 'var(--surface)' }} activeDot={{ r: 5, strokeWidth: 2, stroke: 'var(--surface)' }} />}
+                {(leadChartMode === 'conversion') && <Area yAxisId="right" type="monotone" dataKey="conversion" name="Conversion rate" stroke="var(--dashboard-warning)" fill="url(#gWon)" strokeWidth={2.8} activeDot={{ r: 5, strokeWidth: 2, stroke: 'var(--surface)' }} />}
+              </ComposedChart>
             </ResponsiveContainer>
           </div>
         </div>
 
-        <div className="card p-5">
-          <h3 className="font-display font-semibold text-white text-[15px] mb-1">Leads by source</h3>
-          <p className="text-[11.5px] text-slate-500 mb-3">Where leads are coming from</p>
-          <div className="chart-3d h-[190px]">
+        <div className="card p-5 dashboard-chart-card">
+          <div className="flex items-start justify-between gap-3 mb-3">
+            <div>
+              <h3 className="font-display font-semibold text-white text-[15px] mb-1">Leads by source</h3>
+              <p className="text-[11.5px] text-slate-500">Where leads are coming from</p>
+            </div>
+            <div className="chart-mini-controls">
+              {[
+                { id: 'count', label: 'Volume' },
+                { id: 'won', label: 'Won' },
+                { id: 'rate', label: 'Rate' }
+              ].map(btn => (
+                <button key={btn.id} className={sourceMetric === btn.id ? 'is-active' : ''} onClick={() => setSourceMetric(btn.id)}>{btn.label}</button>
+              ))}
+            </div>
+          </div>
+          <div className="chart-3d source-donut h-[190px]">
             <ResponsiveContainer width="100%" height="100%">
               <PieChart>
-                <Pie data={srcData} dataKey="count" nameKey="source" innerRadius={52} outerRadius={78} paddingAngle={2} strokeWidth={0}>
+                <Pie data={srcData} dataKey="chartValue" nameKey="source" innerRadius={52} outerRadius={78} paddingAngle={2} strokeWidth={0}>
                   {srcData.map((_, i) => <Cell key={i} fill={DONUT_COLORS[i % DONUT_COLORS.length]} />)}
                 </Pie>
                 <Tooltip contentStyle={tooltipStyle()} />
               </PieChart>
             </ResponsiveContainer>
+            <div className="source-donut-center">
+              <span>{sourceMetric === 'rate' ? 'Avg rate' : sourceMetric === 'won' ? 'Won' : 'Leads'}</span>
+              <strong>{sourceMetric === 'rate'
+                ? `${Math.round(srcData.reduce((sum, s) => sum + s.rate, 0) / Math.max(srcData.length, 1))}%`
+                : srcData.reduce((sum, s) => sum + (sourceMetric === 'won' ? s.won : s.count), 0)}</strong>
+            </div>
           </div>
           <div className="space-y-1.5 mt-1">
             {srcData.slice(0, 5).map((s, i) => (
@@ -209,6 +266,7 @@ export default function Dashboard() {
                 <span className="text-slate-300 flex-1 truncate">{s.source}</span>
                 <span className="mono text-slate-400">{s.count}</span>
                 <span className="text-emerald-400 text-[10.5px] mono">{s.won} won</span>
+                <span className="source-rate-badge">{s.rate}%</span>
               </div>
             ))}
           </div>
@@ -217,30 +275,35 @@ export default function Dashboard() {
 
       {/* row 3: AI + source ranking + alerts */}
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
-        <div className="card p-5">
-          <div className="flex items-center gap-2 mb-1">
-            <Sparkles size={15} style={{ color: 'var(--accent)' }} />
-            <h3 className="font-display font-semibold text-white text-[15px]">AI recommended actions</h3>
+        <div className="card p-5 ai-actions-card">
+          <div className="ai-actions-heading">
+            <div>
+              <div className="flex items-center gap-2 mb-1">
+                <Sparkles size={15} style={{ color: 'var(--accent)' }} />
+                <h3 className="font-display font-semibold text-white text-[15px]">AI recommended actions</h3>
+              </div>
+              <p className="text-[11.5px] text-slate-500">Highest-intent leads that need attention</p>
+            </div>
+            <span className="ai-actions-count">{hot.length}</span>
           </div>
-          <p className="text-[11.5px] text-slate-500 mb-3">Highest-intent leads that need attention</p>
-          <div className="space-y-2">
+          <div className="ai-actions-list">
             {hot.map(l => (
-              <div key={l.id} className="group card card-hover !rounded-xl p-3 space-y-2">
+              <div key={l.id} className="group ai-action-row">
                 <button className="w-full text-left flex items-center gap-3" onClick={() => openLead(l.id)}>
-                  <Avatar name={l.fullName} color={l.associateColor} size={34} />
+                  <span className="ai-action-mark">{initials(l.fullName)}</span>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
                       <span className="text-[13px] font-semibold text-white truncate">{l.fullName}</span>
-                      <span className={`chip !px-1.5 !py-0.5 text-[9.5px] uppercase ${riskClass(l.ai.risk)}`}>{l.ai.risk}</span>
+                      <span className={`ai-risk-chip ${riskClass(l.ai.risk)}`}>{l.ai.risk}</span>
                     </div>
                     <div className="text-[11.5px] text-slate-400 truncate mt-0.5">{l.ai.nextAction?.text}</div>
                   </div>
-                  <ScorePill score={l.ai.score} />
+                  <span className="ai-action-score"><strong>{l.ai.score}</strong><small>score</small></span>
                 </button>
-                <div className="hidden group-hover:flex items-center gap-1.5 pt-2 border-t border-white/8">
+                <div className="ai-action-tools">
                   {QUICK_ACTIONS.map(qa => (
                     <button key={qa.channel} title={qa.label}
-                      className="flex-1 h-7 rounded-lg flex items-center justify-center gap-1.5 border border-white/10 bg-white/5 hover:bg-white/10 transition-colors text-[10.5px] text-slate-300"
+                      className="ai-action-tool"
                       onClick={(e) => quickContact(e, l, qa.channel)}>
                       <qa.icon size={13} style={{ color: qa.color }} /> {qa.label}
                     </button>
@@ -269,7 +332,7 @@ export default function Dashboard() {
             {shownSources.map((s, i) => {
               const rate = s.count ? Math.round((s.won / s.count) * 100) : 0
               return (
-                <div key={s.source} className="rounded-xl bg-white/[0.03] border border-white/[0.05] p-2.5">
+                <div key={s.source} className="source-rank-row">
                   <div className="flex items-center gap-2.5">
                     <span className="dashboard-rank w-5 h-5 rounded-md flex items-center justify-center text-[10px] font-bold shrink-0">{i + 1}</span>
                     <span className="text-[12.5px] font-medium text-white flex-1 truncate">{s.source}</span>
@@ -344,24 +407,66 @@ export default function Dashboard() {
       </div>
 
       {/* row 4: team leaderboard */}
-      <div className="card p-5">
-        <h3 className="font-display font-semibold text-white text-[15px] mb-4">Associate leaderboard</h3>
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
-          {(team || []).map((t, i) => (
-            <button key={t.associateId} className="card card-hover !rounded-xl p-3.5 flex items-center gap-3 text-left" onClick={() => setScorecardId(t.associateId)}>
-              <span className="font-display text-[13px] font-bold text-slate-600 w-5">{i + 1}</span>
-              <Avatar name={t.name} color={t.color} photoUrl={t.photoUrl} size={34} />
-              <div className="flex-1 min-w-0">
-                <div className="text-[12.5px] font-semibold text-white truncate">{t.name}</div>
-                <div className="text-[11px] text-slate-500 truncate">{boot?.locations.find(l => l.id === t.locationId)?.name?.split(',')[0] || ''}</div>
-              </div>
-              <div className="text-right">
-                <div className="text-[12.5px] font-semibold text-emerald-400 mono">{money(t.revenue)}</div>
-                <div className="text-[10.5px] text-slate-500">{t.won} won · {t.conversion}%</div>
-              </div>
-            </button>
-          ))}
+      <div className="card p-5 associate-leaderboard-panel">
+        <div className="associate-leaderboard-head">
+          <div>
+            <h3 className="font-display font-semibold text-white text-[15px]">Associate leaderboard</h3>
+            <p>{bestAssociate ? `${bestAssociate.name} leads by revenue · ${avgTeamConversion}% avg conversion` : 'No associate performance yet'}</p>
+          </div>
+          <div className="associate-leaderboard-summary">
+            <span><strong>{teamRows.length}</strong><small>active</small></span>
+            <span><strong>{teamRows.reduce((sum, row) => sum + (row.won || 0), 0)}</strong><small>won</small></span>
+            <span><strong>{avgTeamConversion}%</strong><small>avg conv.</small></span>
+          </div>
         </div>
+        <div className="associate-leaderboard-layout">
+          <div className="associate-podium">
+            {topAssociates.map((t, i) => (
+              <button key={t.associateId} className={`leaderboard-card text-left is-top rank-${i + 1}`} onClick={() => setScorecardId(t.associateId)}>
+                <div className="leaderboard-main">
+                  <span className={`leaderboard-rank ${i === 0 ? 'is-first' : i === 1 ? 'is-second' : 'is-third'}`}>{i + 1}</span>
+                  <Avatar name={t.name} color={t.color} photoUrl={t.photoUrl} size={38} />
+                  <div className="flex-1 min-w-0">
+                    <div className="text-[12.5px] font-semibold text-white truncate">{t.name}</div>
+                    <div className="text-[11px] text-slate-500 truncate">{boot?.locations.find(l => l.id === t.locationId)?.name?.split(',')[0] || ''}</div>
+                  </div>
+                  <div className="leaderboard-money">
+                    <div>{money(t.revenue)}</div>
+                    <span>{t.won} won</span>
+                  </div>
+                </div>
+                <div className="leaderboard-progress" style={{ '--progress': `${Math.min(100, t.conversion || 0)}%` }} />
+                <div className="leaderboard-stats">
+                  <span><strong>{t.conversion}%</strong><small>conversion</small></span>
+                  <span><strong>{t.open || 0}</strong><small>open</small></span>
+                  <span><strong>{t.total || 0}</strong><small>total</small></span>
+                  <span><strong>{t.target || 0}</strong><small>target</small></span>
+                </div>
+              </button>
+            ))}
+          </div>
+          <div className="associate-rank-list">
+            {remainingAssociates.map((t, i) => (
+              <button key={t.associateId} className="associate-rank-row" onClick={() => setScorecardId(t.associateId)}>
+                <span className="associate-rank-number">{i + 4}</span>
+                <Avatar name={t.name} color={t.color} photoUrl={t.photoUrl} size={30} />
+                <div className="min-w-0 flex-1">
+                  <div className="associate-rank-name">{t.name}</div>
+                  <div className="associate-rank-sub">{boot?.locations.find(l => l.id === t.locationId)?.name?.split(',')[0] || ''}</div>
+                </div>
+                <div className="associate-rank-metrics">
+                  <span>{t.conversion}%</span>
+                  <span>{t.open || 0} open</span>
+                  <strong>{t.won} won</strong>
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <div className="dashboard-footer-note">
+        <span>Overview · {(boot?.locations || []).length} studio locations</span>
       </div>
 
       <AssociateCompareModal open={compareOpen} onClose={() => setCompareOpen(false)} />
@@ -375,7 +480,7 @@ export default function Dashboard() {
 
 function PerfStat({ label, value, color, sub }) {
   return (
-    <div className="card !rounded-xl px-3.5 py-3 flex items-center justify-between">
+    <div className="perf-stat-card px-3.5 py-3 flex items-center justify-between">
       <div>
         <div className="text-[11px] text-slate-400">{label}</div>
         {sub && <div className="text-[10.5px] text-slate-600 mt-0.5">{sub}</div>}
@@ -387,30 +492,21 @@ function PerfStat({ label, value, color, sub }) {
 
 function LeadPerformanceDeck({ data, visible }) {
   const rows = (data || []).slice(-12)
-  const max = Math.max(1, ...rows.map(r => Math.max(r.newLeads || 0, r.won || 0, r.missed || 0)))
   const latest = rows.at(-1) || {}
   return (
     <div className="lead-performance-deck">
-      <div className="lead-deck-orbit" />
-      <div className="lead-deck-stage">
-        {rows.map((r, i) => {
-          const leadH = Math.max(10, Math.round(((r.newLeads || 0) / max) * 100))
-          const wonH = Math.max(8, Math.round(((r.won || 0) / max) * 100))
-          const missedH = Math.max(6, Math.round(((r.missed || 0) / max) * 100))
-          const active = i === rows.length - 1
-          const label = r.label || r.month
-          return (
-            <div key={`${label}-${i}`} className={`lead-deck-column ${active ? 'is-current' : ''}`} title={`${label}: ${r.newLeads || 0} new, ${r.won || 0} won, ${r.missed || 0} missed follow-ups`}>
-              <div className="lead-deck-bars">
-                {visible?.newLeads !== false && <span className="lead-deck-bar lead-deck-bar-new" style={{ height: `${leadH}%` }} />}
-                {visible?.won !== false && <span className="lead-deck-bar lead-deck-bar-won" style={{ height: `${wonH}%` }} />}
-                {visible?.missed !== false && <span className="lead-deck-bar lead-deck-bar-missed" style={{ height: `${missedH}%` }} />}
-              </div>
-              <span className="lead-deck-label">{label}</span>
-            </div>
-          )
-        })}
-      </div>
+      <ResponsiveContainer width="100%" height="100%">
+        <ComposedChart data={rows} margin={{ top: 24, right: 18, left: -18, bottom: 6 }}>
+          <CartesianGrid stroke="rgba(148,163,184,.14)" vertical={false} strokeDasharray="4 7" />
+          <XAxis dataKey="label" tick={AXIS} axisLine={false} tickLine={false} interval={0} />
+          <YAxis tick={AXIS} axisLine={false} tickLine={false} />
+          <Tooltip contentStyle={tooltipStyle()} cursor={{ fill: 'rgba(148,163,184,.08)' }} />
+          <Legend verticalAlign="top" height={22} iconType="circle" wrapperStyle={{ fontSize: 11, color: 'var(--axis)' }} />
+          {visible?.newLeads !== false && <Bar dataKey="newLeads" name="New leads" fill="var(--accent)" radius={[7, 7, 2, 2]} barSize={18} />}
+          {visible?.won !== false && <Line type="monotone" dataKey="won" name="Won deals" stroke="var(--dashboard-secondary)" strokeWidth={3} dot={{ r: 3, fill: '#fff', strokeWidth: 2 }} activeDot={{ r: 5 }} />}
+          {visible?.missed !== false && <Bar dataKey="missed" name="Missed FU" fill="var(--dashboard-warning)" radius={[6, 6, 2, 2]} barSize={10} />}
+        </ComposedChart>
+      </ResponsiveContainer>
       <div className="lead-deck-insight">
         <span>{latest.label || latest.month || 'Current'}</span>
         <strong>{latest.newLeads || 0} new · {latest.won || 0} won · {latest.missed || 0} missed</strong>

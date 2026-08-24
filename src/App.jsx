@@ -1,7 +1,7 @@
 import React, { useState } from 'react'
 import {
   LayoutDashboard, KanbanSquare, Users, UploadCloud, Settings, Search,
-  Bell, Plus, Zap, Link2, ShieldCheck, Sun, Moon, BarChart3, ChevronsLeft, ChevronsRight,
+  Plus, Zap, Link2, ShieldCheck, Sun, Moon, BarChart3, ChevronsLeft, ChevronsRight,
   CalendarDays, CalendarRange, Activity
 } from 'lucide-react'
 import { AppProvider, Toasts, useApp } from './store.jsx'
@@ -113,10 +113,9 @@ function Sidebar() {
 }
 
 function Topbar({ onAdd }) {
-  const { view, navigate, alerts, boot, theme, setTheme } = useApp()
+  const { view, navigate, alerts, boot, theme, setTheme, refreshData } = useApp()
   const [query, setQuery] = useState('')
   const title = NAV.find(n => n.id === view)?.title || 'Executive Overview'
-  const todayCount = alerts.filter(a => a.level === 'high').length
 
   return (
     <header className="relative z-30 h-[74px] shrink-0 flex items-center gap-4 px-6 border-b border-white/6 bg-[#080a12]/70 backdrop-blur-xl">
@@ -142,6 +141,14 @@ function Topbar({ onAdd }) {
           }}
         />
       </div>
+
+      <button
+        className="btn btn-ghost !h-9 !py-0 !px-3 text-[12px]"
+        onClick={refreshData}
+        title="Refresh workspace data"
+      >
+        Refresh
+      </button>
 
       <button
         className="w-9 h-9 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center text-slate-300 hover:text-white hover:bg-white/10 transition-colors"
