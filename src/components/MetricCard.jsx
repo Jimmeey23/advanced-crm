@@ -1,39 +1,50 @@
-import React, { useState } from 'react'
-import { ChevronRight, Info, ArrowUpRight, ArrowDownRight } from 'lucide-react'
+import React from 'react'
+import { Info, X, ArrowUpRight, ArrowDownRight } from 'lucide-react'
+// NOTE: this app toggles theme via [data-theme] attribute, not Tailwind's `dark:` variant,
+// so custom classes (mcard-*) are used here with matching rules in index.css for both themes.
 
-/**
- * Shared flip metric card.
- * Front: title, big value, 12-point trend bars.
- * Back: icon + title, value, description, MoM/YoY pills.
- */
 export default function MetricCard({
   icon: Icon,
   color = '#64748b',
   title,
   value,
   description,
-  calculation,
   trend = [],
   mom,
   yoy,
 }) {
-  const [flipped, setFlipped] = useState(false)
+  const [flipped, setFlipped] = React.useState(false)
+
+  React.useEffect(() => {
+    if (!flipped) return
+    const handleFlip = (e) => {
+      if (e.detail !== title) setFlipped(false)
+    }
+    window.addEventListener('metric-flip', handleFlip)
+    return () => window.removeEventListener('metric-flip', handleFlip)
+  }, [flipped, title])
+
+  const toggle = (e) => {
+    e?.preventDefault()
+    e?.stopPropagation()
+    const next = !flipped
+    setFlipped(next)
+    if (next) window.dispatchEvent(new CustomEvent('metric-flip', { detail: title }))
+  }
+
   const hasTrend = trend.length > 0
   const max = Math.max(1, ...trend.map(t => Math.abs(t.value) || 0))
   const maxIdx = hasTrend
     ? trend.reduce((bi, t, i, arr) => (Math.abs(t.value) > Math.abs(arr[bi].value) ? i : bi), 0)
     : -1
   const lastIdx = trend.length - 1
-  const analysis = buildAnalysis(title, trend, mom, yoy)
-
-  const toggle = () => setFlipped(f => !f)
 
   return (
     <div
       role="button"
       tabIndex={0}
       aria-pressed={flipped}
-      className="flip-card w-full text-left"
+      className={`flip-card w-full h-full text-left group flex flex-col ${flipped ? 'z-20 relative' : ''}`}
       onClick={toggle}
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') {
@@ -43,29 +54,100 @@ export default function MetricCard({
       }}
       style={{ '--metric-accent': color }}
     >
-      <div className={`flip-card-inner card metric-card-v2 ${flipped ? 'is-flipped' : ''}`}>
-        <div className="flip-face metric-card-front">
-          <div className="flex items-center justify-between">
-            <span className="metric-card-title">{title}</span>
-            <span className="metric-card-x" aria-hidden="true"><ChevronRight size={15} /></span>
+      <div className={`flip-card-inner flex-1 w-full !h-[154px] !min-h-[154px] ${flipped ? 'is-flipped' : ''} transition-transform duration-500`} style={{ transitionTimingFunction: 'initial' }}>
+
+        {/* --- FRONT SIDE --- */}
+        <div
+          className="flip-face card mcard-front !absolute inset-0 flex flex-col justify-start items-start cursor-pointer transition-all duration-300 hover:-translate-y-0.5"
+          style={{ animation: 'none', WebkitTransform: 'translateZ(1px)', WebkitBackfaceVisibility: 'hidden' }}
+        >
+          {/* decorative floating glow blobs, clipped to the card's rounded corners */}
+          <div className="mcard-glow-layer">
+            <span className="mcard-glow mcard-glow-a" style={{ background: color }} />
+            <span className="mcard-glow mcard-glow-b" style={{ background: color }} />
           </div>
-          <div className="metric-card-value">{value}</div>
+
+          {/* Top Row: icon + label, with divider below, info tooltip at the right */}
+          <div className="mcard-head flex items-center justify-between w-full mb-3 pb-2.5">
+            <div className="flex items-center gap-2 min-w-0">
+              <span className="mcard-icon flex items-center justify-center w-[24px] h-[24px] rounded-full shrink-0" style={{ background: color }}>
+                {Icon ? <Icon size={12} strokeWidth={2.5} color="#ffffff" /> : null}
+              </span>
+              <span className="mcard-title font-bold text-[12.5px] tracking-tight truncate">{title}</span>
+            </div>
+            <InfoTip text={description || defaultSummary(title, value)} />
+          </div>
+
+          {/* Value row: sits on its own line below the label */}
+          <div className="relative z-10 w-full mb-3">
+            <div className="mcard-value leading-none tracking-tight" style={{ fontVariantNumeric: 'tabular-nums' }}>
+              {value}
+            </div>
+          </div>
+
+          {/* Bottom Row: MOM and YOY */}
+          <div className="mt-auto relative z-10 flex w-full gap-2.5">
+             <TrendBox label="MOM" pct={mom} />
+             <TrendBox label="YOY" pct={yoy} />
+          </div>
+        </div>
+
+        {/* --- BACK SIDE --- */}
+        <div
+          className="flip-face card mcard-back !absolute inset-0 flip-face-back flex flex-col cursor-pointer"
+          style={{ animation: 'none', WebkitTransform: 'rotateY(180deg) translateZ(1px)', WebkitBackfaceVisibility: 'hidden' }}
+        >
+          <div className="mcard-glow-layer">
+            <span className="mcard-glow mcard-glow-a" style={{ background: color }} />
+          </div>
+
+          <div className="relative z-10 flex justify-between items-start mb-2.5 shrink-0">
+            <div className="flex items-center gap-1.5 min-w-0">
+              <span className="mcard-back-title text-[11.5px] font-bold uppercase tracking-widest truncate">{title}</span>
+            </div>
+            <button className="mcard-x w-[22px] h-[22px] shrink-0 flex items-center justify-center rounded-full transition-colors">
+              <X size={13} strokeWidth={2.5} />
+            </button>
+          </div>
+
+          <div className="mcard-desc relative z-10 text-[11px] font-medium mb-2.5 line-clamp-2 shrink-0 leading-relaxed">
+            {description || defaultSummary(title, value)}
+          </div>
+
           {hasTrend && (
-            <div className="metric-card-trend">
-              <div className="metric-card-trend-label">12-month trend</div>
-              <div className="metric-card-bars">
+            <div className="mcard-chart-wrap relative z-10 flex-1 flex flex-col justify-end min-h-0 pt-2">
+              <div className="h-[36px] flex items-end gap-[3px] shrink-0">
                 {trend.map((t, i) => {
-                  const h = Math.max(6, Math.round((Math.abs(t.value) / max) * 100))
+                  const h = Math.max(12, Math.round((Math.abs(t.value) / max) * 100))
                   const isLast = i === lastIdx
-                  const isMax = i === maxIdx && !isLast
-                  const barColor = isLast || isMax ? 'var(--metric-accent)' : undefined
+                  const isMax = i === maxIdx
+                  const [m, y] = splitLabel(t.label)
+                  const edge = i === 0 ? 'left' : i === lastIdx ? 'right' : 'center'
+
                   return (
-                    <div key={i} className="metric-card-bar-col">
+                    <div key={i} className="flex-1 h-full flex flex-col items-center justify-end relative group/bar cursor-crosshair">
                       <div
-                        className="metric-card-bar"
-                        style={{ height: `${h}%`, background: barColor }}
+                        className={`mcard-bar w-[80%] max-w-[12px] rounded-t-sm transition-opacity duration-200 hover:opacity-100 ${isLast ? 'mcard-bar-active' : isMax ? 'mcard-bar-peak' : ''}`}
+                        style={{ height: `${h}%`, ...(isLast ? { background: color } : {}) }}
                       />
-                      <span className="metric-card-bar-label">{t.label}</span>
+                      <div className="mcard-bar-label mt-1 text-center font-bold" style={{ fontSize: '7.5px', lineHeight: '8px', letterSpacing: '-0.02em', WebkitTransform: 'scale(0.9)', transformOrigin: 'center' }}>
+                        <div>{m}</div>
+                        <div>{y}</div>
+                      </div>
+
+                      {/* Tooltip: rendered above the bar so it never gets clipped by the card edge */}
+                      <div
+                        className={`mcard-tooltip2 bottom-[calc(100%+9px)] group-hover/bar:opacity-100 group-hover/bar:translate-y-0 group-hover/bar:scale-100 whitespace-nowrap ${
+                          edge === 'left' ? 'left-0' : edge === 'right' ? 'right-0' : 'left-1/2 -translate-x-1/2'
+                        }`}
+                      >
+                        <span className="font-semibold opacity-70 mr-1.5">{t.label}</span>
+                        <span className="font-extrabold">{t.value}</span>
+                        <div
+                          className={`mcard-tooltip2-arrow ${edge === 'left' ? 'left-3' : edge === 'right' ? 'right-3' : 'left-1/2 -translate-x-1/2'}`}
+                          style={{ bottom: '-4px', transform: `rotate(45deg) ${edge === 'center' ? 'translateX(-50%)' : ''}` }}
+                        />
+                      </div>
                     </div>
                   )
                 })}
@@ -73,92 +155,51 @@ export default function MetricCard({
             </div>
           )}
         </div>
-
-        <div className="flip-face flip-face-back metric-card-back">
-          <div className="flex items-center justify-between">
-            <div className="metric-card-back-headline min-w-0">
-              <span className="metric-card-icon" style={{ background: `${color}22`, color }}>
-                {Icon ? <Icon size={14} /> : null}
-              </span>
-              <span className="metric-card-back-title truncate">{title}</span>
-              <Info size={13} className="metric-card-info shrink-0" />
-            </div>
-            <span className="metric-card-value metric-card-value-sm">{value}</span>
-          </div>
-          <div className="metric-card-desc">{description || defaultSummary(title, value)}</div>
-          <div className="metric-card-calc">
-            <strong>Calculation:</strong> {calculation || defaultCalculation(title)}
-          </div>
-          {analysis && <div className="metric-card-analysis">{analysis}</div>}
-          <div className="metric-card-pills">
-            <TrendPill label="MoM" pct={mom} />
-            <TrendPill label="YoY" pct={yoy} />
-          </div>
-        </div>
       </div>
     </div>
   )
 }
 
-function defaultSummary(title, value) {
-  return `${title || 'This metric'} is currently ${value ?? '—'} for the selected scope and period.`
+function InfoTip({ text }) {
+  return (
+    <span className="mcard-info-wrap relative inline-flex items-center shrink-0 group/info">
+      <Info size={12} className="mcard-info opacity-60 transition-colors" />
+      <span className="mcard-tooltip2 mcard-info-tip top-[calc(100%+8px)] right-0 group-hover/info:opacity-100 group-hover/info:translate-y-0 group-hover/info:scale-100 normal-case font-medium">
+        {text}
+        <span className="mcard-tooltip2-arrow" style={{ top: '-4px', right: '8px', transform: 'rotate(45deg)' }} />
+      </span>
+    </span>
+  )
 }
 
-function defaultCalculation(title) {
-  const name = (title || '').toLowerCase()
-  if (name.includes('open lead')) return 'Count of leads where status is open, excluding won and lost records.'
-  if (name.includes('new lead')) return 'Count of leads created during the selected reporting period.'
-  if (name.includes('trial')) return 'Count of leads in trial-booked or trial-completed stages during the selected period.'
-  if (name.includes('won')) return 'Count of closed-won leads using their conversion date when available.'
-  if (name.includes('revenue')) return 'Sum of value estimates for closed-won leads in the selected period.'
-  if (name.includes('follow')) return 'Completed follow-ups divided by total scheduled/logged follow-ups.'
-  if (name.includes('response')) return 'Average elapsed time between logged member touchpoints.'
-  if (name.includes('overdue')) return 'Count of follow-ups with due dates before today and not marked done.'
-  return 'Computed from the filtered lead, associate, studio, and follow-up records in this view.'
-}
-
-function buildAnalysis(title, trend, mom, yoy) {
-  const name = (title || 'This metric').toLowerCase()
-  const parts = []
-
-  if (trend.length >= 2) {
-    const best = trend.reduce((b, t) => (t.value > b.value ? t : b), trend[0])
-    const worst = trend.reduce((w, t) => (t.value < w.value ? t : w), trend[0])
-    const dir = mom > 0 ? 'trending up' : mom < 0 ? 'trending down' : 'holding steady'
-    parts.push(`${cap(name)} is ${dir} month over month.`)
-    if (best.value !== worst.value) {
-      parts.push(`Peaked in ${best.label}, lowest in ${worst.label}.`)
-    }
-  } else if (mom !== undefined && mom !== null && !Number.isNaN(mom)) {
-    parts.push(`${cap(name)} moved ${mom >= 0 ? 'up' : 'down'} ${Math.abs(mom).toFixed(1)}% vs. the prior period.`)
-  }
-
-  if (yoy !== undefined && yoy !== null && !Number.isNaN(yoy)) {
-    parts.push(`${yoy >= 0 ? 'Up' : 'Down'} ${Math.abs(yoy).toFixed(1)}% compared to the same period last year.`)
-  }
-
-  return parts.join(' ')
-}
-
-function cap(s) { return s.charAt(0).toUpperCase() + s.slice(1) }
-
-function TrendPill({ label, pct }) {
+function TrendBox({ label, pct }) {
   if (pct === undefined || pct === null || Number.isNaN(pct)) {
     return (
-      <div className="metric-card-pill">
-        <div className="metric-card-pill-label">{label}</div>
-        <div className="metric-card-pill-value text-slate-500">—</div>
+      <div className="mcard-trendbox flex-1 flex flex-col rounded-[10px] py-1.5 px-2.5 items-center justify-center">
+        <div className="mcard-trendbox-label text-[9.5px] font-bold uppercase tracking-widest">{label}</div>
+        <div className="mcard-trendbox-empty text-[13px] font-extrabold mt-[1px]">—</div>
       </div>
     )
   }
   const up = pct >= 0
+  const rounded = Math.round(Math.abs(pct))
   return (
-    <div className="metric-card-pill">
-      <div className="metric-card-pill-label">{label}</div>
-      <div className={`metric-card-pill-value ${up ? 'text-emerald-400' : 'text-rose-400'}`}>
-        {up ? <ArrowUpRight size={11} /> : <ArrowDownRight size={11} />}
-        {Math.abs(pct).toFixed(1)}%
+    <div className="mcard-trendbox flex-1 flex flex-col rounded-[10px] py-1.5 px-2.5 items-center justify-center transition-colors">
+      <div className="mcard-trendbox-label text-[9.5px] font-bold uppercase tracking-widest">{label}</div>
+      <div className={`mt-[1px] text-[13px] font-extrabold flex items-center justify-center gap-[1px] ${up ? 'mcard-trendbox-up' : 'mcard-trendbox-down'}`}>
+        {up ? <ArrowUpRight size={14} strokeWidth={2.5} /> : <ArrowDownRight size={14} strokeWidth={2.5} />}
+        {up ? '+' : '-'}{rounded}%
       </div>
     </div>
   )
+}
+
+function splitLabel(lbl = '') {
+  const parts = lbl.trim().split(' ')
+  if (parts.length === 1) return [parts[0], '']
+  return [parts[0].slice(0, 3) || '', parts[1].slice(-2) || '']
+}
+
+function defaultSummary(title, value) {
+  return `${title || 'This metric'} is currently ${value ?? '—'} for the selected scope and period.`
 }

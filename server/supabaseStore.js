@@ -74,7 +74,8 @@ export async function loadState() {
     importHistory: meta.importHistory || [],
     webhookIntegrations: meta.webhookIntegrations || [],
     webhookLogs: meta.webhookLogs || [],
-    sheetSyncLogs: meta.sheetSyncLogs || []
+    sheetSyncLogs: meta.sheetSyncLogs || [],
+    inbox: meta.inbox || { messages: [], conversations: {} }
   }
 }
 
@@ -112,7 +113,8 @@ export async function persistState(state, dirtyLeadIds = [], deletedLeadIds = []
     importHistory: state.importHistory,
     webhookIntegrations: state.webhookIntegrations,
     webhookLogs: state.webhookLogs,
-    sheetSyncLogs: state.sheetSyncLogs
+    sheetSyncLogs: state.sheetSyncLogs,
+    inbox: state.inbox
   }
   const { error: metaErr } = await c.from(META_TABLE).upsert({ key: META_KEY, data: meta, updated_at: new Date().toISOString() })
   if (metaErr) throw new Error(`supabase persist meta: ${metaErr.message}`)
@@ -150,7 +152,8 @@ export async function persistMetaState(state) {
     importHistory: state.importHistory,
     webhookIntegrations: state.webhookIntegrations,
     webhookLogs: state.webhookLogs,
-    sheetSyncLogs: state.sheetSyncLogs
+    sheetSyncLogs: state.sheetSyncLogs,
+    inbox: state.inbox
   }
   const { error } = await c.from(META_TABLE).upsert({ key: META_KEY, data: meta, updated_at: new Date().toISOString() })
   if (error) throw new Error(`supabase persist meta: ${error.message}`)

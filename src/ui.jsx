@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import { X } from 'lucide-react'
 import { AVATAR_COLORS, initials } from './lib.js'
+import { API_BASE } from './api.js'
 
 export function Avatar({ name, color, size = 30, className = '', photoUrl }) {
   const c = color || AVATAR_COLORS[(name || '').length % AVATAR_COLORS.length]
@@ -33,7 +34,7 @@ function normalizePhotoUrl(photoUrl) {
   const raw = String(photoUrl || '').trim()
   if (!raw) return ''
   if (/^(https?:)?\/\//i.test(raw) || raw.startsWith('data:')) return raw
-  return `/${raw.replace(/^public\//, '').replace(/^\/+/, '')}`
+  return `${API_BASE}/${raw.replace(/^public\//, '').replace(/^\/+/, '')}`
 }
 
 export function ScorePill({ score, size = 'md' }) {

@@ -293,6 +293,7 @@ export function seed() {
       reminders: { followUpEnabled: true, leadAgeEnabled: true, highValueEnabled: true, emailReminders: false },
       gpt: { apiKey: '', model: 'gpt-4o-mini', enabled: true },
       respondio: { apiKey: '', workspaceId: '' },
+      inbox: { snippets: [] },
       mailtrap: { host: '', port: 2525, user: '', pass: '', fromEmail: 'studio@physique57.in', fromName: 'Physique 57 Lead Studio', enabled: false },
       googleSheets: {
         clientId: '', clientSecret: '', refreshToken: '', accessToken: '', tokenExpiresAt: '',
@@ -311,6 +312,7 @@ export function seed() {
     importHistory: [],
     webhookIntegrations: [],
     webhookLogs: [],
-    sheetSyncLogs: []
+    sheetSyncLogs: [],
+    inbox: { messages: [], conversations: {} }
   }
 }

@@ -48,7 +48,8 @@ async function req(method, path, body, isForm) {
       lastError = error
 
       // Retry a likely backend origin when we hit a 404 from the current one.
-      if (res.status !== 404) break
+      // But only if the 404 doesn't come with an explicit JSON application error.
+      if (res.status !== 404 || data.error || data.message) break
     } catch (err) {
       lastError = err
     }

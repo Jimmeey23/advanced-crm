@@ -2,7 +2,7 @@ import React, { useState } from 'react'
 import {
   LayoutDashboard, KanbanSquare, Users, UploadCloud, Settings, Search,
   Plus, Zap, Link2, ShieldCheck, Sun, Moon, BarChart3, ChevronsLeft, ChevronsRight,
-  CalendarDays, CalendarRange, Activity
+  CalendarDays, CalendarRange, Activity, Inbox as InboxIcon
 } from 'lucide-react'
 import { AppProvider, Toasts, useApp } from './store.jsx'
 import { useFetch } from './hooks.js'
@@ -16,6 +16,7 @@ import Import from './pages/Import.jsx'
 import Team from './pages/Team.jsx'
 import StudioWeekly from './pages/StudioWeekly.jsx'
 import StudioMonthly from './pages/StudioMonthly.jsx'
+import Inbox from './pages/Inbox.jsx'
 import SettingsPage from './pages/Settings.jsx'
 import LeadDrawer from './components/LeadDrawer.jsx'
 import AddLeadModal from './components/AddLeadModal.jsx'
@@ -29,6 +30,7 @@ const NAV = [
   { id: 'studio-monthly', label: 'Monthly studio report', title: 'Monthly Studio Review', icon: CalendarRange },
   { id: 'pipeline', label: 'Pipeline', title: 'Sales Pipeline', icon: KanbanSquare },
   { id: 'leads', label: 'Leads', title: 'Lead Directory', icon: Users },
+  { id: 'inbox', label: 'Inbox', title: 'Unified Inbox', icon: InboxIcon },
   { id: 'import', label: 'Import CSV', title: 'Lead Import Centre', icon: UploadCloud },
   { id: 'team', label: 'Team & Studios', title: 'Studios & Sales Team', icon: Users },
   { id: 'settings', label: 'Settings', title: 'Workspace Settings', icon: Settings }
@@ -271,6 +273,7 @@ function Shell() {
     case 'studio-monthly': return <StudioMonthly />
     case 'pipeline': return <Pipeline />
     case 'leads': return <Leads initialSearch={viewParams.search} />
+    case 'inbox': return <Inbox />
     case 'import': return <Import />
     case 'team': return <Team />
     case 'settings': return <SettingsPage />

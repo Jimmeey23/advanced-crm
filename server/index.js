@@ -10,6 +10,7 @@ import { assignLead } from './roundRobin.js'
 import * as momence from './momence.js'
 import * as gpt from './gpt.js'
 import * as respondio from './respondio.js'
+import * as inbox from './inbox.js'
 import * as mailer from './mailer.js'
 import * as supabase from './supabaseStore.js'
 import { runReminderDigest, startReminderScheduler } from './reminders.js'
@@ -2263,7 +2264,21 @@ app.post('/api/respondio/webhook/:key', (req, res) => {
   if (!db.settings.respondio?.inboundWebhookKey || req.params.key !== db.settings.respondio.inboundWebhookKey) {
     return res.status(404).json({ error: 'Unknown webhook' })
   }
-  broadcastChange('respondio-message')
+  const lead = inbox.matchLeadFromWebhook(db, req.body)
+  if (lead) {
+    if (!lead.respondId) {
+      const contactId = req.body?.contact?.id || req.body?.contact?.contactId
+      if (contactId) lead.respondId = contactId
+    }
+    const extracted = inbox.extractInboundMessage(req.body)
+    inbox.recordMessage(db, lead.id, { direction: 'inbound', ...extracted })
+    lead.lastActivityAt = nowIso()
+    markDirty(lead.id)
+    save()
+    broadcastChange('respondio-message', { leadId: lead.id })
+  } else {
+    broadcastChange('respondio-message')
+  }
   res.json({ ok: true })
 })
 
@@ -2404,12 +2419,101 @@ app.post('/api/respondio/send', async (req, res) => {
     }
     lead.respondio = { ...(lead.respondio || {}), lastOutboundAt: nowIso(), lastOutboundType: shouldUseTemplate ? 'template' : 'text' }
     lead.lastActivityAt = nowIso()
+    inbox.recordMessage(db, lead.id, {
+      direction: 'outbound',
+      channel,
+      type: shouldUseTemplate ? 'whatsapp_template' : 'text',
+      content: shouldUseTemplate ? '' : text,
+      templateName: shouldUseTemplate ? (template?.name || '') : ''
+    })
     markDirty(lead.id)
     save()
+    broadcastChange('respondio-message', { leadId: lead.id })
     res.json({ ok: true, contactId: contact.id, message: msg })
   } catch (e) {
     res.status(502).json({ error: e.message })
   }
+})
+
+// ---------- Unified Inbox ----------
+
+app.get('/api/inbox', (req, res) => {
+  inbox.ensure(db)
+  const { studio, associate, channel, status, unread, q } = req.query
+  const rows = inbox.listConversations(db, db.leads, {
+    studio, associate, channel, status, q,
+    unreadOnly: unread === '1' || unread === 'true'
+  })
+  res.json({ configured: respondio.isConfigured(db), conversations: rows })
+})
+
+app.get('/api/inbox/:leadId/messages', async (req, res) => {
+  const lead = leadById(req.params.leadId)
+  if (!lead) return res.status(404).json({ error: 'Lead not found' })
+  inbox.ensure(db)
+  // Backfill from Respond.io once so a conversation that predates this
+  // store's rollout still shows its history, then merge with anything
+  // already recorded locally.
+  if (respondio.isConfigured(db)) {
+    try {
+      const remote = await respondio.syncLeadConversations(db, lead)
+      const known = new Set(inbox.listMessages(db, lead.id).map(m => `${m.direction}:${m.sentAt}:${m.content}`))
+      for (const m of remote?.conversations?.[0]?.messages || []) {
+        const key = `${m.direction}:${m.sentAt}:${m.content}`
+        if (!known.has(key)) {
+          inbox.recordMessage(db, lead.id, { direction: m.direction, channel: 'whatsapp', type: m.type, content: m.content, sentAt: m.sentAt })
+          known.add(key)
+        }
+      }
+      markDirty(lead.id)
+      save()
+    } catch (e) { /* backfill is best-effort */ }
+  }
+  res.json({ messages: inbox.listMessages(db, lead.id) })
+})
+
+app.post('/api/inbox/:leadId/read', (req, res) => {
+  const lead = leadById(req.params.leadId)
+  if (!lead) return res.status(404).json({ error: 'Lead not found' })
+  res.json(inbox.markRead(db, lead.id))
+  save()
+})
+
+app.post('/api/inbox/:leadId/status', (req, res) => {
+  const lead = leadById(req.params.leadId)
+  if (!lead) return res.status(404).json({ error: 'Lead not found' })
+  try {
+    const c = inbox.setStatus(db, lead.id, req.body.status)
+    save()
+    res.json(c)
+  } catch (e) { res.status(400).json({ error: e.message }) }
+})
+
+app.post('/api/inbox/:leadId/assign', (req, res) => {
+  const lead = leadById(req.params.leadId)
+  if (!lead) return res.status(404).json({ error: 'Lead not found' })
+  const c = inbox.assign(db, lead.id, req.body.associateId || null)
+  save()
+  res.json(c)
+})
+
+app.get('/api/inbox/snippets', (req, res) => res.json(inbox.listSnippets(db)))
+app.post('/api/inbox/snippets', (req, res) => {
+  const s = inbox.addSnippet(db, req.body)
+  save()
+  res.status(201).json(s)
+})
+app.patch('/api/inbox/snippets/:id', (req, res) => {
+  try {
+    const s = inbox.updateSnippet(db, req.params.id, req.body)
+    save()
+    res.json(s)
+  } catch (e) { res.status(404).json({ error: e.message }) }
+})
+app.delete('/api/inbox/snippets/:id', (req, res) => {
+  inbox.deleteSnippet(db, req.params.id)
+  save()
+  res.json({ ok: true })
 })
 
 // ---------- Mailtrap email ----------
@@ -2493,8 +2597,9 @@ app.get('/api/analytics/performance/details', (req, res) => {
 
 const sseClients = new Set()
 
-function broadcastChange(type) {
-  for (const res of sseClients) res.write(`data: ${JSON.stringify({ type })}\n\n`)
+function broadcastChange(type, data) {
+  const payload = data ? { type, ...data } : { type }
+  for (const res of sseClients) res.write(`data: ${JSON.stringify(payload)}\n\n`)
 }
 
 app.get('/api/events', (req, res) => {

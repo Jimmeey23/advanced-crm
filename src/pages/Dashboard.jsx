@@ -124,10 +124,11 @@ export default function Dashboard() {
   const shownSources = sourceView === 'top' ? topSources : bottomSources
   const shownMax = Math.max(...shownSources.map(s => s.count), 1)
   const teamRows = team || []
-  const topAssociates = teamRows.slice(0, 3)
-  const remainingAssociates = teamRows.slice(3)
   const bestAssociate = teamRows[0]
   const avgTeamConversion = teamRows.length ? Math.round(teamRows.reduce((sum, row) => sum + (row.conversion || 0), 0) / teamRows.length) : 0
+  const topHalf = teamRows.slice(0, Math.ceil(teamRows.length / 2))
+  const bottomHalf = teamRows.slice(Math.ceil(teamRows.length / 2)).reverse()
+  const worstAssociate = bottomHalf[0]
 
   if (l1) return <Loading />
   if (e1 || !ov) {
@@ -406,54 +407,30 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* row 4: team leaderboard */}
-      <div className="card p-5 associate-leaderboard-panel">
-        <div className="associate-leaderboard-head">
-          <div>
-            <h3 className="font-display font-semibold text-white text-[15px]">Associate leaderboard</h3>
-            <p>{bestAssociate ? `${bestAssociate.name} leads by revenue · ${avgTeamConversion}% avg conversion` : 'No associate performance yet'}</p>
-          </div>
-          <div className="associate-leaderboard-summary">
-            <span><strong>{teamRows.length}</strong><small>active</small></span>
-            <span><strong>{teamRows.reduce((sum, row) => sum + (row.won || 0), 0)}</strong><small>won</small></span>
-            <span><strong>{avgTeamConversion}%</strong><small>avg conv.</small></span>
-          </div>
-        </div>
-        <div className="associate-leaderboard-layout">
-          <div className="associate-podium">
-            {topAssociates.map((t, i) => (
-              <button key={t.associateId} className={`leaderboard-card text-left is-top rank-${i + 1}`} onClick={() => setScorecardId(t.associateId)}>
-                <div className="leaderboard-main">
-                  <span className={`leaderboard-rank ${i === 0 ? 'is-first' : i === 1 ? 'is-second' : 'is-third'}`}>{i + 1}</span>
-                  <Avatar name={t.name} color={t.color} photoUrl={t.photoUrl} size={38} />
-                  <div className="flex-1 min-w-0">
-                    <div className="text-[12.5px] font-semibold text-white truncate">{t.name}</div>
-                    <div className="text-[11px] text-slate-500 truncate">{boot?.locations.find(l => l.id === t.locationId)?.name?.split(',')[0] || ''}</div>
-                  </div>
-                  <div className="leaderboard-money">
-                    <div>{money(t.revenue)}</div>
-                    <span>{t.won} won</span>
-                  </div>
-                </div>
-                <div className="leaderboard-progress" style={{ '--progress': `${Math.min(100, t.conversion || 0)}%` }} />
-                <div className="leaderboard-stats">
-                  <span><strong>{t.conversion}%</strong><small>conversion</small></span>
-                  <span><strong>{t.open || 0}</strong><small>open</small></span>
-                  <span><strong>{t.total || 0}</strong><small>total</small></span>
-                  <span><strong>{t.target || 0}</strong><small>target</small></span>
-                </div>
-              </button>
-            ))}
+      {/* row 4: associate leaderboard, top vs bottom */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <div className="card p-5 associate-leaderboard-panel">
+          <div className="associate-leaderboard-head">
+            <div>
+              <h3 className="font-display font-semibold text-white text-[15px]">Top associates</h3>
+              <p>{bestAssociate ? `${bestAssociate.name} leads by revenue · ${avgTeamConversion}% avg conversion` : 'No associate performance yet'}</p>
+            </div>
+            <div className="associate-leaderboard-summary">
+              <span><strong>{teamRows.length}</strong><small>active</small></span>
+              <span><strong>{teamRows.reduce((sum, row) => sum + (row.won || 0), 0)}</strong><small>won</small></span>
+              <span><strong>{avgTeamConversion}%</strong><small>avg conv.</small></span>
+            </div>
           </div>
           <div className="associate-rank-list">
-            {remainingAssociates.map((t, i) => (
+            {topHalf.map((t, i) => (
               <button key={t.associateId} className="associate-rank-row" onClick={() => setScorecardId(t.associateId)}>
-                <span className="associate-rank-number">{i + 4}</span>
+                <span className={`associate-rank-number ${i === 0 ? 'is-gold' : i === 1 ? 'is-silver' : i === 2 ? 'is-bronze' : 'is-good'}`}>{i + 1}</span>
                 <Avatar name={t.name} color={t.color} photoUrl={t.photoUrl} size={30} />
                 <div className="min-w-0 flex-1">
                   <div className="associate-rank-name">{t.name}</div>
                   <div className="associate-rank-sub">{boot?.locations.find(l => l.id === t.locationId)?.name?.split(',')[0] || ''}</div>
                 </div>
+                <div className="associate-rank-revenue">{money(t.revenue)}</div>
                 <div className="associate-rank-metrics">
                   <span>{t.conversion}%</span>
                   <span>{t.open || 0} open</span>
@@ -461,6 +438,39 @@ export default function Dashboard() {
                 </div>
               </button>
             ))}
+            {!topHalf.length && <Empty icon={<Trophy size={20} />} title="No associate data" subtitle="Performance will appear once leads are worked." />}
+          </div>
+        </div>
+
+        <div className="card p-5 associate-leaderboard-panel">
+          <div className="associate-leaderboard-head">
+            <div>
+              <h3 className="font-display font-semibold text-white text-[15px]">Needs attention</h3>
+              <p>{worstAssociate ? `${worstAssociate.name} trails the team · lowest conversion & revenue` : 'No associate performance yet'}</p>
+            </div>
+            <div className="associate-leaderboard-summary">
+              <span><strong>{bottomHalf.length}</strong><small>active</small></span>
+              <span><strong>{bottomHalf.reduce((sum, row) => sum + (row.won || 0), 0)}</strong><small>won</small></span>
+            </div>
+          </div>
+          <div className="associate-rank-list">
+            {bottomHalf.map((t, i) => (
+              <button key={t.associateId} className="associate-rank-row" onClick={() => setScorecardId(t.associateId)}>
+                <span className={`associate-rank-number ${i === 0 ? 'is-bad' : ''}`}>{i + 1}</span>
+                <Avatar name={t.name} color={t.color} photoUrl={t.photoUrl} size={30} />
+                <div className="min-w-0 flex-1">
+                  <div className="associate-rank-name">{t.name}</div>
+                  <div className="associate-rank-sub">{boot?.locations.find(l => l.id === t.locationId)?.name?.split(',')[0] || ''}</div>
+                </div>
+                <div className="associate-rank-revenue">{money(t.revenue)}</div>
+                <div className="associate-rank-metrics">
+                  <span>{t.conversion}%</span>
+                  <span>{t.open || 0} open</span>
+                  <strong>{t.won} won</strong>
+                </div>
+              </button>
+            ))}
+            {!bottomHalf.length && <Empty icon={<Trophy size={20} />} title="No associate data" subtitle="Performance will appear once leads are worked." />}
           </div>
         </div>
       </div>
