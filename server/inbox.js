@@ -27,7 +27,26 @@ export function ensure(db) {
   if (!db.inbox.conversations) db.inbox.conversations = {}
   if (!db.settings.inbox) db.settings.inbox = { snippets: defaultSnippets() }
   if (!Array.isArray(db.settings.inbox.snippets)) db.settings.inbox.snippets = defaultSnippets()
+  if (!db.inbox.sentAtMigrated) migrateSentAt(db)
   return db.inbox
+}
+
+// One-time fixup for conversations synced before sentAt was normalized to
+// epoch ms — those have a mix of unix-second numbers and ISO strings on
+// disk, which is exactly what caused inbound/outbound to cluster instead of
+// interleaving. Mutates in place; the flag rides along in db.inbox so it
+// persists on the next save() rather than re-running every request.
+function migrateSentAt(db) {
+  for (const m of db.inbox.messages) m.sentAt = normalizeSentAt(m.sentAt)
+  const byKey = new Map()
+  for (const m of db.inbox.messages) {
+    const cur = byKey.get(m.key)
+    if (cur === undefined || m.sentAt > cur) byKey.set(m.key, m.sentAt)
+  }
+  for (const [key, lastMessageAt] of byKey) {
+    if (db.inbox.conversations[key]) db.inbox.conversations[key].lastMessageAt = lastMessageAt
+  }
+  db.inbox.sentAtMigrated = true
 }
 
 function defaultSnippets() {
@@ -60,11 +79,30 @@ export function setContactInfo(db, key, { contactId, fullName, phone, email, res
   return c
 }
 
+// respond.io message timestamps arrive as unix seconds (message/list has no
+// top-level timestamp field per its docs — status[].timestamp is unix
+// seconds), while our own outbound sends stamp `new Date().toISOString()`.
+// Mixing epoch numbers and ISO strings and sorting by String comparison
+// (the old behavior) put every inbound message in one cluster and every
+// outbound in another instead of interleaving by time — this normalizes
+// everything to epoch milliseconds so sorting is always a plain numeric
+// comparison regardless of which shape a given source handed in.
+export function normalizeSentAt(input) {
+  if (input === null || input === undefined || input === '') return Date.now()
+  if (typeof input === 'number') return input < 10_000_000_000 ? input * 1000 : input
+  const asNumber = Number(input)
+  if (!Number.isNaN(asNumber) && String(input).trim() === String(asNumber)) {
+    return asNumber < 10_000_000_000 ? asNumber * 1000 : asNumber
+  }
+  const parsed = Date.parse(input)
+  return Number.isNaN(parsed) ? Date.now() : parsed
+}
+
 // Appends a message to the store and updates the conversation's rollup
 // fields. Inbound messages bump unreadCount; outbound ones don't.
 export function recordMessage(db, key, { direction, channel, type = 'text', content = '', templateName = '', sentAt } = {}) {
   ensure(db)
-  const when = sentAt || new Date().toISOString()
+  const when = normalizeSentAt(sentAt)
   const message = { id: uid('imsg'), key, direction, channel: channel || 'whatsapp', type, content, templateName, sentAt: when }
   db.inbox.messages.push(message)
   const c = conv(db, key)
@@ -76,7 +114,7 @@ export function recordMessage(db, key, { direction, channel, type = 'text', cont
 
 export function listMessages(db, key) {
   ensure(db)
-  return db.inbox.messages.filter(m => m.key === key).sort((a, b) => String(a.sentAt).localeCompare(String(b.sentAt)))
+  return db.inbox.messages.filter(m => m.key === key).sort((a, b) => a.sentAt - b.sentAt)
 }
 
 export function markRead(db, key) {
@@ -133,7 +171,7 @@ export function listConversations(db, leads, { studio, associate, channel, statu
     .filter(r => !status || r.status === status)
     .filter(r => !unreadOnly || r.unreadCount > 0)
     .filter(r => !q || `${r.lead.fullName} ${r.lead.phone} ${r.lead.email}`.toLowerCase().includes(String(q).toLowerCase()))
-    .sort((a, b) => String(b.lastMessageAt || '').localeCompare(String(a.lastMessageAt || '')))
+    .sort((a, b) => (b.lastMessageAt || 0) - (a.lastMessageAt || 0))
   return rows
 }
 

@@ -237,7 +237,7 @@ export async function resolveWhatsAppChannelIds(db) {
 export async function listTemplates(db, channelId) {
   if (!channelId) return []
   const out = []
-  let path = `/space/channel/${channelId}/template`
+  let path = `/space/channel/${channelId}/template?limit=99`
   let guard = 0
   while (path && guard < 25) {
     guard++

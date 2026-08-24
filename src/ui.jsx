@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import { X } from 'lucide-react'
 import { AVATAR_COLORS, initials } from './lib.js'
-import { API_BASE } from './api.js'
 
 export function Avatar({ name, color, size = 30, className = '', photoUrl }) {
   const c = color || AVATAR_COLORS[(name || '').length % AVATAR_COLORS.length]
@@ -30,11 +29,17 @@ export function Avatar({ name, color, size = 30, className = '', photoUrl }) {
   )
 }
 
+// Associate photos live in src/public/avatars — a static asset bundled with
+// the frontend build, not something the API server hosts. Prefixing with
+// API_BASE (added for API calls, so it can point at a separate backend
+// origin in a split deployment) broke these: the file exists at the
+// frontend's own origin, not the API's, so the request 404'd there and the
+// image silently fell back to initials.
 function normalizePhotoUrl(photoUrl) {
   const raw = String(photoUrl || '').trim()
   if (!raw) return ''
   if (/^(https?:)?\/\//i.test(raw) || raw.startsWith('data:')) return raw
-  return `${API_BASE}/${raw.replace(/^public\//, '').replace(/^\/+/, '')}`
+  return `/${raw.replace(/^public\//, '').replace(/^\/+/, '')}`
 }
 
 export function ScorePill({ score, size = 'md' }) {

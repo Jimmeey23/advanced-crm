@@ -1703,6 +1703,11 @@ html[data-theme="light"] .alerts-menu {
   border-color: rgba(15,23,42,.14);
   box-shadow: 0 24px 60px rgba(15,23,42,.18);
 }
+/* [data-theme="light"] .card forces position:relative (same 0,2,0
+   specificity as the .fixed utility, and loads after it), which silently
+   turns this dropdown's `fixed` class into an in-flow relative box —
+   #root's id selector guarantees this wins regardless of load order. */
+#root .alerts-menu { position: fixed; }
 
 /* Lead table grouped rows */
 .lead-group-stack {

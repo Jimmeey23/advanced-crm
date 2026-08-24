@@ -2303,9 +2303,10 @@ async function backfillLeadMessages(lead) {
     const remote = await respondio.syncLeadConversations(db, lead)
     const known = new Set(inbox.listMessages(db, lead.id).map(m => `${m.direction}:${m.sentAt}:${m.content}`))
     for (const m of remote?.conversations?.[0]?.messages || []) {
-      const dedupeKey = `${m.direction}:${m.sentAt}:${m.content}`
+      const sentAt = inbox.normalizeSentAt(m.sentAt)
+      const dedupeKey = `${m.direction}:${sentAt}:${m.content}`
       if (!known.has(dedupeKey)) {
-        inbox.recordMessage(db, lead.id, { direction: m.direction, channel: 'whatsapp', type: m.type, content: m.content, sentAt: m.sentAt })
+        inbox.recordMessage(db, lead.id, { direction: m.direction, channel: 'whatsapp', type: m.type, content: m.content, sentAt })
         known.add(dedupeKey)
       }
     }
@@ -2321,7 +2322,7 @@ async function backfillContactMessages(key, contactId) {
     const raw = await respondio.listMessagesByIdentifier(db, `id:${contactId}`, 100)
     for (const m of raw) {
       const content = m.message?.text || m.message?.template?.name || ''
-      const sentAt = m.timestamp || m.sentAt || m.createdAt || m.status?.[0]?.timestamp || null
+      const sentAt = inbox.normalizeSentAt(m.timestamp || m.sentAt || m.createdAt || m.status?.[0]?.timestamp || null)
       const direction = m.traffic === 'incoming' ? 'inbound' : 'outbound'
       const dedupeKey = `${direction}:${sentAt}:${content}`
       if (!known.has(dedupeKey)) {
@@ -2361,7 +2362,11 @@ app.post('/api/inbox/sync', async (req, res) => {
         await backfillContactMessages(key, contact.id)
       }
     }
-    save()
+    // A full-workspace sync touches thousands of rows in one go — save()'s
+    // debounced write can lose most of it if the process restarts (or the
+    // request otherwise ends) before the delayed Supabase upsert fires.
+    // Await the real write so the response only returns once it's durable.
+    await saveNow()
     broadcastChange('respondio-message')
     res.json({ ok: true, contactsFound: contacts.length, matched, unmatched })
   } catch (e) {

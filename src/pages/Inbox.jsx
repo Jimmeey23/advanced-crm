@@ -1,7 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Search, Send, Sparkles, MessageCircle, Phone, Mail, MessageSquareText,
-  CheckCircle2, Circle, ListFilter, BookmarkPlus
+  CheckCircle2, Circle, ListFilter, BookmarkPlus, ArrowUpDown, CheckCheck,
+  Building2, UserRound, Tag, Info, Ban
 } from 'lucide-react'
 import { useApp } from '../store.jsx'
 import { api, API_BASE } from '../api.js'
@@ -13,6 +14,25 @@ const CHANNEL_META = {
   sms: { label: 'SMS', icon: MessageSquareText, color: '#fbbf24' },
   email: { label: 'Email', icon: Mail, color: '#a78bfa' },
   call: { label: 'Call', icon: Phone, color: '#38bdf8' }
+}
+
+const STATUS_TABS = [
+  { id: '', label: 'All' },
+  { id: 'open', label: 'Open' },
+  { id: 'closed', label: 'Closed' }
+]
+
+const SORT_OPTIONS = [
+  { id: 'newest', label: 'Newest activity' },
+  { id: 'oldest', label: 'Oldest activity' },
+  { id: 'unread', label: 'Unread first' }
+]
+
+function sortRows(rows, sort) {
+  const copy = [...rows]
+  if (sort === 'oldest') return copy.sort((a, b) => (a.lastMessageAt || 0) - (b.lastMessageAt || 0))
+  if (sort === 'unread') return copy.sort((a, b) => (b.unreadCount || 0) - (a.unreadCount || 0) || (b.lastMessageAt || 0) - (a.lastMessageAt || 0))
+  return copy.sort((a, b) => (b.lastMessageAt || 0) - (a.lastMessageAt || 0))
 }
 
 function timeAgo(iso) {
@@ -94,7 +114,10 @@ export default function Inbox() {
   const [channel, setChannel] = useState('')
   const [status, setStatus] = useState('')
   const [unreadOnly, setUnreadOnly] = useState(false)
+  const [unmatchedOnly, setUnmatchedOnly] = useState(false)
   const [showFilters, setShowFilters] = useState(false)
+  const [sort, setSort] = useState('newest')
+  const [markingAllRead, setMarkingAllRead] = useState(false)
 
   const [channelToSend, setChannelToSend] = useState('whatsapp')
   const [text, setText] = useState('')
@@ -126,6 +149,21 @@ export default function Inbox() {
   }
 
   const loadSnippets = () => api.get('/api/inbox/snippets').then(setSnippets).catch(() => {})
+
+  const displayedRows = useMemo(() => {
+    const filtered = unmatchedOnly ? rows.filter(r => r.unmatched) : rows
+    return sortRows(filtered, sort)
+  }, [rows, unmatchedOnly, sort])
+
+  const markAllRead = async () => {
+    const unread = displayedRows.filter(r => r.unreadCount > 0)
+    if (!unread.length) return
+    setMarkingAllRead(true)
+    try {
+      await Promise.all(unread.map(r => api.post(`/api/inbox/${r.leadId}/read`)))
+      setRows(curr => curr.map(r => unread.some(u => u.leadId === r.leadId) ? { ...r, unreadCount: 0 } : r))
+    } finally { setMarkingAllRead(false) }
+  }
 
   const syncFromRespondio = async () => {
     setSyncing(true)
@@ -256,34 +294,64 @@ export default function Inbox() {
       {/* Conversation list */}
       <div className="w-[320px] shrink-0 flex flex-col card !rounded-2xl !p-0 overflow-hidden">
         <div className="p-3 border-b border-white/8 space-y-2">
+          <div className="flex items-center gap-1 rounded-xl bg-white/5 border border-white/10 p-0.5">
+            {STATUS_TABS.map(t => (
+              <button
+                key={t.id}
+                onClick={() => setStatus(t.id)}
+                className={`flex-1 py-1.5 rounded-lg text-[11.5px] font-semibold transition-colors ${
+                  status === t.id ? 'bg-white/15 text-white' : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+
           <div className="relative">
             <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-500" />
             <input className="input !pl-8 !py-1.5 !text-[12px]" placeholder="Search conversations…" value={q} onChange={e => setQ(e.target.value)} />
           </div>
-          <div className="flex items-center gap-2">
+
+          <div className="flex items-center gap-1.5">
             <button
-              className={`btn btn-ghost !py-1.5 !px-2.5 !text-[11.5px] flex-1 ${showFilters ? '!bg-white/15' : ''}`}
+              className={`btn btn-ghost !py-1.5 !px-2 !text-[11px] flex-1 ${showFilters ? '!bg-white/15' : ''}`}
               onClick={() => setShowFilters(v => !v)}
             >
-              <ListFilter size={12} /> Filters
+              <ListFilter size={11} /> Filters
             </button>
             <button
-              className={`btn btn-ghost !py-1.5 !px-2.5 !text-[11.5px] ${unreadOnly ? '!bg-white/15' : ''}`}
+              className={`btn btn-ghost !py-1.5 !px-2 !text-[11px] ${unreadOnly ? '!bg-white/15' : ''}`}
               onClick={() => setUnreadOnly(v => !v)}
             >
               Unread
             </button>
             <button
-              className="btn btn-ghost !py-1.5 !px-2.5 !text-[11.5px]"
+              className="btn btn-ghost !py-1.5 !px-2 !text-[11px]"
+              onClick={markAllRead}
+              disabled={markingAllRead || !displayedRows.some(r => r.unreadCount > 0)}
+              title="Mark all visible conversations as read"
+            >
+              {markingAllRead ? <Spinner size={11} /> : <CheckCheck size={11} />}
+            </button>
+            <button
+              className="btn btn-ghost !py-1.5 !px-2 !text-[11px]"
               onClick={syncFromRespondio}
               disabled={syncing}
               title="Pull every existing conversation from Respond.io"
             >
-              {syncing ? <Spinner size={12} /> : <Sparkles size={12} />} Sync
+              {syncing ? <Spinner size={11} /> : <Sparkles size={11} />}
             </button>
           </div>
+
           {showFilters && (
             <div className="space-y-1.5">
+              <div className="flex items-center gap-1.5">
+                <ArrowUpDown size={11} className="text-slate-500 shrink-0" />
+                <select className="input select-strong !py-1.5 !text-[12px] flex-1" value={sort} onChange={e => setSort(e.target.value)}>
+                  {SORT_OPTIONS.map(o => <option key={o.id} value={o.id}>{o.label}</option>)}
+                </select>
+              </div>
               <select className="input select-strong !py-1.5 !text-[12px]" value={studio} onChange={e => setStudio(e.target.value)}>
                 <option value="">All studios</option>
                 {(boot?.locations || []).map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
@@ -292,27 +360,24 @@ export default function Inbox() {
                 <option value="">All owners</option>
                 {(boot?.associates || []).map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
               </select>
-              <div className="flex gap-1.5">
-                <select className="input select-strong !py-1.5 !text-[12px] flex-1" value={channel} onChange={e => setChannel(e.target.value)}>
-                  <option value="">All channels</option>
-                  {Object.entries(CHANNEL_META).map(([k, m]) => <option key={k} value={k}>{m.label}</option>)}
-                </select>
-                <select className="input select-strong !py-1.5 !text-[12px] flex-1" value={status} onChange={e => setStatus(e.target.value)}>
-                  <option value="">Any status</option>
-                  <option value="open">Open</option>
-                  <option value="closed">Closed</option>
-                </select>
-              </div>
+              <select className="input select-strong !py-1.5 !text-[12px]" value={channel} onChange={e => setChannel(e.target.value)}>
+                <option value="">All channels</option>
+                {Object.entries(CHANNEL_META).map(([k, m]) => <option key={k} value={k}>{m.label}</option>)}
+              </select>
+              <label className="flex items-center gap-2 text-[11.5px] text-slate-400 select-none px-0.5">
+                <input type="checkbox" className="accent-rose-500" checked={unmatchedOnly} onChange={e => setUnmatchedOnly(e.target.checked)} />
+                No matching CRM lead only
+              </label>
             </div>
           )}
         </div>
 
         <div className="flex-1 overflow-y-auto scrollbar-thin p-2 space-y-0.5">
           {loadingList && <div className="flex justify-center py-8"><Spinner size={18} /></div>}
-          {!loadingList && !rows.length && (
+          {!loadingList && !displayedRows.length && (
             <div className="pt-8"><Empty icon={<MessageCircle size={20} />} title="No conversations" subtitle="Messages from Respond.io will show up here automatically." /></div>
           )}
-          {rows.map(row => (
+          {displayedRows.map(row => (
             <ConversationRow key={row.leadId} row={row} active={row.leadId === selectedLeadId} onClick={() => openThread(row.leadId)} />
           ))}
         </div>
@@ -333,24 +398,14 @@ export default function Inbox() {
                 <div className="text-[13px] font-semibold text-white truncate">{selected.lead.fullName}</div>
                 <div className="text-[11px] text-slate-500 truncate">{selected.lead.phone || selected.lead.email}</div>
               </div>
-              {selected.unmatched ? (
-                <span className="chip bg-amber-500/10 text-amber-400 border border-amber-400/20 !text-[10.5px]">No matching lead</span>
-              ) : (
-                <>
-                  <select
-                    className="input select-strong !py-1.5 !text-[11.5px] !w-[150px]"
-                    value={selected.assigneeId || ''}
-                    onChange={e => setAssignee(e.target.value || null)}
-                    title="Assign conversation"
-                  >
-                    <option value="">Unassigned</option>
-                    {(boot?.associates || []).map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
-                  </select>
-                  <button className="btn btn-ghost !py-1.5 !px-2.5 !text-[11.5px]" onClick={toggleStatus}>
-                    {selected.status === 'closed' ? <><Circle size={12} /> Reopen</> : <><CheckCircle2 size={12} /> Close</>}
-                  </button>
-                </>
+              {selected.assigneeId && (
+                <span className="chip bg-white/5 border border-white/10 text-slate-300 !text-[10.5px]">
+                  {(boot?.associates || []).find(a => a.id === selected.assigneeId)?.name || 'Assigned'}
+                </span>
               )}
+              <span className={`chip !text-[10.5px] ${selected.status === 'closed' ? 'bg-slate-500/10 text-slate-400 border border-slate-400/20' : 'bg-emerald-500/10 text-emerald-400 border border-emerald-400/20'}`}>
+                {selected.status === 'closed' ? 'Closed' : 'Open'}
+              </span>
             </div>
 
             <div className="flex-1 overflow-y-auto scrollbar-thin p-4 space-y-2.5">
@@ -447,6 +502,74 @@ export default function Inbox() {
           </>
         )}
       </div>
+
+      {/* Contact details */}
+      {selected && (
+        <div className="w-[260px] shrink-0 flex flex-col card !rounded-2xl !p-4 overflow-y-auto scrollbar-thin gap-4">
+          <div className="flex flex-col items-center text-center gap-2">
+            <Avatar name={selected.lead.fullName} size={56} />
+            <div>
+              <div className="text-[13.5px] font-semibold text-white">{selected.lead.fullName}</div>
+              <span className={`chip !mt-1 !text-[10px] ${selected.status === 'closed' ? 'bg-slate-500/10 text-slate-400 border border-slate-400/20' : 'bg-emerald-500/10 text-emerald-400 border border-emerald-400/20'}`}>
+                {selected.status === 'closed' ? 'Closed' : 'Open'}
+              </span>
+            </div>
+          </div>
+
+          {selected.unmatched && (
+            <div className="rounded-xl bg-amber-500/10 border border-amber-400/20 px-2.5 py-2 text-[11px] text-amber-300 flex items-start gap-1.5">
+              <Info size={12} className="shrink-0 mt-0.5" /> No matching CRM lead — this is a respond.io contact only.
+            </div>
+          )}
+
+          <div className="space-y-2.5">
+            <div className="flex items-center gap-2 text-[12px] text-slate-300">
+              <Phone size={13} className="text-slate-500 shrink-0" />
+              <span className="truncate">{selected.lead.phone || '—'}</span>
+            </div>
+            <div className="flex items-center gap-2 text-[12px] text-slate-300">
+              <Mail size={13} className="text-slate-500 shrink-0" />
+              <span className="truncate">{selected.lead.email || '—'}</span>
+            </div>
+            {!selected.unmatched && (
+              <div className="flex items-center gap-2 text-[12px] text-slate-300">
+                <Building2 size={13} className="text-slate-500 shrink-0" />
+                <span className="truncate">{(boot?.locations || []).find(l => l.id === selected.lead.locationId)?.name || 'No studio'}</span>
+              </div>
+            )}
+            <div className="flex items-center gap-2 text-[12px] text-slate-300">
+              <Tag size={13} className="text-slate-500 shrink-0" />
+              <span className="truncate">{CHANNEL_META[selected.lastMessage?.channel]?.label || 'WhatsApp'}</span>
+            </div>
+          </div>
+
+          <div className="border-t border-white/8 pt-3 space-y-2">
+            <label className="text-[10.5px] uppercase tracking-wider text-slate-500 font-semibold block">Assigned to</label>
+            {selected.unmatched ? (
+              <div className="flex items-center gap-1.5 text-[11.5px] text-slate-500"><Ban size={12} /> Link a lead to assign</div>
+            ) : (
+              <select
+                className="input select-strong !py-1.5 !text-[11.5px] w-full"
+                value={selected.assigneeId || ''}
+                onChange={e => setAssignee(e.target.value || null)}
+              >
+                <option value="">Unassigned</option>
+                {(boot?.associates || []).map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+              </select>
+            )}
+          </div>
+
+          {!selected.unmatched && (
+            <button className="btn btn-ghost !text-[11.5px] justify-center" onClick={toggleStatus}>
+              {selected.status === 'closed' ? <><Circle size={12} /> Reopen conversation</> : <><CheckCircle2 size={12} /> Close conversation</>}
+            </button>
+          )}
+
+          <div className="flex items-center gap-2 text-[11px] text-slate-500 pt-1">
+            <UserRound size={12} /> {messages.length} message{messages.length === 1 ? '' : 's'} in this thread
+          </div>
+        </div>
+      )}
     </div>
   )
 }
