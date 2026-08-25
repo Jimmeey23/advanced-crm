@@ -5,6 +5,10 @@
 // to — same model as every other integration here).
 import { nowIso } from './db.js'
 import { resolveLeadFields, buildLeadPayloadFromResolved, isValidEmail, isValidPhone } from './leadFieldMapping.js'
+import * as supabase from './supabaseStore.js'
+import { randomUUID } from 'node:crypto'
+
+const SYNC_OWNER_ID = randomUUID()
 
 const OAUTH_BASE = 'https://accounts.google.com/o/oauth2/v2/auth'
 const TOKEN_URL = 'https://oauth2.googleapis.com/token'
@@ -236,16 +240,31 @@ async function writeStatusColumn(db, statusColIndex, rowUpdates) {
 // — every row still looks unprocessed to both, so both create a lead for
 // it: a full duplicate set of the sheet. A large sheet (tens of thousands of
 // rows) easily takes long enough for this to happen in practice.
+//
+// This in-process flag only stops two overlapping runs *within the same
+// server instance*. When Supabase is configured, multiple server instances
+// can share one project (see db.js's applyRemoteLeadChange), each with its
+// own syncInFlight — so the same overlap can happen across instances, and
+// this flag alone can't see it. acquireSyncLock()/releaseSyncLock() close
+// that gap with a lock row Postgres enforces atomically via a unique
+// constraint (see supabaseStore.js); this flag stays as the fast local
+// short-circuit and the fallback when Supabase isn't configured at all.
 let syncInFlight = false
 
 export async function runSync(db, { createLeadFrom, updateLeadFromPayload, findDuplicateLead, assignLead, markDirty, logSync, force = false }) {
   if (!isConfigured(db)) throw new Error('Google Sheets is not fully configured yet.')
   if (syncInFlight) throw new Error('A sync is already in progress — wait for it to finish before starting another.')
   syncInFlight = true
+  const gotRemoteLock = await supabase.acquireSyncLock(SYNC_OWNER_ID)
+  if (!gotRemoteLock) {
+    syncInFlight = false
+    throw new Error('A sync is already in progress on another server instance — wait for it to finish before starting another.')
+  }
   try {
     return await runSyncInner(db, { createLeadFrom, updateLeadFromPayload, findDuplicateLead, assignLead, markDirty, logSync, force })
   } finally {
     syncInFlight = false
+    await supabase.releaseSyncLock()
   }
 }
 

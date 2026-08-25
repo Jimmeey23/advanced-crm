@@ -122,12 +122,13 @@ function computeFollowUpState(lead) {
   }
 }
 
-function buildAlerts() {
+function buildAlerts(scope = {}) {
   const today = new Date().toISOString().slice(0, 10)
   const alerts = []
   const cad = db.settings.cadence || { outreachDays: 7 }
   const notif = db.settings.notifications || {}
-  for (const lead of db.leads) {
+  const leads = (scope.studio || scope.associate) ? scopeLeads(db.leads, scope) : db.leads
+  for (const lead of leads) {
     if (lead.status !== 'open') continue
     const e = enrichLead(lead, db)
     const fu = computeFollowUpState(lead)
@@ -237,7 +238,7 @@ app.get('/api/bootstrap', (req, res) => {
 
 // ---------- alerts ----------
 
-app.get('/api/alerts', (req, res) => res.json(buildAlerts()))
+app.get('/api/alerts', (req, res) => res.json(buildAlerts(req.query)))
 
 // ---------- locations ----------
 
@@ -1570,12 +1571,13 @@ app.get('/api/analytics/performance', (req, res) => {
     fmt = (d) => d.toISOString().slice(0, 7)
   }
 
-  const row = buckets.map(b => ({ ...b, newLeads: 0, won: 0, revenue: 0, followUps: 0, missed: 0 }))
+  const row = buckets.map(b => ({ ...b, newLeads: 0, won: 0, revenue: 0, followUps: 0, missed: 0, lost: 0, lostRevenue: 0 }))
   const idx = Object.fromEntries(row.map((r, i) => [r.key, i]))
 
   const validDate = (v) => v && v !== '-' && !isNaN(new Date(v).getTime())
 
-  for (const l of scopeLeads(db.leads, req.query)) {
+  const scoped = scopeLeads(db.leads, req.query)
+  for (const l of scoped) {
     if (validDate(l.createdAt)) {
       const ck = fmt(new Date(l.createdAt))
       if (idx[ck] !== undefined) row[idx[ck]].newLeads++
@@ -1583,6 +1585,12 @@ app.get('/api/analytics/performance', (req, res) => {
     if (l.status === 'won' && validDate(l.convertedAt)) {
       const wk = fmt(new Date(l.convertedAt))
       if (idx[wk] !== undefined) { row[idx[wk]].won++; row[idx[wk]].revenue += l.valueEstimate || 0 }
+    }
+    // No dedicated "lost at" field on a lead — bucketed by createdAt, same
+    // convention already used for the lost-cohort report elsewhere.
+    if (l.status === 'lost' && validDate(l.createdAt)) {
+      const lk = fmt(new Date(l.createdAt))
+      if (idx[lk] !== undefined) { row[idx[lk]].lost++; row[idx[lk]].lostRevenue += l.valueEstimate || 0 }
     }
     for (const f of l.followUps || []) {
       if (!validDate(f.date)) continue
@@ -1597,9 +1605,14 @@ app.get('/api/analytics/performance', (req, res) => {
   const totals = row.reduce((acc, r) => {
     acc.newLeads += r.newLeads; acc.won += r.won; acc.revenue += r.revenue
     acc.followUps += r.followUps; acc.missed += r.missed
+    acc.lost += r.lost; acc.lostRevenue += r.lostRevenue
     return acc
-  }, { newLeads: 0, won: 0, revenue: 0, followUps: 0, missed: 0 })
+  }, { newLeads: 0, won: 0, revenue: 0, followUps: 0, missed: 0, lost: 0, lostRevenue: 0 })
   totals.followUpRate = totals.followUps ? Math.round(((totals.followUps - totals.missed) / totals.followUps) * 100) : 0
+  totals.lossRate = (totals.won + totals.lost) ? Math.round((totals.lost / (totals.won + totals.lost)) * 100) : 0
+  // Snapshot, not a per-period sum — pipeline value of leads currently open
+  // within scope, regardless of when they were created.
+  totals.openPipelineValue = scoped.filter(l => l.status === 'open').reduce((s, l) => s + (l.valueEstimate || 0), 0)
 
   res.json({ range, buckets: row, totals })
 })
@@ -3122,12 +3135,12 @@ app.get('/api/analytics/performance/details', (req, res) => {
     fmt = (d) => d.toISOString().slice(0, 7)
   }
 
-  const row = buckets.map(b => ({ ...b, newLeads: [], won: [], missed: [] }))
+  const row = buckets.map(b => ({ ...b, newLeads: [], won: [], missed: [], lost: [] }))
   const idx = Object.fromEntries(row.map((r, i) => [r.key, i]))
 
   const validDate2 = (v) => v && v !== '-' && !isNaN(new Date(v).getTime())
 
-  for (const l of db.leads) {
+  for (const l of scopeLeads(db.leads, req.query)) {
     if (validDate2(l.createdAt)) {
       const ck = fmt(new Date(l.createdAt))
       if (idx[ck] !== undefined && row[idx[ck]].newLeads.length < 200) row[idx[ck]].newLeads.push({ id: l.id, fullName: l.fullName, stage: l.stage, status: l.status })
@@ -3135,6 +3148,10 @@ app.get('/api/analytics/performance/details', (req, res) => {
     if (l.status === 'won' && validDate2(l.convertedAt)) {
       const wk = fmt(new Date(l.convertedAt))
       if (idx[wk] !== undefined && row[idx[wk]].won.length < 200) row[idx[wk]].won.push({ id: l.id, fullName: l.fullName, stage: l.stage, value: l.valueEstimate })
+    }
+    if (l.status === 'lost' && validDate2(l.createdAt)) {
+      const lk = fmt(new Date(l.createdAt))
+      if (idx[lk] !== undefined && row[idx[lk]].lost.length < 200) row[idx[lk]].lost.push({ id: l.id, fullName: l.fullName, stage: l.stage, value: l.valueEstimate })
     }
     for (const f of l.followUps || []) {
       if (!validDate2(f.date) || f.done !== false) continue

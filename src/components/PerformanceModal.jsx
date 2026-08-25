@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react'
 import { Users, Trophy, IndianRupee, CalendarCheck2, CalendarClock, ChevronDown } from 'lucide-react'
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Cell } from 'recharts'
 import { useApp } from '../store.jsx'
-import { api } from '../api.js'
+import { api, buildQuery } from '../api.js'
 import { Modal, ModalHeader, Spinner } from '../ui.jsx'
 import { money } from '../lib.js'
 import MetricCard from './MetricCard.jsx'
@@ -17,7 +17,7 @@ function momOf(series) {
 
 const COLORS = { newLeads: '#2563eb', won: '#10b981', missed: '#f43f5e' }
 
-export default function PerformanceModal({ open, onClose, range = 'week' }) {
+export default function PerformanceModal({ open, onClose, range = 'week', studio = '', associate = '' }) {
   const { openLead } = useApp()
   const [data, setData] = useState(null)
   const [details, setDetails] = useState(null)
@@ -28,14 +28,15 @@ export default function PerformanceModal({ open, onClose, range = 'week' }) {
     if (!open) return
     setLoading(true)
     setOpenIdx(null)
+    const q = buildQuery({ range, studio, associate })
     Promise.all([
-      api.get(`/api/analytics/performance?range=${range}`),
-      api.get(`/api/analytics/performance/details?range=${range}`)
+      api.get(`/api/analytics/performance?${q}`),
+      api.get(`/api/analytics/performance/details?${q}`)
     ])
       .then(([p, d]) => { setData(p); setDetails(d) })
       .catch(() => {})
       .finally(() => setLoading(false))
-  }, [open, range])
+  }, [open, range, studio, associate])
 
   const chartData = (data?.buckets || []).map(b => ({ ...b, missed: b.missed || 0 }))
   const t = data?.totals || {}

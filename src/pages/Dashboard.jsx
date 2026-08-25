@@ -78,8 +78,12 @@ export default function Dashboard() {
   const { data: tl, loading: l2 } = useFetch(() => api.get(`/api/analytics/timeline?${buildQuery({ studio: filters.studio, associate: filters.associate })}`), [dataVersion, filters.studio, filters.associate])
   const { data: sources, loading: l4 } = useFetch(() => api.get(`/api/analytics/sources?${scopeQuery}`), [dataVersion, scopeQuery])
   const { data: team, loading: l5 } = useFetch(() => api.get(`/api/analytics/team?${scopeQuery}`), [dataVersion, scopeQuery])
-  const { data: hotResp } = useFetch(() => api.get('/api/leads?risk=hot&pageSize=50'), [dataVersion])
-  const { alerts } = useApp()
+  const { data: hotResp } = useFetch(() => api.get(`/api/leads?${buildQuery({ risk: 'hot', pageSize: 50, locationId: filters.studio, associateId: filters.associate })}`), [dataVersion, filters.studio, filters.associate])
+  // Dashboard-local, filter-scoped alerts — deliberately NOT the global
+  // `useApp().alerts` slice (that one feeds the header bell/AlertsDropdown
+  // app-wide and must stay unfiltered by this page's studio/associate/month).
+  const { data: scopedAlerts } = useFetch(() => api.get(`/api/alerts?${buildQuery({ studio: filters.studio, associate: filters.associate })}`), [dataVersion, filters.studio, filters.associate])
+  const alerts = scopedAlerts || []
 
   const [perfRange, setPerfRange] = React.useState('month')
   const [compareOpen, setCompareOpen] = React.useState(false)
@@ -540,7 +544,7 @@ export default function Dashboard() {
       </div>
 
       <AssociateCompareModal open={compareOpen} onClose={() => setCompareOpen(false)} />
-      <PerformanceModal open={perfOpen} onClose={() => setPerfOpen(false)} range={perfRange} />
+      <PerformanceModal open={perfOpen} onClose={() => setPerfOpen(false)} range={perfRange} studio={filters.studio} associate={filters.associate} />
       <AssociateScorecardModal associateId={scorecardId} onClose={() => setScorecardId(null)} openLead={openLead} />
       <ComposeModal open={!!composeLead} onClose={() => setComposeLead(null)} lead={composeLead} defaultChannel={composeChannel} />
       <RespondioTemplateModal open={!!templateLead} onClose={() => setTemplateLead(null)} lead={templateLead} />

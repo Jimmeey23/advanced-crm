@@ -217,6 +217,46 @@ export async function persistMetaState(state) {
   if (error) throw new Error(`supabase persist meta: ${error.message}`)
 }
 
+const SYNC_LOCK_KEY = 'sheet_sync_lock'
+// A sync running long enough to be considered abandoned (crashed process,
+// killed deploy) rather than just slow — past this, a new attempt is
+// allowed to steal the lock instead of being blocked forever.
+const SYNC_LOCK_STALE_MS = 60 * 60 * 1000
+
+// Atomic cross-instance lock for the Google Sheets sync, backed by the
+// unique constraint on app_state.key: Postgres itself rejects the insert if
+// a lock row already exists, so two instances racing this at the same
+// instant can't both "win" the way two `syncInFlight` booleans (one per
+// process) could — see the runSync comment in googleSheets.js for the
+// duplicate-import scenario this closes. ownerId identifies the instance
+// that holds it, purely for the log line if a stale lock gets stolen.
+export async function acquireSyncLock(ownerId) {
+  const c = getClient()
+  if (!c) return true // no Supabase configured — single-instance assumption holds, in-process lock is enough
+  const now = new Date().toISOString()
+  const { error } = await c.from(META_TABLE).insert({ key: SYNC_LOCK_KEY, data: { ownerId, acquiredAt: now }, updated_at: now })
+  if (!error) return true
+  if (error.code !== '23505') throw new Error(`supabase acquire sync lock: ${error.message}`)
+
+  // Row already exists — see whether it's stale enough to steal.
+  const { data: existing, error: readErr } = await c.from(META_TABLE).select('data').eq('key', SYNC_LOCK_KEY).maybeSingle()
+  if (readErr) throw new Error(`supabase read sync lock: ${readErr.message}`)
+  const acquiredAt = existing?.data?.acquiredAt ? new Date(existing.data.acquiredAt).getTime() : 0
+  if (Date.now() - acquiredAt < SYNC_LOCK_STALE_MS) return false
+
+  console.log(`[supabase] stealing stale sheet sync lock held by ${existing?.data?.ownerId || 'unknown'} since ${existing?.data?.acquiredAt}`)
+  const { error: updateErr } = await c.from(META_TABLE).update({ data: { ownerId, acquiredAt: now }, updated_at: now }).eq('key', SYNC_LOCK_KEY)
+  if (updateErr) throw new Error(`supabase steal sync lock: ${updateErr.message}`)
+  return true
+}
+
+export async function releaseSyncLock() {
+  const c = getClient()
+  if (!c) return
+  const { error } = await c.from(META_TABLE).delete().eq('key', SYNC_LOCK_KEY)
+  if (error) console.error('[supabase] release sync lock failed', error.message)
+}
+
 function uniqueIds(ids) {
   return [...new Set((ids || []).map(id => String(id || '').trim()).filter(Boolean))]
 }

@@ -38,7 +38,24 @@ export function isDuplicatePair(a, b) {
   const emailA = normalizeEmail(a.email), emailB = normalizeEmail(b.email)
   if (emailA && emailB && emailA === emailB) return true
   const phoneA = normalizePhone(a.phone), phoneB = normalizePhone(b.phone)
-  return Boolean(phoneA && phoneA.length === 10 && phoneA === phoneB)
+  if (phoneA && phoneA.length === 10 && phoneA === phoneB) return true
+  return rawContactMatch(a, b)
+}
+
+// Fallback for a lead whose email/phone doesn't pass validation (typo'd
+// domain, 9-digit number, "N/A") — normalizeEmail/normalizePhone reject
+// these outright, which used to make findDuplicateAmong give up on the
+// candidate entirely and let it re-create a fresh lead on every resync/
+// webhook redelivery. An exact match on the raw trimmed/lowercased string
+// still catches "same junk value repeated" without risking a false match
+// between two different people who both merely lack clean contact info.
+function rawContactMatch(a, b) {
+  const rawEmailA = String(a.email || '').trim().toLowerCase()
+  const rawEmailB = String(b.email || '').trim().toLowerCase()
+  if (rawEmailA && rawEmailB && rawEmailA === rawEmailB) return true
+  const rawPhoneA = String(a.phone || '').trim().toLowerCase()
+  const rawPhoneB = String(b.phone || '').trim().toLowerCase()
+  return Boolean(rawPhoneA && rawPhoneB && rawPhoneA === rawPhoneB)
 }
 
 // Finds a single existing lead matching `candidate` — used when a new lead
@@ -46,7 +63,8 @@ export function isDuplicatePair(a, b) {
 export function findDuplicateAmong(leads, candidate) {
   const emailNorm = normalizeEmail(candidate.email)
   const phoneNorm = normalizePhone(candidate.phone)
-  if (!emailNorm && !(phoneNorm && phoneNorm.length === 10)) return null
+  const hasRawContact = String(candidate.email || '').trim() || String(candidate.phone || '').trim()
+  if (!emailNorm && !(phoneNorm && phoneNorm.length === 10) && !hasRawContact) return null
   return leads.find(l => isDuplicatePair(candidate, l)) || null
 }
 

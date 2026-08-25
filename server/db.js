@@ -146,28 +146,33 @@ function scheduleRemoteWrite() {
 // mean re-fetching every page of a large leads table on every single edit.
 let remoteLeadChangeCount = 0
 function applyRemoteLeadChange({ eventType, id, data }) {
-  if (Date.now() - lastLocalWriteAt < 2000 || !state || !id) return
+  if (!state || !id) return
   const idx = state.leads.findIndex(l => l.id === id)
-  if (eventType === 'DELETE') {
-    if (idx !== -1) state.leads.splice(idx, 1)
-  } else if (data) {
-    if (idx !== -1) {
-      state.leads[idx] = data
+  if (idx !== -1) {
+    // Known local row: this event can be an echo of our own recent write
+    // reflected back through Realtime — skip it to avoid clobbering newer
+    // local state with a stale echo. This suppression only makes sense for
+    // a row we already have; it must NOT gate the unknown-id branch below,
+    // or a genuine concurrent duplicate from another instance sails past
+    // the dedup merge check just because we happened to write something
+    // else in the last 2s.
+    if (Date.now() - lastLocalWriteAt < 2000) return
+    if (eventType === 'DELETE') state.leads.splice(idx, 1)
+    else if (data) state.leads[idx] = data
+  } else if (eventType !== 'DELETE' && data) {
+    // An id we don't recognize locally usually means this row was created
+    // by another server instance sharing this Supabase project. If it's
+    // actually the same person as a lead we already have (another instance
+    // raced the same email/phone past its own — necessarily local-only —
+    // dedup check before either write reached us), merge into the
+    // existing row instead of blindly appending a second one.
+    const existing = findDuplicateAmong(state.leads, data)
+    if (existing) {
+      const existingIdx = state.leads.indexOf(existing)
+      state.leads[existingIdx] = { ...existing, ...data, id: existing.id }
+      console.log(`[db] merged remote duplicate lead ${data.id} into existing ${existing.id}`)
     } else {
-      // An id we don't recognize locally usually means this row was created
-      // by another server instance sharing this Supabase project. If it's
-      // actually the same person as a lead we already have (another instance
-      // raced the same email/phone past its own — necessarily local-only —
-      // dedup check before either write reached us), merge into the
-      // existing row instead of blindly appending a second one.
-      const existing = findDuplicateAmong(state.leads, data)
-      if (existing) {
-        const existingIdx = state.leads.indexOf(existing)
-        state.leads[existingIdx] = { ...existing, ...data, id: existing.id }
-        console.log(`[db] merged remote duplicate lead ${data.id} into existing ${existing.id}`)
-      } else {
-        state.leads.push(data)
-      }
+      state.leads.push(data)
     }
   }
   scheduleRemoteWrite()
