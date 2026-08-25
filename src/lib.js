@@ -78,6 +78,7 @@ export function baseColumnValue(id, l, lookup) {
     case 'remarks': return l.remarks || ''
     case 'stage': return l.stage || ''
     case 'status': return l.status || ''
+    case 'statusGroup': return l.statusGroup || ''
     case 'fullName': return l.fullName || ''
     case 'email': return l.email || ''
     default: return ''

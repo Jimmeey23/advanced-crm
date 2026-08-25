@@ -32,7 +32,7 @@ function getColumnValue(col, l, lookup) {
 }
 
 const EMPTY_FILTERS = {
-  locationId: '', stage: '', status: '', associateId: '', sourceName: '', channel: '',
+  locationId: '', stage: '', status: '', statusGroup: '', associateId: '', sourceName: '', channel: '',
   classType: '', risk: '', minScore: '', maxScore: '', dateFrom: '', dateTo: '', createdWithinDays: '', flagged: ''
 }
 
@@ -72,7 +72,8 @@ const GROUP_OPTIONS = [
   { id: '', label: 'No grouping' },
   { id: 'locationId', label: 'Location' },
   { id: 'stage', label: 'Stage' },
-  { id: 'status', label: 'Status' },
+  { id: 'status', label: 'Outcome' },
+  { id: 'statusGroup', label: 'Status' },
   { id: 'sourceName', label: 'Source' },
   { id: 'associateId', label: 'Owner' },
   { id: 'classType', label: 'Class type' },
@@ -228,11 +229,11 @@ export default function Leads({ initialSearch = '' }) {
 
   const exportCsv = () => {
     const rows = data?.items || []
-    const head = ['Full Name', 'Phone', 'Email', 'Source', 'Stage', 'Status', 'Owner', 'Location', 'Class Type', 'AI Score', 'Created At', 'Remarks', 'Missed Follow-ups']
+    const head = ['Full Name', 'Phone', 'Email', 'Source', 'Stage', 'Status', 'Outcome', 'Owner', 'Location', 'Class Type', 'AI Score', 'Created At', 'Remarks', 'Missed Follow-ups']
     const lines = [head.join(',')]
     for (const l of rows) {
       const esc = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`
-      lines.push([l.fullName, l.phone, l.email, l.sourceName, l.stage, l.status, lookup.asnById[l.associateId]?.name || '', lookup.locById[l.locationId]?.name || '', l.classType, l.ai.score, l.createdAt, l.remarks, l.fu?.missedCount || 0].map(esc).join(','))
+      lines.push([l.fullName, l.phone, l.email, l.sourceName, l.stage, l.statusGroup, l.status, lookup.asnById[l.associateId]?.name || '', lookup.locById[l.locationId]?.name || '', l.classType, l.ai.score, l.createdAt, l.remarks, l.fu?.missedCount || 0].map(esc).join(','))
     }
     downloadText(`leads-${new Date().toISOString().slice(0, 10)}.csv`, lines.join('\n'))
     toast('Exported CSV')
@@ -395,9 +396,13 @@ export default function Leads({ initialSearch = '' }) {
             <option value="">All stages</option>
             {(boot?.stages || []).map(s => <option key={s}>{s}</option>)}
           </Filter>
-          <Filter label="Status" value={filters.status} onChange={setF('status')}>
-            <option value="">All statuses</option>
+          <Filter label="Outcome" value={filters.status} onChange={setF('status')}>
+            <option value="">All outcomes</option>
             <option value="open">Open</option><option value="won">Won</option><option value="lost">Lost</option>
+          </Filter>
+          <Filter label="Status" value={filters.statusGroup} onChange={setF('statusGroup')}>
+            <option value="">All statuses</option>
+            {(boot?.statusGroups || []).map(s => <option key={s}>{s}</option>)}
           </Filter>
           <Filter label="Associate" value={filters.associateId} onChange={setF('associateId')}>
             <option value="">All associates</option>
@@ -494,6 +499,7 @@ function groupKey(l, by, lookup) {
     case 'locationId': return lookup.locById[l.locationId]?.name || 'Unassigned'
     case 'stage': return l.stage || 'Unknown'
     case 'status': return (l.status || 'open').toUpperCase()
+    case 'statusGroup': return l.statusGroup || 'Unknown'
     case 'sourceName': return l.sourceName || 'Unknown'
     case 'associateId': return lookup.asnById[l.associateId]?.name || 'Unassigned'
     case 'classType': return l.classType || 'None'
@@ -596,7 +602,7 @@ function TableGrid({ items, boot, lookup, openLead, changeStage, toggleManualFla
   const leadW = widthOf('lead', 260)
   const stageW = widthOf('stage', 190)
   const autoFitColumns = () => {
-    const next = { select: 76, lead: 260, stage: 190, createdAt: 140, remarksField: 160, message: 112 }
+    const next = { select: 76, lead: 260, stage: 190, createdAt: 140, remarksField: 350, message: 112 }
     for (const c of visibleCols) next[c.id] = c.field === 'owner' ? 180 : c.field === 'score' ? 104 : 145
     for (const ch of Object.keys(CHANNELS)) next[`fu_${ch}`] = 54
     setColWidths?.(next)
@@ -607,7 +613,7 @@ function TableGrid({ items, boot, lookup, openLead, changeStage, toggleManualFla
     const startX = e.clientX
     const startWidth = widthOf(id, fallback)
     const onMove = (ev) => {
-      const next = Math.max(48, Math.min(540, Math.round(startWidth + ev.clientX - startX)))
+      const next = Math.max(48, Math.min(1200, Math.round(startWidth + ev.clientX - startX)))
       setColWidths?.(prev => ({ ...prev, [id]: next }))
     }
     const onUp = () => {
@@ -638,9 +644,9 @@ function TableGrid({ items, boot, lookup, openLead, changeStage, toggleManualFla
             <SortHead label="Stage" field="stage" width={stageW} onResize={startResize} onAutoFit={autoFitColumns} className={`px-4 py-3 font-semibold`} sortBy={sortBy} sortDir={sortDir} setSortBy={setSortBy} setSortDir={setSortDir} />
             <SortHead label="Created" field="createdAt" width={widthOf('createdAt', 150)} onResize={startResize} onAutoFit={autoFitColumns} className="px-4 py-3 font-semibold" sortBy={sortBy} sortDir={sortDir} setSortBy={setSortBy} setSortDir={setSortDir} />
             {visibleCols.map(c => <SortHead key={c.id} label={c.label} field={c.field || c.id} resizeId={c.id} width={widthOf(c.id, c.field === 'owner' ? 190 : c.field === 'score' ? 112 : 150)} onResize={startResize} onAutoFit={autoFitColumns} className="px-4 py-3 font-semibold" sortBy={sortBy} sortDir={sortDir} setSortBy={setSortBy} setSortDir={setSortDir} />)}
-            <th className="resizable-th px-4 py-3 font-semibold" style={{ width: widthOf('remarksField', 160), minWidth: widthOf('remarksField', 160) }}>
+            <th className="resizable-th px-4 py-3 font-semibold" style={{ width: widthOf('remarksField', 350), minWidth: widthOf('remarksField', 350) }}>
               <span>Remarks</span>
-              <span className="col-resize-handle" onDoubleClick={autoFitColumns} onMouseDown={startResize('remarksField', widthOf('remarksField', 160))} title="Drag to resize column. Double-click to auto-fit all columns." />
+              <span className="col-resize-handle" onDoubleClick={autoFitColumns} onMouseDown={startResize('remarksField', widthOf('remarksField', 350))} title="Drag to resize column. Double-click to auto-fit all columns." />
             </th>
             {Object.entries(CHANNELS).map(([ch, c], i) => (
               <th key={ch} className="resizable-th px-2 py-3 font-semibold text-center" style={{ width: widthOf(`fu_${ch}`, 56), minWidth: widthOf(`fu_${ch}`, 56) }} title={`${c.label} follow-up status`}>
@@ -1116,7 +1122,9 @@ function SummaryView({ items, boot, lookup }) {
   }
   const avgScore = scores.length ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length) : 0
   const maxStage = Math.max(1, ...Object.values(byStage))
-  const stageCols = { 'New Lead': '#3b82f6', Contacted: '#6366f1', 'Trial Booked': '#06b6d4', 'Trial Completed': '#10b981', 'Follow Up': '#f59e0b', 'Proposal Sent': '#a855f7', Negotiation: '#ec4899', Won: '#34d399', Lost: '#94a3b8' }
+  const stageStatusGroups = boot?.stageStatusGroups || {}
+  const stageCols = { 'Pre-Trial': '#3b82f6', 'Unresponsive': '#94a3b8', 'Trial Scheduled': '#06b6d4', 'Trial Completed': '#10b981', 'Post-Trial Follow-up': '#f59e0b', 'Disqualified': '#64748b', 'Not Interested': '#f43f5e', 'Lost': '#71717a', 'Won': '#34d399' }
+  const colorForStage = (stage) => stageCols[stageStatusGroups[stage]] || '#94a3b8'
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
@@ -1145,7 +1153,7 @@ function SummaryView({ items, boot, lookup }) {
             <div key={stage} className="flex items-center gap-2 text-[12px]">
               <span className="w-[120px] text-slate-400 truncate">{stage}</span>
               <div className="flex-1 h-2 rounded-full bg-white/5 overflow-hidden">
-                <div className="h-full rounded-full" style={{ width: `${(count / maxStage) * 100}%`, background: stageCols[stage] || '#94a3b8' }} />
+                <div className="h-full rounded-full" style={{ width: `${(count / maxStage) * 100}%`, background: colorForStage(stage) }} />
               </div>
               <span className="mono text-slate-300 w-6 text-right">{count}</span>
             </div>

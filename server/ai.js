@@ -1,6 +1,7 @@
 // Lightweight rule-based intelligence layer.
 // Generates lead scores, sentiment signals, insights and next-best-action
 // suggestions. Pure heuristics — no external LLM required.
+import { statusGroupOf } from './leadStatus.js'
 
 const POSITIVE = [
   'interested', 'keen', 'love', 'loved', 'confirm', 'confirmed', 'ready', 'enroll',
@@ -15,9 +16,14 @@ const NEGATIVE = [
 ]
 const NEUTRAL = ['will get back', 'get back', 'let us know', 'next week', 'schedule shared', 'will call', 'keep well', 'not keeping well']
 
-const STAGE_WEIGHT = {
-  'New Lead': 5, 'Contacted': 12, 'Trial Booked': 26, 'Trial Completed': 32,
-  'Follow Up': 16, 'Proposal Sent': 40, 'Negotiation': 52, 'Won': 96, 'Lost': 4
+// Keyed by statusGroup (server/leadStatus.js), not the raw `stage` string —
+// there are 30+ stage strings but only 9 funnel groups, and this used to be
+// keyed by a fabricated stage set ('New Lead', 'Trial Booked', ...) that
+// never matched any real lead.stage value, silently falling through to the
+// `|| 8` default for every lead.
+const STATUS_GROUP_WEIGHT = {
+  'Pre-Trial': 10, 'Unresponsive': 4, 'Trial Scheduled': 26, 'Trial Completed': 32,
+  'Post-Trial Follow-up': 40, 'Disqualified': 2, 'Not Interested': 2, 'Lost': 4, 'Won': 96
 }
 const SOURCE_WEIGHT = {
   'Client Referral': 12, 'Walk-in': 10, Instagram: 8, 'Website Form': 7,
@@ -47,7 +53,7 @@ function sentimentOf(lead) {
 
 function scoreLead(lead, db) {
   let score = 35
-  score += STAGE_WEIGHT[lead.stage] || 8
+  score += STATUS_GROUP_WEIGHT[statusGroupOf(lead.stage)] || 8
   score += SOURCE_WEIGHT[lead.sourceName] || 4
   if (lead.memberId) score += 5
 
@@ -78,16 +84,16 @@ function nextBestAction(lead) {
   if (lead.status === 'lost') return { label: 'Nurture', text: 'Log the reason, add to the reactivation list and revisit in 90 days.' }
   if (senti === 'negative') return { label: 'Re-engage', text: 'Try a different angle (new schedule, promo) or park in the nurture list.' }
 
-  const byStage = {
-    'New Lead': { label: 'First outreach', text: 'Contact within 24 hours — call first, then follow up on WhatsApp with a studio intro.' },
-    Contacted: { label: 'Qualify interest', text: 'Share trial class slots for their studio and try to lock a date and time.' },
-    'Trial Booked': { label: 'Confirm trial', text: 'Send a reminder and waiver link 24 hours before the trial class.' },
+  const byStatusGroup = {
+    'Pre-Trial': { label: 'First outreach', text: 'Contact within 24 hours — call first, then follow up on WhatsApp with a studio intro.' },
+    'Unresponsive': { label: 'Re-attempt contact', text: 'Try a different channel/time — call if WhatsApp was tried, or vice versa.' },
+    'Trial Scheduled': { label: 'Confirm trial', text: 'Send a reminder and waiver link 24 hours before the trial class.' },
     'Trial Completed': { label: 'Close after trial', text: 'Ask for feedback, share membership plans and propose a start date.' },
-    'Follow Up': { label: 'Value nudge', text: 'Send a personalised nudge (new schedule, limited offer) and request a call.' },
-    'Proposal Sent': { label: 'Follow up proposal', text: 'Soft-ask on the proposal — address objections and confirm pricing window.' },
-    Negotiation: { label: 'Close the deal', text: 'Prepare a final offer within approval limits and aim to close this week.' }
+    'Post-Trial Follow-up': { label: 'Value nudge', text: 'Send a personalised nudge (new schedule, limited offer) and request a call.' },
+    'Disqualified': { label: 'Log and park', text: 'Confirm the blocker (location/language/timing) and park — revisit only if circumstances change.' },
+    'Not Interested': { label: 'Nurture', text: 'Log the reason, add to the reactivation list and revisit in 90 days.' }
   }
-  return byStage[lead.stage] || { label: 'Reach out', text: 'Touch base and advance the conversation toward a trial class.' }
+  return byStatusGroup[statusGroupOf(lead.stage)] || { label: 'Reach out', text: 'Touch base and advance the conversation toward a trial class.' }
 }
 
 function insightsFor(lead, score) {
@@ -116,8 +122,8 @@ function insightsFor(lead, score) {
   if (score >= 70) out.push('High-scoring lead — prioritise in today\u2019s queue.')
   if (score >= 50 && score < 70) out.push('Moderate intent — a well-timed nudge can move this forward.')
 
-  const trialStages = ['Trial Booked', 'Trial Completed']
-  if (trialStages.includes(lead.stage) && !lead.memberId) out.push('Create the Momence member record now to map future sales history.')
+  const trialGroups = ['Trial Scheduled', 'Trial Completed']
+  if (trialGroups.includes(statusGroupOf(lead.stage)) && !lead.memberId) out.push('Create the Momence member record now to map future sales history.')
 
   if (lead.status === 'won') out.push('Won — referrer credit and a Google review ask can generate more referrals.')
   return out.slice(0, 5)
@@ -251,16 +257,16 @@ export function suggestFollowups(lead) {
     out.push({ channel: 'call', label: 'Call', text: `Call ${first} — missed follow-up by ${daysBetween(missed[0].date, new Date().toISOString().slice(0, 10))} days. Best time ${bestContactTime(lead)}.` })
   }
 
-  const byStage = {
-    'New Lead': [
+  const byStatusGroup = {
+    'Pre-Trial': [
       { channel: 'call', label: 'Call', text: `Call ${first} — introduce the ${center} studio and lock a trial slot.` },
       { channel: 'whatsapp', label: 'WhatsApp', text: `Hi ${first}! 👋 Welcome to Physique 57. We'd love to host you for a free trial at ${center} — does this week work?` }
     ],
-    Contacted: [
-      { channel: 'whatsapp', label: 'WhatsApp', text: `Hi ${first}, as promised here are the trial class slots at ${center}. Which one suits you best? I'll reserve your spot.` },
+    'Unresponsive': [
+      { channel: 'whatsapp', label: 'WhatsApp', text: `Hi ${first}, trying to reach you about a free trial at ${center} — what time works this week?` },
       { channel: 'sms', label: 'SMS', text: `Trial slots at ${center}: Tue 10:30a, Thu 7p, Sat 11a. Which works? — Physique 57` }
     ],
-    'Trial Booked': [
+    'Trial Scheduled': [
       { channel: 'whatsapp', label: 'WhatsApp', text: `Reminder ${first}! Your trial class at ${center} is coming up. Here's the waiver link — arrive 10 min early. Can't wait!` },
       { channel: 'call', label: 'Call', text: `Call ${first} — confirm trial attendance and share waiver link 24h before.` }
     ],
@@ -268,21 +274,13 @@ export function suggestFollowups(lead) {
       { channel: 'whatsapp', label: 'WhatsApp', text: `Hi ${first}, hope you loved the class! I can share membership plans for ${center} — would you like the monthly or annual options?` },
       { channel: 'email', label: 'Email', text: `Thanks for trying us out, ${first}! Attached are membership options for ${center}. Happy to answer any questions.` }
     ],
-    'Follow Up': [
+    'Post-Trial Follow-up': [
       { channel: 'whatsapp', label: 'WhatsApp', text: `Hi ${first}, a quick nudge — we have a limited-time offer on memberships at ${center}. Interested in details?` },
       { channel: 'call', label: 'Call', text: `Call ${first} — value nudge on membership, address any pricing objections.` }
-    ],
-    'Proposal Sent': [
-      { channel: 'email', label: 'Email', text: `Hi ${first}, following up on the proposal shared earlier. Happy to walk you through it or adjust the plan. What works for you?` },
-      { channel: 'call', label: 'Call', text: `Call ${first} — soft-ask on the proposal, confirm pricing window.` }
-    ],
-    Negotiation: [
-      { channel: 'call', label: 'Call', text: `Call ${first} — close on the negotiated offer. Offer is valid till end of week.` },
-      { channel: 'whatsapp', label: 'WhatsApp', text: `Hi ${first}, confirming the final offer from our end. Reply "yes" and I'll start the enrollment!` }
     ]
   }
 
-  const suggestions = byStage[stage] || [{ channel: 'whatsapp', label: 'WhatsApp', text: `Hi ${first}, touching base about Physique 57 at ${center} — happy to help with anything!` }]
+  const suggestions = byStatusGroup[statusGroupOf(stage)] || [{ channel: 'whatsapp', label: 'WhatsApp', text: `Hi ${first}, touching base about Physique 57 at ${center} — happy to help with anything!` }]
   for (const s of suggestions) {
     if (!out.some(o => o.channel === s.channel && o.text === s.text)) out.push(s)
   }
@@ -320,6 +318,7 @@ export function enrichLead(lead, db) {
 
   return {
     ...lead,
+    statusGroup: statusGroupOf(lead.stage),
     gpt: lead.aiGpt || null,
     fu: {
       missedCount: missed.length,

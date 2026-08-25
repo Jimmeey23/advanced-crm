@@ -8,7 +8,7 @@ export const BASE_FIELD_OPTIONS = [
   { id: 'valueEstimate', label: 'Value estimate' }, { id: 'classType', label: 'Class type' },
   { id: 'missedCount', label: 'Missed follow-ups' }, { id: 'lastOutreachDays', label: 'Days since outreach' },
   { id: 'created', label: 'Created date' }, { id: 'remarks', label: 'Remarks' },
-  { id: 'stage', label: 'Stage' }, { id: 'status', label: 'Status' }
+  { id: 'stage', label: 'Stage' }, { id: 'status', label: 'Outcome' }, { id: 'statusGroup', label: 'Status' }
 ]
 
 export const DEFAULT_COLUMNS = [
@@ -17,6 +17,7 @@ export const DEFAULT_COLUMNS = [
   { id: 'owner', kind: 'base', field: 'owner', label: 'Owner', type: 'text', hidden: false },
   { id: 'location', kind: 'base', field: 'location', label: 'Location', type: 'text', hidden: false },
   { id: 'score', kind: 'base', field: 'score', label: 'Score', type: 'number', decimals: 0, unit: '', hidden: false },
+  { id: 'statusGroup', kind: 'base', field: 'statusGroup', label: 'Status', type: 'text', hidden: false },
   { id: 'valueEstimate', kind: 'base', field: 'valueEstimate', label: 'Value', type: 'currency', decimals: 0, hidden: true },
   { id: 'classType', kind: 'base', field: 'classType', label: 'Class type', type: 'text', hidden: true },
   { id: 'missedCount', kind: 'base', field: 'missedCount', label: 'Missed follow-ups', type: 'number', decimals: 0, unit: '', hidden: true }

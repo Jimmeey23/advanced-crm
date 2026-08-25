@@ -75,8 +75,11 @@ export default function Pipeline() {
                 onDrop={e => { e.preventDefault(); e.currentTarget.style.borderColor = ''; const id = e.dataTransfer.getData('text/lead'); if (id && id !== dragId) moveStage(id, col.stage) }}
               >
                 <div className="pipeline-column-head px-3.5 py-3 flex items-center gap-2.5">
-                  <span className="w-2 h-2 rounded-full" style={{ background: columnColor(col.stage) }} />
-                  <span className="font-display text-[13px] font-semibold text-slate-200">{col.stage}</span>
+                  <span className="w-2 h-2 rounded-full" style={{ background: columnColor((boot?.stageStatusGroups || {})[col.stage]) }} />
+                  <div className="min-w-0">
+                    <div className="font-display text-[13px] font-semibold text-slate-200 truncate">{col.stage}</div>
+                    <div className="text-[10px] text-slate-500 truncate">{(boot?.stageStatusGroups || {})[col.stage]}</div>
+                  </div>
                   <span className="ml-auto chip bg-white/6 border border-white/10 text-slate-400 mono !py-0.5 !px-2 text-[11px]">{count}</span>
                 </div>
                 <div className="flex-1 px-2 pb-2 space-y-2 overflow-y-auto scrollbar-thin">
@@ -94,13 +97,18 @@ export default function Pipeline() {
   )
 }
 
-function columnColor(stage) {
-  const map = {
-    'New Lead': '#3b82f6', Contacted: '#6366f1', 'Trial Booked': '#06b6d4',
-    'Trial Completed': '#10b981', 'Follow Up': '#f59e0b', 'Proposal Sent': '#a855f7',
-    Negotiation: '#ec4899', Won: '#34d399', Lost: '#94a3b8'
-  }
-  return map[stage] || '#94a3b8'
+// Keyed by statusGroup (server/leadStatus.js), not the raw stage string —
+// there are 30+ real stage strings but only 9 funnel groups, and this used
+// to be keyed by a fabricated stage set ('New Lead', 'Trial Booked', ...)
+// that never matched any real lead.stage value, so every column silently
+// fell through to the default gray.
+const STATUS_GROUP_COLOR = {
+  'Pre-Trial': '#3b82f6', 'Unresponsive': '#94a3b8', 'Trial Scheduled': '#06b6d4',
+  'Trial Completed': '#10b981', 'Post-Trial Follow-up': '#f59e0b',
+  'Disqualified': '#64748b', 'Not Interested': '#f43f5e', 'Lost': '#71717a', 'Won': '#34d399'
+}
+function columnColor(statusGroup) {
+  return STATUS_GROUP_COLOR[statusGroup] || '#94a3b8'
 }
 
 function LeadCard({ lead, lookup, openLead, onDragStart }) {

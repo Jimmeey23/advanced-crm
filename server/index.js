@@ -16,6 +16,7 @@ import * as mailer from './mailer.js'
 import * as supabase from './supabaseStore.js'
 import { runReminderDigest, startReminderScheduler } from './reminders.js'
 import { parseCsv, autoMap, normalizeStage, normalizeStatus, parseFlexibleDate } from './csv.js'
+import { STATUS_GROUPS, statusGroupOf } from './leadStatus.js'
 import { resolveLeadFields, buildLeadPayloadFromResolved, suggestMappingFromKeys, isValidEmail, isValidPhone, LEAD_FIELD_ALIASES } from './leadFieldMapping.js'
 import * as googleSheets from './googleSheets.js'
 import * as zohoPeople from './zohoPeople.js'
@@ -98,10 +99,8 @@ function safePatch(lead, body) {
     if (key in body) lead[key] = body[key]
   }
   if ('stage' in body && body.stage) {
-    const s = String(body.stage).trim()
-    if (s.toLowerCase() === 'won') { lead.status = 'won'; if (!lead.convertedAt) lead.convertedAt = new Date().toISOString().slice(0, 10) }
-    else if (s.toLowerCase() === 'lost') lead.status = 'lost'
-    else lead.status = 'open'
+    lead.status = normalizeStatus(body.stage, body.status)
+    if (lead.status === 'won' && !lead.convertedAt) lead.convertedAt = new Date().toISOString().slice(0, 10)
   }
   if ('fullName' in body) lead.fullName = String(body.fullName || '').trim()
   lead.updatedAt = nowIso()
@@ -221,6 +220,8 @@ app.get('/api/bootstrap', (req, res) => {
     locations: db.locations,
     associates: db.associates,
     stages: db.stages,
+    statusGroups: STATUS_GROUPS,
+    stageStatusGroups: Object.fromEntries(db.stages.map(s => [s, statusGroupOf(s)])),
     sources: db.sources,
     channels: db.channels,
     classTypes: db.classTypes,
@@ -317,6 +318,7 @@ function applyFilters(list, q) {
   if (q.associateId) out = out.filter(l => l.associateId === q.associateId)
   if (q.stage) out = out.filter(l => l.stage === q.stage)
   if (q.status) out = out.filter(l => l.status === q.status)
+  if (q.statusGroup) out = out.filter(l => statusGroupOf(l.stage) === q.statusGroup)
   if (q.sourceName) out = out.filter(l => l.sourceName === q.sourceName)
   if (q.channel) out = out.filter(l => l.channel === q.channel)
   if (q.classType) out = out.filter(l => l.classType === q.classType)
@@ -1183,7 +1185,7 @@ app.get('/api/analytics/overview', (req, res) => {
   const revenueLastMonth = won.filter(l => monthKey(l.convertedAt) === lastMonth)
     .reduce((s, l) => s + (l.valueEstimate || 0), 0)
 
-  const trialBooked = open.filter(l => ['Trial Booked', 'Trial Completed'].includes(l.stage)).length
+  const trialBooked = open.filter(l => ['Trial Scheduled', 'Trial Completed'].includes(statusGroupOf(l.stage))).length
 
   const unassigned = open.filter(l => !l.associateId).length
 
