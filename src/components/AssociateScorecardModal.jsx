@@ -4,7 +4,7 @@ import {
   AlertTriangle, MapPin, X
 } from 'lucide-react'
 import {
-  ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip
+  ResponsiveContainer, LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip
 } from 'recharts'
 import { useApp } from '../store.jsx'
 import { useFetch } from '../hooks.js'
@@ -13,10 +13,10 @@ import { Modal, normalizePhotoUrl } from '../ui.jsx'
 import { money } from '../lib.js'
 
 const tooltipStyle = {
-  background: '#ffffff', border: '1px solid rgba(15,23,42,0.12)', borderRadius: 14,
-  fontSize: 12, color: '#0f172a', boxShadow: '0 16px 38px rgba(15,23,42,.12)'
+  background: 'var(--scorecard-tooltip-bg)', border: '1px solid var(--scorecard-line)', borderRadius: 6,
+  fontSize: 12, color: 'var(--scorecard-text)', boxShadow: '0 10px 28px rgba(0,0,0,.16)'
 }
-const AXIS = { fill: '#5b6278', fontSize: 10.5 }
+const AXIS = { fill: 'var(--scorecard-muted)', fontSize: 10.5 }
 
 export default function AssociateScorecardModal({ associateId, onClose, openLead }) {
   const { data, loading, error } = useFetch(
@@ -40,8 +40,8 @@ export default function AssociateScorecardModal({ associateId, onClose, openLead
                 <div className="associate-scorecard-location"><MapPin size={12} />{data.associate.locationName || 'No studio'}<span className={`associate-scorecard-status ${data.associate.active ? 'is-active' : 'is-inactive'}`}>{data.associate.active ? 'Active' : 'Inactive'}</span></div>
               </div>
               <div className="associate-scorecard-monthly">
-              <MiniStat label="This month" value={`${data.thisMonth.won} / ${data.thisMonth.target}`} sub="won vs target" color={attainmentColor(data.thisMonth.attainmentPct)} />
-              <MiniStat label="Attainment" value={`${data.thisMonth.attainmentPct}%`} sub={`${data.thisMonth.newLeads} new this month`} color={attainmentColor(data.thisMonth.attainmentPct)} />
+              <MiniStat label="Monthly revenue" value={money(data.thisMonth.revenue)} sub={`${money(data.thisMonth.revenueTarget)} target`} color={attainmentColor(data.thisMonth.attainmentPct)} />
+              <MiniStat label="Revenue attainment" value={`${data.thisMonth.attainmentPct}%`} sub={`${data.thisMonth.won} wins this month`} color={attainmentColor(data.thisMonth.attainmentPct)} />
               <MiniStat label="Avg AI score" value={data.totals.avgScore} sub={`${data.totals.hot} hot leads`} color="#a78bfa" />
               </div>
             </div>
@@ -60,7 +60,7 @@ export default function AssociateScorecardModal({ associateId, onClose, openLead
               <div className="h-[160px]">
                 <ResponsiveContainer width="100%" height="100%">
                   <LineChart data={data.history} margin={{ top: 5, right: 5, left: -20, bottom: 0 }}>
-                    <CartesianGrid stroke="rgba(255,255,255,0.06)" vertical={false} />
+                    <CartesianGrid stroke="var(--scorecard-grid-line)" vertical={false} />
                     <XAxis dataKey="periodLabel" tick={AXIS} axisLine={false} tickLine={false} />
                     <YAxis tick={AXIS} axisLine={false} tickLine={false} />
                     <Tooltip contentStyle={tooltipStyle} />
@@ -71,10 +71,26 @@ export default function AssociateScorecardModal({ associateId, onClose, openLead
               </div>
             </div>
 
-            <div className="associate-scorecard-section overflow-hidden">
-              <div className="px-4 py-2.5 border-b border-white/8 text-[12px] font-semibold text-slate-200 flex items-center gap-2">
-                <CalendarCheck2 size={13} className="text-amber-400" /> Follow-up health
+            <PerformanceComparison data={data} />
+          </div>
+
+          <div className="associate-scorecard-grid">
+            <div className="associate-scorecard-section associate-scorecard-chart">
+              <h3 className="font-display font-semibold text-white text-[13px] mb-2">Monthly revenue</h3>
+              <div className="h-[160px]">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={data.history} margin={{ top: 5, right: 5, left: -10, bottom: 0 }}>
+                    <CartesianGrid stroke="var(--scorecard-grid-line)" vertical={false} />
+                    <XAxis dataKey="periodLabel" tick={AXIS} axisLine={false} tickLine={false} />
+                    <YAxis tick={AXIS} tickFormatter={compactMoney} axisLine={false} tickLine={false} />
+                    <Tooltip contentStyle={tooltipStyle} formatter={value => money(value)} />
+                    <Bar dataKey="revenue" name="Revenue" fill="#0ea5e9" radius={[3, 3, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
               </div>
+            </div>
+            <div className="associate-scorecard-section overflow-hidden">
+              <div className="px-4 py-2.5 border-b border-white/8 text-[12px] font-semibold text-slate-200 flex items-center gap-2"><CalendarCheck2 size={13} className="text-amber-400" /> Follow-up health</div>
               <div className="p-4 grid grid-cols-2 gap-3">
                 <StatCard icon={<CalendarCheck2 size={13} />} label="Completion" value={`${data.followUpHealth.completionRate}%`} color="#fbbf24" />
                 <StatCard icon={<AlertTriangle size={13} />} label="Overdue" value={data.followUpHealth.overdueCount} color="#f43f5e" />
@@ -127,6 +143,23 @@ function attainmentColor(pct) {
   return '#10b981'
 }
 
+function compactMoney(value) {
+  const amount = Number(value) || 0
+  if (amount >= 10000000) return `₹${(amount / 10000000).toFixed(1)}Cr`
+  if (amount >= 100000) return `₹${(amount / 100000).toFixed(1)}L`
+  if (amount >= 1000) return `₹${Math.round(amount / 1000)}K`
+  return `₹${amount}`
+}
+
+function PerformanceComparison({ data }) {
+  const rows = [
+    { label: 'Revenue target', actual: data.thisMonth.revenue, target: data.thisMonth.revenueTarget, value: money(data.thisMonth.revenue), targetLabel: money(data.thisMonth.revenueTarget), color: '#0ea5e9' },
+    { label: 'Conversion target', actual: data.thisMonth.conversion, target: data.thisMonth.conversionTarget, value: `${data.thisMonth.conversion}%`, targetLabel: `${data.thisMonth.conversionTarget}%`, color: '#10b981' },
+    { label: 'Follow-up completion', actual: data.followUpHealth.completionRate, target: 100, value: `${data.followUpHealth.completionRate}%`, targetLabel: '100%', color: '#f59e0b' }
+  ]
+  return <div className="associate-scorecard-section associate-comparison"><div className="associate-report-heading"><Target size={13} /> Actual vs target</div><div className="associate-comparison-list">{rows.map(row => { const pct = row.target ? Math.min(100, Math.round((row.actual / row.target) * 100)) : 0; return <div key={row.label} className="associate-comparison-row"><div><span>{row.label}</span><strong>{row.value} <small>of {row.targetLabel}</small></strong></div><div className="associate-comparison-track"><i style={{ width: `${pct}%`, background: row.color }} /></div></div> })}</div></div>
+}
+
 function MiniStat({ label, value, sub, color }) {
   return (
     <div className="associate-scorecard-mini-stat">
@@ -148,12 +181,14 @@ function StatCard({ icon, label, value, sub, color }) {
 }
 
 function BreakdownTable({ title, rows, labelKey, countOnly }) {
+  const maxCount = Math.max(1, ...(rows || []).map(row => row.count || 0))
   return (
     <div className="associate-scorecard-section overflow-hidden">
       <div className="px-4 py-2.5 border-b border-white/8 text-[12px] font-semibold text-slate-200">{title}</div>
       <div className="max-h-[180px] overflow-y-auto scrollbar-thin">
         {rows?.length ? rows.map(r => (
-          <div key={r[labelKey]} className="flex items-center gap-2 px-4 py-1.5 text-[12px] border-b border-white/5 last:border-0">
+          <div key={r[labelKey]} className="associate-breakdown-row flex items-center gap-2 px-4 py-1.5 text-[12px] border-b border-white/5 last:border-0">
+            <i style={{ width: `${Math.max(3, (r.count / maxCount) * 100)}%` }} />
             <span className="text-slate-300 flex-1 truncate">{r[labelKey]}</span>
             <span className="mono text-slate-400">{r.count}</span>
             {!countOnly && <span className="mono text-emerald-400 text-[10.5px] shrink-0 w-10 text-right">{r.wonRate}%</span>}

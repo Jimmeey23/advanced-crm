@@ -2341,8 +2341,11 @@ app.get('/api/analytics/associate/:id/scorecard', (req, res) => {
   const lastMonthKey = new Date(now.getFullYear(), now.getMonth() - 1, 1).toISOString().slice(0, 7)
   const newThisMonth = owned.filter(l => (l.createdAt || '').slice(0, 7) === thisMonthKey).length
   const wonThisMonth = owned.filter(l => l.status === 'won' && (l.convertedAt || l.createdAt || '').slice(0, 7) === thisMonthKey).length
+  const revenueThisMonth = owned.filter(l => l.status === 'won' && (l.convertedAt || l.createdAt || '').slice(0, 7) === thisMonthKey)
+    .reduce((sum, lead) => sum + (Number(lead.valueEstimate) || 0), 0)
   const wonLastMonth = owned.filter(l => l.status === 'won' && (l.convertedAt || l.createdAt || '').slice(0, 7) === lastMonthKey).length
-  const target = associate.targetMonthly || 10
+  const revenueTarget = associate.revenueTargetMonthly || 0
+  const conversionTarget = associate.conversionTargetPct || 0
 
   const sourceMap = {}
   for (const l of owned) {
@@ -2368,7 +2371,7 @@ app.get('/api/analytics/associate/:id/scorecard', (req, res) => {
     associate: {
       id: associate.id, name: associate.name, color: associate.color, photoUrl: associate.photoUrl, photoZoom: associate.photoZoom, photoPosX: associate.photoPosX, photoPosY: associate.photoPosY,
       locationId: associate.locationId, locationName: loc?.name || '',
-      active: associate.active !== false, targetMonthly: target
+      active: associate.active !== false, revenueTargetMonthly: revenueTarget, conversionTargetPct: conversionTarget
     },
     totals: {
       total: owned.length, open: open.length, won: won.length, lost: lost.length,
@@ -2378,7 +2381,10 @@ app.get('/api/analytics/associate/:id/scorecard', (req, res) => {
     },
     thisMonth: {
       newLeads: newThisMonth, won: wonThisMonth, wonLastMonth,
-      target, attainmentPct: target ? Math.min(999, Math.round((wonThisMonth / target) * 100)) : 0
+      revenue: revenueThisMonth, revenueTarget,
+      conversion: owned.length ? Math.round((won.length / owned.length) * 100) : 0,
+      conversionTarget,
+      attainmentPct: revenueTarget ? Math.min(999, Math.round((revenueThisMonth / revenueTarget) * 100)) : 0
     },
     followUpHealth: { total: followUps, missed, overdueCount, completionRate: followUpRate },
     history,
