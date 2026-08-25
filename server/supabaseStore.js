@@ -64,10 +64,16 @@ export async function loadState() {
   const settingsMeta = settingsRes.data?.data || {}
   const persisted = { ...meta, ...settingsMeta }
 
+  // .range() pagination has no meaning without a stable sort — Postgres
+  // doesn't guarantee row order across separate queries otherwise, so
+  // consecutive pages could return overlapping rows (duplicates injected
+  // into the in-memory leads array on every single server boot) or skip
+  // rows entirely. Order by the primary key so each page is a disjoint,
+  // deterministic slice.
   const leads = []
   let from = 0
   for (;;) {
-    const { data, error } = await c.from(LEADS_TABLE).select('data').range(from, from + 999)
+    const { data, error } = await c.from(LEADS_TABLE).select('data').order('id', { ascending: true }).range(from, from + 999)
     if (error) throw new Error(`supabase load leads: ${error.message}`)
     if (!data || data.length === 0) break
     leads.push(...data.map(r => r.data))
