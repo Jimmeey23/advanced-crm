@@ -618,19 +618,19 @@ function buildWebhookLeadPayload(resolved, integ, record) {
 // specific enough to stand alone; a phone match additionally requires the
 // first name to agree, so two different people sharing a number no longer
 // merge.
-function firstNameNorm(name) {
-  return String(name || '').trim().toLowerCase().split(/\s+/)[0] || ''
+function fullNameNorm(name) {
+  return String(name || '').trim().toLowerCase().replace(/\s+/g, ' ')
 }
 
 function findDuplicateLead(email, phone, name) {
   const emailNorm = email ? String(email).trim().toLowerCase() : ''
   const phoneNorm = phone ? String(phone).replace(/\D/g, '') : ''
-  const nameNorm = firstNameNorm(name)
+  const nameNorm = fullNameNorm(name)
   if (!emailNorm && !phoneNorm) return null
   return db.leads.find(l => {
     if (emailNorm && l.email && l.email !== '-' && String(l.email).trim().toLowerCase() === emailNorm) return true
     if (phoneNorm && l.phone && String(l.phone).replace(/\D/g, '') === phoneNorm) {
-      return nameNorm && nameNorm === firstNameNorm(l.fullName)
+      return nameNorm && nameNorm === fullNameNorm(l.fullName)
     }
     return false
   })
