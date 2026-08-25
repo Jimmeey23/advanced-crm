@@ -1,8 +1,9 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Search, Send, Sparkles, MessageCircle, Phone, Mail, MessageSquareText,
-  CheckCircle2, Circle, ListFilter, BookmarkPlus, ArrowUpDown, CheckCheck,
-  Building2, UserRound, Tag, Info, Ban
+  CheckCircle2, Circle, ListFilter, BookmarkPlus, ArrowUpDown, CheckCheck, Check,
+  Building2, UserRound, Tag, Info, Ban, Globe2, Languages, Image as ImageIcon,
+  FileText, Mic, Clock
 } from 'lucide-react'
 import { useApp } from '../store.jsx'
 import { api, API_BASE } from '../api.js'
@@ -48,6 +49,39 @@ function timeAgo(iso) {
   return d.toLocaleDateString()
 }
 
+function fullTimestamp(sentAt) {
+  if (!sentAt) return ''
+  return new Date(sentAt).toLocaleString(undefined, {
+    weekday: 'short', year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
+  })
+}
+
+function dateLabel(sentAt) {
+  const d = new Date(sentAt)
+  const today = new Date()
+  const yesterday = new Date(today); yesterday.setDate(today.getDate() - 1)
+  const sameDay = (a, b) => a.toDateString() === b.toDateString()
+  if (sameDay(d, today)) return 'Today'
+  if (sameDay(d, yesterday)) return 'Yesterday'
+  return d.toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric', year: d.getFullYear() !== today.getFullYear() ? 'numeric' : undefined })
+}
+
+function sortMessages(list) {
+  return [...(list || [])].sort((a, b) => (a.sentAt || 0) - (b.sentAt || 0))
+}
+
+const MESSAGE_TYPE_ICON = { image: ImageIcon, file: FileText, document: FileText, audio: Mic, voice: Mic }
+
+function DeliveryTicks({ status }) {
+  if (!status) return null
+  const s = String(status).toLowerCase()
+  if (s === 'failed') return <span className="text-rose-400" title="Failed to deliver">!</span>
+  if (s === 'read') return <CheckCheck size={12} className="text-blue-400" />
+  if (s === 'delivered') return <CheckCheck size={12} className="text-slate-400" />
+  if (s === 'sent') return <Check size={12} className="text-slate-500" />
+  return null
+}
+
 function ConversationRow({ row, active, onClick }) {
   const meta = CHANNEL_META[row.lastMessage?.channel] || CHANNEL_META.whatsapp
   const Icon = meta.icon
@@ -83,6 +117,7 @@ function ConversationRow({ row, active, onClick }) {
 
 function MessageBubble({ msg }) {
   const outbound = msg.direction === 'outbound'
+  const TypeIcon = MESSAGE_TYPE_ICON[String(msg.type || '').toLowerCase()]
   return (
     <div className={`flex ${outbound ? 'justify-end' : 'justify-start'}`}>
       <div className={`max-w-[75%] rounded-2xl px-3.5 py-2 text-[13px] ${
@@ -93,9 +128,25 @@ function MessageBubble({ msg }) {
             <Sparkles size={10} /> Template: {msg.templateName}
           </div>
         )}
-        <div className="whitespace-pre-wrap">{msg.content || (msg.templateName ? '' : '(no content)')}</div>
-        <div className="text-[10px] text-slate-500 mt-1 text-right">{timeAgo(msg.sentAt)}</div>
+        {TypeIcon && (
+          <div className="text-[10.5px] uppercase tracking-wider text-slate-400 font-semibold mb-1 flex items-center gap-1">
+            <TypeIcon size={10} /> {msg.type}
+          </div>
+        )}
+        <div className="whitespace-pre-wrap">{msg.content || (msg.templateName || TypeIcon ? '' : '(no content)')}</div>
+        <div className="flex items-center justify-end gap-1 mt-1" title={fullTimestamp(msg.sentAt)}>
+          <span className="text-[10px] text-slate-500 flex items-center gap-1"><Clock size={9} /> {timeAgo(msg.sentAt)}</span>
+          {outbound && <DeliveryTicks status={msg.status} />}
+        </div>
       </div>
+    </div>
+  )
+}
+
+function DateSeparator({ sentAt }) {
+  return (
+    <div className="flex items-center justify-center py-1">
+      <span className="text-[10.5px] text-slate-500 bg-white/5 border border-white/10 rounded-full px-2.5 py-0.5">{dateLabel(sentAt)}</span>
     </div>
   )
 }
@@ -107,6 +158,7 @@ export default function Inbox() {
   const [selectedLeadId, setSelectedLeadId] = useState(null)
   const [messages, setMessages] = useState([])
   const [loadingThread, setLoadingThread] = useState(false)
+  const [profile, setProfile] = useState(null)
 
   const [q, setQ] = useState('')
   const [studio, setStudio] = useState('')
@@ -193,17 +245,35 @@ export default function Inbox() {
 
   const selected = rows.find(r => r.leadId === selectedLeadId) || null
 
+  const loadProfile = async (leadId) => {
+    try {
+      const r = await api.get(`/api/inbox/${leadId}/profile`)
+      setProfile(r.profile || null)
+    } catch (e) { /* enrichment is best-effort */ }
+  }
+
   const openThread = async (leadId) => {
     setSelectedLeadId(leadId)
     setLoadingThread(true)
     setText('')
+    setProfile(null)
     try {
       const r = await api.get(`/api/inbox/${leadId}/messages`)
-      setMessages(r.messages || [])
+      setMessages(sortMessages(r.messages))
       await api.post(`/api/inbox/${leadId}/read`)
       setRows(curr => curr.map(row => row.leadId === leadId ? { ...row, unreadCount: 0 } : row))
+      loadProfile(leadId)
     } finally { setLoadingThread(false) }
   }
+
+  // Keeps the enriched respond.io profile panel (tags, custom fields,
+  // assignee, language/country) reasonably fresh while a conversation stays
+  // open, without a live API call on every render.
+  useEffect(() => {
+    if (!selectedLeadId) return
+    const id = setInterval(() => loadProfile(selectedLeadId), 5 * 60 * 1000)
+    return () => clearInterval(id)
+  }, [selectedLeadId])
 
   // Real-time: reuse the app-wide SSE channel already open in store.jsx by
   // listening for the same 'respondio-message' broadcast type via a second,
@@ -410,7 +480,16 @@ export default function Inbox() {
 
             <div className="flex-1 overflow-y-auto scrollbar-thin p-4 space-y-2.5">
               {loadingThread && <div className="flex justify-center py-8"><Spinner size={18} /></div>}
-              {!loadingThread && messages.map(m => <MessageBubble key={m.id} msg={m} />)}
+              {!loadingThread && sortMessages(messages).map((m, i, arr) => {
+                const prev = arr[i - 1]
+                const showSeparator = !prev || new Date(prev.sentAt).toDateString() !== new Date(m.sentAt).toDateString()
+                return (
+                  <React.Fragment key={m.id}>
+                    {showSeparator && <DateSeparator sentAt={m.sentAt} />}
+                    <MessageBubble msg={m} />
+                  </React.Fragment>
+                )
+              })}
               <div ref={threadEndRef} />
             </div>
 
@@ -541,7 +620,52 @@ export default function Inbox() {
               <Tag size={13} className="text-slate-500 shrink-0" />
               <span className="truncate">{CHANNEL_META[selected.lastMessage?.channel]?.label || 'WhatsApp'}</span>
             </div>
+            {profile?.countryCode && (
+              <div className="flex items-center gap-2 text-[12px] text-slate-300">
+                <Globe2 size={13} className="text-slate-500 shrink-0" />
+                <span className="truncate">{profile.countryCode}</span>
+              </div>
+            )}
+            {profile?.language && (
+              <div className="flex items-center gap-2 text-[12px] text-slate-300">
+                <Languages size={13} className="text-slate-500 shrink-0" />
+                <span className="truncate">{profile.language}</span>
+              </div>
+            )}
+            {profile?.assignee && (profile.assignee.firstName || profile.assignee.email) && (
+              <div className="flex items-center gap-2 text-[12px] text-slate-300">
+                <UserRound size={13} className="text-slate-500 shrink-0" />
+                <span className="truncate">Respond.io owner: {[profile.assignee.firstName, profile.assignee.lastName].filter(Boolean).join(' ') || profile.assignee.email}</span>
+              </div>
+            )}
           </div>
+
+          {Array.isArray(profile?.tags) && profile.tags.length > 0 && (
+            <div className="border-t border-white/8 pt-3 space-y-1.5">
+              <label className="text-[10.5px] uppercase tracking-wider text-slate-500 font-semibold block">Tags</label>
+              <div className="flex flex-wrap gap-1">
+                {profile.tags.map((t, i) => (
+                  <span key={i} className="chip bg-white/5 border border-white/10 text-slate-300 !text-[10px]">{typeof t === 'string' ? t : (t.name || t.label)}</span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {Array.isArray(profile?.customFields) && profile.customFields.filter(f => f?.value !== undefined && f?.value !== null && f?.value !== '').length > 0 && (
+            <div className="border-t border-white/8 pt-3 space-y-1.5">
+              <label className="text-[10.5px] uppercase tracking-wider text-slate-500 font-semibold block">Custom fields</label>
+              <div className="space-y-1">
+                {profile.customFields
+                  .filter(f => f?.value !== undefined && f?.value !== null && f?.value !== '')
+                  .map((f, i) => (
+                    <div key={f.id || i} className="flex items-center justify-between gap-2 text-[11.5px]">
+                      <span className="text-slate-500 truncate">{f.name || f.id}</span>
+                      <span className="text-slate-300 truncate max-w-[130px] text-right">{String(f.value)}</span>
+                    </div>
+                  ))}
+              </div>
+            </div>
+          )}
 
           <div className="border-t border-white/8 pt-3 space-y-2">
             <label className="text-[10.5px] uppercase tracking-wider text-slate-500 font-semibold block">Assigned to</label>

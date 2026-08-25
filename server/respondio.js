@@ -271,6 +271,20 @@ export async function findContact(db, { email, phone, lead } = {}) {
   }
 }
 
+// Fetch a contact directly by its respond.io id — used to enrich the Inbox
+// profile panel (tags, custom fields, assignee, language/country) for a
+// conversation whose contact id we already know, without re-resolving a
+// lead's email/phone identifier.
+export async function getContactById(db, contactId) {
+  if (!contactId) return null
+  try {
+    const data = await api(db, `/contact/id:${contactId}`)
+    return pickContact(data)
+  } catch (e) {
+    return null
+  }
+}
+
 // Create or update the lead's contact and return the contact object (with id).
 export async function getOrCreateContact(db, lead) {
   const { firstName, lastName } = splitName(lead.fullName || lead.name)
@@ -477,7 +491,8 @@ export async function syncLeadConversations(db, lead) {
       type: m.message?.type || 'text',
       content: m.message?.text || m.message?.template?.name || '',
       sentAt: m.timestamp || m.sentAt || m.createdAt || m.status?.[0]?.timestamp || null,
-      channel: m.channelId || null
+      channel: m.channelId || null,
+      status: Array.isArray(m.status) && m.status.length ? (m.status[m.status.length - 1]?.type || m.status[m.status.length - 1]?.status || null) : null
     }))
     .sort((a, b) => String(a.sentAt || '').localeCompare(String(b.sentAt || '')))
 

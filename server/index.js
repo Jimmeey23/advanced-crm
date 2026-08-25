@@ -2498,6 +2498,11 @@ app.post('/api/respondio/webhook/:key', (req, res) => {
 // merging with anything already recorded locally. Dedupes by content (and,
 // when respond.io provides one, its messageId too — see
 // inbox.knownMessageKeys for why a message needs to match on either form).
+function latestStatus(statusList) {
+  if (!Array.isArray(statusList) || !statusList.length) return null
+  return statusList[statusList.length - 1]?.type || statusList[statusList.length - 1]?.status || null
+}
+
 async function backfillLeadMessages(lead) {
   try {
     const remote = await respondio.syncLeadConversations(db, lead)
@@ -2505,7 +2510,7 @@ async function backfillLeadMessages(lead) {
     for (const m of remote?.conversations?.[0]?.messages || []) {
       const keys = inbox.messageDedupeKeys(m.id, m.direction, m.content)
       if (!keys.some(k => known.has(k))) {
-        inbox.recordMessage(db, lead.id, { direction: m.direction, channel: 'whatsapp', type: m.type, content: m.content, sentAt: inbox.normalizeSentAt(m.sentAt), sourceId: m.id || null })
+        inbox.recordMessage(db, lead.id, { direction: m.direction, channel: 'whatsapp', type: m.type, content: m.content, sentAt: inbox.normalizeSentAt(m.sentAt), sourceId: m.id || null, status: m.status || null })
         keys.forEach(k => known.add(k))
       }
     }
@@ -2525,7 +2530,7 @@ async function backfillContactMessages(key, contactId) {
       const keys = inbox.messageDedupeKeys(m.messageId, direction, content)
       if (!keys.some(k => known.has(k))) {
         const sentAt = inbox.normalizeSentAt(m.timestamp || m.sentAt || m.createdAt || m.status?.[0]?.timestamp || null)
-        inbox.recordMessage(db, key, { direction, channel: 'whatsapp', type: m.message?.type || 'text', content, sentAt, sourceId: m.messageId || null })
+        inbox.recordMessage(db, key, { direction, channel: 'whatsapp', type: m.message?.type || 'text', content, sentAt, sourceId: m.messageId || null, status: latestStatus(m.status) })
         keys.forEach(k => known.add(k))
       }
     }
@@ -2772,6 +2777,30 @@ app.get('/api/inbox/:key/messages', async (req, res) => {
     save()
   }
   res.json({ messages: inbox.listMessages(db, lead.id) })
+})
+
+// Serves the cached respond.io contact profile (tags, custom fields,
+// assignee, language/country) instantly, kicking off a background refresh
+// when the cache is stale rather than blocking the request on respond.io —
+// the panel polls this every 5 min while a conversation is open.
+app.get('/api/inbox/:key/profile', async (req, res) => {
+  const key = req.params.key
+  inbox.ensure(db)
+  const lead = key.startsWith('contact:') ? null : leadById(key)
+  if (!lead && !key.startsWith('contact:')) return res.status(404).json({ error: 'Lead not found' })
+  const contactId = key.startsWith('contact:') ? key.slice('contact:'.length) : lead?.respondId
+  const cached = inbox.getCachedProfile(db, key)
+  res.json({ profile: cached, stale: inbox.isProfileStale(db, key) })
+  if (!contactId || !respondio.isConfigured(db)) return
+  if (!inbox.isProfileStale(db, key)) return
+  try {
+    const fresh = await respondio.getContactById(db, contactId)
+    if (fresh) {
+      inbox.setCachedProfile(db, key, fresh)
+      save()
+      broadcastChange('respondio-message', { leadId: key })
+    }
+  } catch (e) { /* best-effort background refresh */ }
 })
 
 app.post('/api/inbox/:key/read', (req, res) => {

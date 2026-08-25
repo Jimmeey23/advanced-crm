@@ -129,10 +129,10 @@ export function normalizeSentAt(input) {
 // backfill) — pass it so a re-sync can dedupe by stable id instead of
 // content+timestamp, which breaks for inbound messages (see hasReliableTime
 // below).
-export function recordMessage(db, key, { direction, channel, type = 'text', content = '', templateName = '', sentAt, sourceId = null } = {}) {
+export function recordMessage(db, key, { direction, channel, type = 'text', content = '', templateName = '', sentAt, sourceId = null, status = null } = {}) {
   ensure(db)
   const when = normalizeSentAt(sentAt)
-  const message = { id: uid('imsg'), sourceId, key, direction, channel: channel || 'whatsapp', type, content, templateName, sentAt: when }
+  const message = { id: uid('imsg'), sourceId, key, direction, channel: channel || 'whatsapp', type, content, templateName, sentAt: when, status }
   db.inbox.messages.push(message)
   const c = conv(db, key)
   c.lastMessageAt = when
@@ -191,6 +191,33 @@ export function assign(db, key, associateId) {
   const c = conv(db, key)
   c.assigneeId = associateId || null
   return c
+}
+
+// ---------- respond.io contact profile enrichment ----------
+// Cached alongside the conversation record so the Inbox panel shows tags,
+// custom fields, assignee, language/country, etc. instantly instead of
+// blocking on a live respond.io call every time a thread is opened. The
+// panel polls the /profile endpoint every 5 min while open; that route
+// serves this cache immediately and refreshes it in the background once
+// it's stale, rather than making the request wait on respond.io.
+const PROFILE_MAX_AGE_MS = 5 * 60 * 1000
+
+export function getCachedProfile(db, key) {
+  const c = conv(db, key)
+  return c.profile || null
+}
+
+export function isProfileStale(db, key) {
+  const c = conv(db, key)
+  if (!c.profile) return true
+  return Date.now() - (c.profileFetchedAt || 0) > PROFILE_MAX_AGE_MS
+}
+
+export function setCachedProfile(db, key, contact) {
+  const c = conv(db, key)
+  c.profile = contact
+  c.profileFetchedAt = Date.now()
+  return c.profile
 }
 
 // Builds the inbox list: one row per key that has a conversation record,
