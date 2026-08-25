@@ -829,7 +829,6 @@ function FuCell({ lead, ch, forceMissed = false }) {
   // follow-ups directly so an overdue-but-never-logged one still shows red
   // instead of silently looking identical to "never scheduled."
   const hasOverduePending = forceMissed || (!filled && (lead.followUps || []).some(f => f.channel === ch && f.done === false && f.date && f.date !== '-' && f.date < today))
-  const suggestion = lead.ai?.followupSuggestions?.find(s => s.channel === ch)?.text
   const Icon = CHANNELS[ch].icon
   const anchorRef = useRef(null)
   const [popOpen, setPopOpen] = useState(false)
@@ -856,7 +855,7 @@ function FuCell({ lead, ch, forceMissed = false }) {
 
   return (
     <>
-      <Tip content={<FuTip lead={lead} ch={ch} o={o} suggestion={suggestion} isMissed={isMissed || hasOverduePending} />}>
+      <Tip content={<FuTip lead={lead} ch={ch} o={o} isMissed={isMissed || hasOverduePending} />}>
         <span
           ref={anchorRef}
           onClick={openPopover}
@@ -967,7 +966,7 @@ function QuickFollowUpPopover({ lead, ch, pos, onClose }) {
   )
 }
 
-function FuTip({ lead, ch, o, suggestion, isMissed }) {
+function FuTip({ lead, ch, o, isMissed }) {
   const meta = CHANNELS[ch]
   return (
     <div className="space-y-1.5 min-w-[220px]">
@@ -981,12 +980,6 @@ function FuTip({ lead, ch, o, suggestion, isMissed }) {
         {o?.date && <span className="ml-auto text-[11px] text-slate-500 mono">{fmtDate(o.date)}</span>}
       </div>
       <div className="text-[11.5px] text-slate-400 leading-relaxed">{o?.comments || `No ${meta.label} follow-up logged yet.`}</div>
-      {suggestion && (
-        <div className="rounded-lg bg-fuchsia-500/10 border border-fuchsia-400/20 px-2.5 py-2">
-          <div className="text-[9.5px] uppercase tracking-wider text-fuchsia-300 font-bold mb-0.5 flex items-center gap-1"><Sparkles size={10} /> AI suggested message</div>
-          <div className="text-[11.5px] text-slate-300 leading-relaxed">“{suggestion}”</div>
-        </div>
-      )}
     </div>
   )
 }

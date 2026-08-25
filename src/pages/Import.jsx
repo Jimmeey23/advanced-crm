@@ -217,7 +217,7 @@ export default function Import() {
         <div className="card p-8 text-center">
           <div className="w-14 h-14 rounded-2xl bg-emerald-500/10 border border-emerald-400/25 flex items-center justify-center text-emerald-400 mx-auto mb-4"><CheckCircle2 size={26} /></div>
           <h3 className="font-display font-bold text-white text-[18px]">Import complete</h3>
-          <p className="text-[13px] text-slate-400 mt-2">Created <b className="text-emerald-400">{result.created}</b> new leads, skipped <b className="text-slate-300">{result.skipped}</b>.</p>
+          <p className="text-[13px] text-slate-400 mt-2">Created <b className="text-emerald-400">{result.created}</b> new leads, skipped <b className="text-slate-300">{result.skipped}</b>{result.duplicates > 0 && <> ({result.duplicates} already existed by email/phone)</>}.</p>
           {result.errors?.length > 0 && (
             <div className="mt-4 text-left max-w-md mx-auto">
               <p className="text-[11.5px] text-amber-400 font-semibold mb-1">{result.errors.length} rows had issues:</p>

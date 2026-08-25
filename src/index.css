@@ -1274,6 +1274,10 @@ html[data-theme="light"] .modal-panel .text-slate-200,
 html[data-theme="light"] .modal-panel .text-slate-300 {
   color: #0f172a;
 }
+html[data-theme="light"] .modal-panel .text-slate-400,
+html[data-theme="light"] .modal-panel .text-slate-500 {
+  color: #475569;
+}
 
 /* Advanced lead table controls */
 .ai-alert-compact {

@@ -115,9 +115,23 @@ function Sidebar() {
 }
 
 function Topbar({ onAdd }) {
-  const { view, navigate, alerts, boot, theme, setTheme, refreshData } = useApp()
+  const { view, navigate, alerts, boot, theme, setTheme, refreshData, toast } = useApp()
   const [query, setQuery] = useState('')
+  const [refreshing, setRefreshing] = useState(false)
   const title = NAV.find(n => n.id === view)?.title || 'Executive Overview'
+
+  const doRefresh = async () => {
+    if (refreshing) return
+    setRefreshing(true)
+    try {
+      await refreshData({ surfaceErrors: true })
+      toast('Workspace refreshed')
+    } catch (e) {
+      toast(`Refresh failed — ${e.message}`, 'error')
+    } finally {
+      setRefreshing(false)
+    }
+  }
 
   return (
     <header className="relative z-30 h-[74px] shrink-0 flex items-center gap-4 px-6 border-b border-white/6 bg-[#0a0a0a]/70 backdrop-blur-xl">
@@ -146,10 +160,11 @@ function Topbar({ onAdd }) {
 
       <button
         className="btn btn-ghost !h-9 !py-0 !px-3 text-[12px]"
-        onClick={refreshData}
+        onClick={doRefresh}
+        disabled={refreshing}
         title="Refresh workspace data"
       >
-        Refresh
+        {refreshing ? 'Refreshing…' : 'Refresh'}
       </button>
 
       <button

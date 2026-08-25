@@ -17,6 +17,7 @@ import { runReminderDigest, startReminderScheduler } from './reminders.js'
 import { parseCsv, autoMap, normalizeStage, normalizeStatus, parseFlexibleDate } from './csv.js'
 import { resolveLeadFields, buildLeadPayloadFromResolved, suggestMappingFromKeys, isValidEmail, isValidPhone } from './leadFieldMapping.js'
 import * as googleSheets from './googleSheets.js'
+import { findDuplicateAmong, clusterDuplicates } from './duplicateMatch.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -484,6 +485,10 @@ function updateLeadFromPayload(lead, payload) {
 }
 
 app.post('/api/leads', (req, res) => {
+  const dup = findDuplicateLead(req.body.email, req.body.phone, req.body.fullName || req.body.name)
+  if (dup) {
+    return res.status(409).json({ error: `Already exists as "${dup.fullName}" — matching email/phone.`, leadId: dup.id })
+  }
   const lead = createLeadFrom(req.body)
   const settings = db.settings.roundRobin
   if (!lead.associateId && settings.enabled) assignLead(db, lead)
@@ -576,8 +581,10 @@ app.post('/api/leads/bulk', (req, res) => {
   const rows = Array.isArray(req.body) ? req.body : req.body?.rows || []
   const created = []
   let skipped = 0
+  let duplicates = 0
   for (const row of rows) {
     if (!row.fullName && !row.name) { skipped++; continue }
+    if (findDuplicateLead(row.email, row.phone, row.fullName || row.name)) { duplicates++; continue }
     const lead = createLeadFrom(row)
     if (!lead.associateId && db.settings.roundRobin.enabled) assignLead(db, lead)
     db.leads.push(lead)
@@ -585,8 +592,8 @@ app.post('/api/leads/bulk', (req, res) => {
     created.push(lead)
   }
   save()
-  log('import', `Bulk import created ${created.length} leads (${skipped} skipped)`)
-  res.status(201).json({ created: created.length, skipped, items: enrichAll(created, db) })
+  log('import', `Bulk import created ${created.length} leads (${skipped} skipped, ${duplicates} duplicate)`)
+  res.status(201).json({ created: created.length, skipped, duplicates, items: enrichAll(created, db) })
 })
 
 // ---------- webhook integrations ----------
@@ -612,28 +619,11 @@ function buildWebhookLeadPayload(resolved, integ, record) {
   return buildLeadPayloadFromResolved(resolved, db, integ.name, record)
 }
 
-// A shared phone number alone (family/office landline, a placeholder typed
-// into many sheet rows) is common enough that matching on phone by itself
-// was collapsing distinct people into one "duplicate" lead. Email match is
-// specific enough to stand alone; a phone match additionally requires the
-// first name to agree, so two different people sharing a number no longer
-// merge.
-function fullNameNorm(name) {
-  return String(name || '').trim().toLowerCase().replace(/\s+/g, ' ')
-}
-
+// Matching logic (fuzzy name comparison, country-code-robust phone
+// comparison) lives in duplicateMatch.js — shared with the bulk dedupe
+// endpoint below so live ingestion and bulk review never disagree.
 function findDuplicateLead(email, phone, name) {
-  const emailNorm = email ? String(email).trim().toLowerCase() : ''
-  const phoneNorm = phone ? String(phone).replace(/\D/g, '') : ''
-  const nameNorm = fullNameNorm(name)
-  if (!emailNorm && !phoneNorm) return null
-  return db.leads.find(l => {
-    if (emailNorm && l.email && l.email !== '-' && String(l.email).trim().toLowerCase() === emailNorm) return true
-    if (phoneNorm && l.phone && String(l.phone).replace(/\D/g, '') === phoneNorm) {
-      return nameNorm && nameNorm === fullNameNorm(l.fullName)
-    }
-    return false
-  })
+  return findDuplicateAmong(db.leads, { email, phone, fullName: name })
 }
 
 function logWebhookCall(integrationId, outcome, detail) {
@@ -955,6 +945,7 @@ app.post('/api/leads/import/apply', (req, res) => {
   const locId = options?.locationId || db.locations[0]?.id
   const created = []
   let skipped = 0
+  let duplicates = 0
   const errors = []
 
   rows.forEach((row, i) => {
@@ -962,6 +953,9 @@ app.post('/api/leads/import/apply', (req, res) => {
       const get = (field) => mapping[field] ? row[mapping[field]] : null
       const fullName = get('fullName') || get('name')
       if (!fullName || String(fullName).trim() === '-' || String(fullName).trim() === '') { skipped++; return }
+      const emailVal = String(get('email') || '').trim()
+      const phoneVal = String(get('phone') || '').trim()
+      if (findDuplicateLead(emailVal, phoneVal, fullName)) { duplicates++; return }
       const fuChannels = db.settings.followUpChannels?.length ? db.settings.followUpChannels : ['call', 'whatsapp', 'email', 'sms']
       const todayKey = new Date().toISOString().slice(0, 10)
       const followUps = (mapping.followUps || [])
@@ -1021,13 +1015,13 @@ app.post('/api/leads/import/apply', (req, res) => {
   if (created.length) {
     db.importHistory.unshift({
       id: uid('imp'), at: nowIso(), fileName: options?.fileName || 'CSV upload',
-      created: created.length, skipped, locationId: locId
+      created: created.length, skipped, duplicates, locationId: locId
     })
     if (db.importHistory.length > 50) db.importHistory.length = 50
     save()
-    log('import', `Imported ${created.length} leads from CSV (${skipped} skipped)`)
+    log('import', `Imported ${created.length} leads from CSV (${skipped} skipped, ${duplicates} duplicate)`)
   }
-  res.status(201).json({ created: created.length, skipped, errors })
+  res.status(201).json({ created: created.length, skipped, duplicates, errors })
 })
 
 // ---------- analytics ----------
@@ -1321,30 +1315,35 @@ app.put('/api/lists', (req, res) => {
 // touching anything, so an admin can sanity-check the count first.
 app.post('/api/leads/dedupe', (req, res) => {
   const dryRun = req.body?.dryRun !== false
-  const groups = new Map() // key -> array of leads, oldest first once sorted
-  const keyFor = (l) => {
-    const email = l.email && l.email !== '-' ? String(l.email).trim().toLowerCase() : ''
-    const phone = l.phone ? String(l.phone).replace(/\D/g, '') : ''
-    return email ? `email:${email}` : phone ? `phone:${phone}` : null
-  }
-  for (const l of db.leads) {
-    const key = keyFor(l)
-    if (!key) continue
-    if (!groups.has(key)) groups.set(key, [])
-    groups.get(key).push(l)
-  }
+  // clusterDuplicates unions leads transitively (A~B by email, B~C by
+  // phone+fuzzy-name) so the whole chain lands in one group, not split
+  // across separate email/phone buckets like the old hash-by-one-key pass.
+  const rawGroups = clusterDuplicates(db.leads)
 
   const toRemove = []
-  for (const group of groups.values()) {
-    if (group.length < 2) continue
+  const dupGroups = []
+  for (const group of rawGroups) {
     group.sort((a, b) => String(a.createdAt || '').localeCompare(String(b.createdAt || '')))
     toRemove.push(...group.slice(1))
+    dupGroups.push(group.map((l, i) => ({
+      id: l.id, fullName: l.fullName, email: l.email, phone: l.phone, stage: l.stage,
+      source: l.source, createdAt: l.createdAt, status: i === 0 ? 'keep' : 'remove'
+    })))
   }
 
   const preview = toRemove.slice(0, 20).map(l => ({ id: l.id, fullName: l.fullName, email: l.email, phone: l.phone, createdAt: l.createdAt }))
-  if (dryRun) return res.json({ dryRun: true, duplicateGroups: [...groups.values()].filter(g => g.length > 1).length, wouldRemove: toRemove.length, preview })
+  if (dryRun) return res.json({
+    dryRun: true, duplicateGroups: dupGroups.length, wouldRemove: toRemove.length, preview,
+    groups: dupGroups
+  })
 
-  const removeIds = new Set(toRemove.map(l => l.id))
+  // A client that already showed the user the full duplicate groups can pass
+  // back exactly which ids to remove (e.g. after the admin unchecked one);
+  // otherwise fall back to removing every non-oldest lead in each group.
+  const removableIds = new Set(toRemove.map(l => l.id))
+  const removeIds = Array.isArray(req.body?.removeIds)
+    ? new Set(req.body.removeIds.filter(id => removableIds.has(id)))
+    : removableIds
   db.leads = db.leads.filter(l => !removeIds.has(l.id))
   for (const id of removeIds) markDeleted(id)
   save()

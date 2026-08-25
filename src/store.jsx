@@ -45,9 +45,13 @@ export function AppProvider({ children }) {
   const setTheme = useCallback((t) => setThemeState(t === 'light' ? 'light' : 'dark'), [])
   const setAccent = useCallback((a) => setAccentState(SESSION_ACCENTS.includes(a) ? a : 'blue'), [])
 
-  const refreshData = useCallback(() => {
+  const refreshData = useCallback((opts = {}) => {
     setDataVersion(v => v + 1)
-    api.get('/api/bootstrap').then(setBoot).catch(() => {})
+    const p = api.get('/api/bootstrap').then(setBoot)
+    // Background callers (SSE, polling) swallow failures on purpose; an
+    // explicit user click (the Topbar Refresh button) wants to know when
+    // the request actually failed instead of the button silently no-op'ing.
+    return opts.surfaceErrors ? p : p.catch(() => {})
   }, [])
   const refreshAlerts = useCallback(async () => {
     try { setAlerts(await api.get('/api/alerts')) } catch (e) { /* ignore */ }

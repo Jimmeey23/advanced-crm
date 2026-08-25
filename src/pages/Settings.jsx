@@ -7,7 +7,7 @@ import {
 } from 'lucide-react'
 import { useApp } from '../store.jsx'
 import { api } from '../api.js'
-import { Spinner } from '../ui.jsx'
+import { Spinner, Modal, ModalHeader } from '../ui.jsx'
 import FieldMappingEditor from '../components/FieldMappingEditor.jsx'
 
 const ACCENTS = [
@@ -475,24 +475,60 @@ export default function SettingsPage() {
   const [dedupeChecking, setDedupeChecking] = useState(false)
   const [dedupePreview, setDedupePreview] = useState(null)
   const [dedupeRemoving, setDedupeRemoving] = useState(false)
+  const [dedupeReviewOpen, setDedupeReviewOpen] = useState(false)
+  const [dedupeSelected, setDedupeSelected] = useState(() => new Set())
 
   const checkDuplicates = async () => {
     setDedupeChecking(true); setDedupePreview(null)
-    try { setDedupePreview(await api.post('/api/leads/dedupe', { dryRun: true })) }
+    try {
+      const result = await api.post('/api/leads/dedupe', { dryRun: true })
+      setDedupePreview(result)
+      setDedupeSelected(new Set((result.groups || []).flatMap(g => g.filter(l => l.status === 'remove').map(l => l.id))))
+    }
     catch (e) { toast(e.message, 'error') }
     finally { setDedupeChecking(false) }
   }
 
+  const toggleDedupeSelected = (id) => {
+    setDedupeSelected(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id); else next.add(id)
+      return next
+    })
+  }
+
   const removeDuplicates = async () => {
-    if (!window.confirm(`Remove ${dedupePreview.wouldRemove} duplicate lead(s)? This keeps the oldest of each group and deletes the rest — cannot be undone.`)) return
+    const removeIds = [...dedupeSelected]
+    if (!removeIds.length) { toast('Nothing selected to remove', 'error'); return }
+    if (!window.confirm(`Remove ${removeIds.length} selected duplicate lead(s)? This cannot be undone.`)) return
     setDedupeRemoving(true)
+    try {
+      const result = await api.post('/api/leads/dedupe', { dryRun: false, removeIds })
+      toast(`Removed ${result.removed} duplicate lead${result.removed === 1 ? '' : 's'}`)
+      setDedupePreview(null)
+      setDedupeReviewOpen(false)
+      refreshData()
+    } catch (e) { toast(e.message, 'error') }
+    finally { setDedupeRemoving(false) }
+  }
+
+  const [dedupeRemovingAll, setDedupeRemovingAll] = useState(false)
+
+  // Bypasses the checkbox selection entirely — removes every non-oldest
+  // lead in every duplicate group (the server's default when no explicit
+  // removeIds are passed), regardless of what's checked in the review table.
+  const removeAllDuplicates = async () => {
+    if (!dedupePreview?.wouldRemove) return
+    if (!window.confirm(`Remove all ${dedupePreview.wouldRemove} duplicate lead(s) across ${dedupePreview.duplicateGroups} group(s)? The oldest of each group is kept, the rest deleted — cannot be undone.`)) return
+    setDedupeRemovingAll(true)
     try {
       const result = await api.post('/api/leads/dedupe', { dryRun: false })
       toast(`Removed ${result.removed} duplicate lead${result.removed === 1 ? '' : 's'}`)
       setDedupePreview(null)
+      setDedupeReviewOpen(false)
       refreshData()
     } catch (e) { toast(e.message, 'error') }
-    finally { setDedupeRemoving(false) }
+    finally { setDedupeRemovingAll(false) }
   }
 
   const configured = boot?.integrations?.momence
@@ -1064,24 +1100,15 @@ export default function SettingsPage() {
 
             <Section icon={<Users size={15} className="text-amber-400" />} title="Duplicate leads" desc="Find and remove leads that share the same email or phone number — same person, imported more than once (e.g. an overlapping sync).">
               <button className="btn btn-soft" onClick={checkDuplicates} disabled={dedupeChecking}>
-                {dedupeChecking ? <Spinner size={14} /> : <Filter size={14} />} Check for duplicates
+                {dedupeChecking ? <Spinner size={14} /> : <Filter size={14} />} Scan for duplicates
               </button>
               {dedupePreview && (
                 <div className="mt-3 rounded-xl bg-white/[0.03] border border-white/6 p-3.5">
                   {dedupePreview.wouldRemove > 0 ? (
                     <>
-                      <p className="text-[12.5px] text-amber-300">{dedupePreview.wouldRemove} duplicate lead{dedupePreview.wouldRemove === 1 ? '' : 's'} found across {dedupePreview.duplicateGroups} group{dedupePreview.duplicateGroups === 1 ? '' : 's'} — the oldest of each group is kept, the rest would be removed.</p>
-                      <div className="mt-2 max-h-40 overflow-y-auto scrollbar-thin space-y-1">
-                        {dedupePreview.preview.map(l => (
-                          <div key={l.id} className="text-[11px] text-slate-400 flex items-center gap-2">
-                            <span className="text-slate-300 truncate flex-1">{l.fullName}</span>
-                            <span className="mono shrink-0">{l.email !== '-' ? l.email : l.phone}</span>
-                          </div>
-                        ))}
-                        {dedupePreview.wouldRemove > dedupePreview.preview.length && <div className="text-[11px] text-slate-600">…and {dedupePreview.wouldRemove - dedupePreview.preview.length} more</div>}
-                      </div>
-                      <button className="btn btn-primary !mt-3 !py-1.5 !text-[12px]" onClick={removeDuplicates} disabled={dedupeRemoving}>
-                        {dedupeRemoving ? <Spinner size={13} /> : <Trash2 size={13} />} Remove {dedupePreview.wouldRemove} duplicate{dedupePreview.wouldRemove === 1 ? '' : 's'}
+                      <p className="text-[12.5px] text-amber-300">{dedupePreview.wouldRemove} duplicate lead{dedupePreview.wouldRemove === 1 ? '' : 's'} found across {dedupePreview.duplicateGroups} group{dedupePreview.duplicateGroups === 1 ? '' : 's'}.</p>
+                      <button className="btn btn-soft !mt-3 !py-1.5 !text-[12px]" onClick={() => setDedupeReviewOpen(true)}>
+                        <Filter size={13} /> Review duplicates
                       </button>
                     </>
                   ) : <p className="text-[12.5px] text-emerald-400">No duplicates found.</p>}
@@ -1091,6 +1118,69 @@ export default function SettingsPage() {
           </>
         )}
       </div>
+
+      <Modal open={dedupeReviewOpen} onClose={() => setDedupeReviewOpen(false)} width={760}>
+        <ModalHeader
+          title="Review duplicate leads"
+          subtitle="Rows highlighted amber are the ones that would be removed — the oldest lead in each group is kept. Uncheck any row to keep it instead."
+          onClose={() => setDedupeReviewOpen(false)}
+        />
+        <div className="max-h-[55vh] overflow-y-auto scrollbar-thin rounded-lg border border-white/6">
+          <table className="w-full text-[12px]">
+            <thead className="sticky top-0 bg-[#14141a] text-slate-500">
+              <tr className="text-left">
+                <th className="p-2 w-8"></th>
+                <th className="p-2">Name</th>
+                <th className="p-2">Email</th>
+                <th className="p-2">Phone</th>
+                <th className="p-2">Source</th>
+                <th className="p-2">Created</th>
+                <th className="p-2">Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(dedupePreview?.groups || []).map((group, gi) => (
+                <React.Fragment key={gi}>
+                  {group.map(l => {
+                    const marked = dedupeSelected.has(l.id)
+                    return (
+                      <tr key={l.id} className={marked ? 'bg-amber-500/10' : l.status === 'keep' ? 'bg-emerald-500/5' : ''}>
+                        <td className="p-2">
+                          {l.status === 'remove' && (
+                            <input type="checkbox" checked={marked} onChange={() => toggleDedupeSelected(l.id)} />
+                          )}
+                        </td>
+                        <td className="p-2 text-slate-200 truncate max-w-[160px]">{l.fullName}</td>
+                        <td className="p-2 mono text-slate-400">{l.email !== '-' ? l.email : ''}</td>
+                        <td className="p-2 mono text-slate-400">{l.phone}</td>
+                        <td className="p-2 text-slate-400">{l.source}</td>
+                        <td className="p-2 text-slate-500">{l.createdAt ? new Date(l.createdAt).toLocaleDateString() : ''}</td>
+                        <td className="p-2">
+                          {l.status === 'keep'
+                            ? <span className="chip bg-emerald-500/15 text-emerald-300 border border-emerald-500/20">Keep</span>
+                            : <span className={`chip border ${marked ? 'bg-amber-500/15 text-amber-300 border-amber-500/20' : 'bg-white/5 text-slate-400 border-white/10'}`}>{marked ? 'Remove' : 'Kept (unchecked)'}</span>}
+                        </td>
+                      </tr>
+                    )
+                  })}
+                  <tr><td colSpan={7} className="h-1.5"></td></tr>
+                </React.Fragment>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <div className="flex items-center justify-between mt-4">
+          <p className="text-[11.5px] text-slate-500">{dedupeSelected.size} lead{dedupeSelected.size === 1 ? '' : 's'} selected for removal</p>
+          <div className="flex gap-2">
+            <button className="btn btn-soft !py-1.5 !text-[12px]" onClick={removeDuplicates} disabled={dedupeRemoving || !dedupeSelected.size}>
+              {dedupeRemoving ? <Spinner size={13} /> : <Trash2 size={13} />} Remove selected
+            </button>
+            <button className="btn btn-primary !py-1.5 !text-[12px]" onClick={removeAllDuplicates} disabled={dedupeRemovingAll || !dedupePreview?.wouldRemove}>
+              {dedupeRemovingAll ? <Spinner size={13} /> : <Trash2 size={13} />} Remove all duplicates
+            </button>
+          </div>
+        </div>
+      </Modal>
 
       <style>{`.label{display:block;font-size:11px;font-weight:600;color:#94a3b8;margin-bottom:4px}`}</style>
     </div>
