@@ -5,6 +5,7 @@
 // each persist, so large imports stay efficient.
 import { createClient } from '@supabase/supabase-js'
 import WebSocket from 'ws'
+import { normalizeEmail, normalizePhone } from './duplicateMatch.js'
 
 // Node 20 has no native global WebSocket; supabase-js's realtime client
 // requires one to exist just to construct, even though we never use realtime.
@@ -130,12 +131,40 @@ export async function persistState(state, dirtyLeadIds = [], deletedLeadIds = []
     const rows = []
     for (const id of ids) {
       const lead = state.leads.find(l => l.id === id)
-      if (lead) rows.push({ id: lead.id, data: lead, updated_at: now })
+      if (lead) rows.push({
+        id: lead.id,
+        data: lead,
+        updated_at: now,
+        email_norm: normalizeEmail(lead.email),
+        phone_norm: normalizePhone(lead.phone)
+      })
     }
     for (let i = 0; i < rows.length; i += UPSERT_BATCH_SIZE) {
       const batch = rows.slice(i, i + UPSERT_BATCH_SIZE)
       const { error } = await c.from(LEADS_TABLE).upsert(batch)
-      if (error) throw new Error(`supabase persist leads: ${error.message}`)
+      if (error) {
+        // 23505 = unique_violation on email_norm/phone_norm — another
+        // instance already persisted a lead with this email/phone under a
+        // different id (the exact race this constraint exists to catch).
+        // Retry one row at a time so a single genuine duplicate doesn't
+        // block every other dirty lead in the batch from saving.
+        if (error.code === '23505' && batch.length > 1) {
+          for (const row of batch) {
+            const single = await c.from(LEADS_TABLE).upsert([row])
+            if (single.error) {
+              if (single.error.code === '23505') {
+                console.error(`[supabase] lead ${row.id} not saved — email/phone already belongs to another lead row (likely a second server instance racing this create): ${single.error.message}`)
+              } else {
+                throw new Error(`supabase persist leads: ${single.error.message}`)
+              }
+            }
+          }
+        } else if (error.code === '23505') {
+          console.error(`[supabase] lead ${batch[0].id} not saved — email/phone already belongs to another lead row (likely a second server instance racing this create): ${error.message}`)
+        } else {
+          throw new Error(`supabase persist leads: ${error.message}`)
+        }
+      }
     }
   }
 }

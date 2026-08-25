@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react'
 import { X } from 'lucide-react'
 import { AVATAR_COLORS, initials } from './lib.js'
 
-export function Avatar({ name, color, size = 30, className = '', photoUrl, photoZoom, photoPosX, photoPosY }) {
+export function Avatar({ name, color, size = 30, className = '', photoUrl, photoZoom, photoPosX, photoPosY, fallback }) {
   const c = color || AVATAR_COLORS[(name || '').length % AVATAR_COLORS.length]
   const [broken, setBroken] = useState(false)
   const src = normalizePhotoUrl(photoUrl)
@@ -29,10 +29,12 @@ export function Avatar({ name, color, size = 30, className = '', photoUrl, photo
   return (
     <span
       className={`inline-flex items-center justify-center rounded-full font-bold shrink-0 ${className}`}
-      style={{ width: size, height: size, background: `${c}22`, color: c, fontSize: size * 0.4, border: `1px solid ${c}55` }}
+      style={fallback
+        ? { width: size, height: size, background: '#111827', color: '#fff', fontSize: size * 0.52, border: '1px solid rgba(255,255,255,.34)' }
+        : { width: size, height: size, background: `${c}22`, color: c, fontSize: size * 0.4, border: `1px solid ${c}55` }}
       title={name}
     >
-      {initials(name)}
+      {fallback || initials(name)}
     </span>
   )
 }

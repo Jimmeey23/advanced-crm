@@ -15,7 +15,7 @@ import * as mailer from './mailer.js'
 import * as supabase from './supabaseStore.js'
 import { runReminderDigest, startReminderScheduler } from './reminders.js'
 import { parseCsv, autoMap, normalizeStage, normalizeStatus, parseFlexibleDate } from './csv.js'
-import { resolveLeadFields, buildLeadPayloadFromResolved, suggestMappingFromKeys, isValidEmail, isValidPhone } from './leadFieldMapping.js'
+import { resolveLeadFields, buildLeadPayloadFromResolved, suggestMappingFromKeys, isValidEmail, isValidPhone, LEAD_FIELD_ALIASES } from './leadFieldMapping.js'
 import * as googleSheets from './googleSheets.js'
 import * as zohoPeople from './zohoPeople.js'
 import { findDuplicateAmong, clusterDuplicates } from './duplicateMatch.js'
@@ -603,6 +603,19 @@ function genWebhookKey() {
   return crypto.randomBytes(24).toString('hex') // 48 chars, unguessable
 }
 
+// Maps a resolveLeadFields() output key to the Lead field it lands on when
+// updating a matched (duplicate) lead — mirrors buildLeadPayloadFromResolved's
+// own mapping in leadFieldMapping.js. followUps is deliberately excluded:
+// that array is appended to, never bulk-replaced by an update.
+const WEBHOOK_UPDATE_FIELD_MAP = {
+  fullName: 'fullName', email: 'email', phone: 'phone', createdAt: 'createdAt', convertedAt: 'convertedAt',
+  sourceId: 'sourceId', sourceName: 'source', remarks: 'notes', classType: 'classType', channel: 'channel',
+  stage: 'stage', status: 'status', valueEstimate: 'valueEstimate', center: 'center', memberId: 'memberId',
+  hostId: 'hostId', period: 'period', purchasesMade: 'purchasesMade', visits: 'visits', trialStatus: 'trialStatus',
+  conversionStatus: 'conversionStatus', retentionStatus: 'retentionStatus', associateName: 'associateName',
+  associateId: 'associateId', locationId: 'locationId'
+}
+
 function webhookUrlForReq(req, key) {
   return `${req.protocol}://${req.get('host')}/api/webhooks/leads/${key}`
 }
@@ -644,6 +657,13 @@ function checkRateLimit(key, limit = 30, windowMs = 60000) {
   rateBuckets.set(key, arr)
   return true
 }
+
+// Static reference for the API docs panel: every Lead field a webhook can
+// populate, plus the built-in key spellings it auto-recognizes without any
+// manual mapping. Read-only, no auth beyond the app's own session.
+app.get('/api/webhooks/field-reference', (req, res) => {
+  res.json({ fields: Object.entries(LEAD_FIELD_ALIASES).map(([field, aliases]) => ({ field, aliases })) })
+})
 
 app.get('/api/webhooks', (req, res) => {
   res.json(db.webhookIntegrations.map(w => serializeWebhook(w, req)))
@@ -792,20 +812,29 @@ app.all('/api/webhooks/leads/:key', (req, res) => {
 
   const dup = findDuplicateLead(email, phone, name)
   if (dup) {
+    // Matched an existing lead by email/phone — merge in whatever fields this
+    // payload actually resolved (edit-via-webhook), rather than only leaving
+    // a note. Only fields the incoming payload resolved a value for are
+    // touched, so a partial payload never blanks out fields the lead already
+    // had; followUps is handled separately below and never bulk-overwritten.
+    const payload = buildWebhookLeadPayload(resolved, integ, body)
+    for (const [payloadKey, resolvedKey] of Object.entries(WEBHOOK_UPDATE_FIELD_MAP)) {
+      if (resolved[resolvedKey] !== undefined && payload[payloadKey] !== undefined) dup[payloadKey] = payload[payloadKey]
+    }
     dup.followUps = dup.followUps || []
     dup.followUps.push({
       id: uid('fu'),
       date: new Date().toISOString().slice(0, 10),
-      comments: `Duplicate signup received via ${integ.name}`,
+      comments: `Lead updated via webhook (${integ.name})`,
       channel: null,
       done: true
     })
     dup.lastActivityAt = nowIso()
     markDirty(dup.id)
     save()
-    log('lead', `Duplicate signup via ${integ.name} matched existing lead ${dup.fullName}`, dup.id)
-    logWebhookCall(integ.id, 'duplicate', `Matched lead ${dup.id}`)
-    return res.json({ status: 'duplicate', leadId: dup.id })
+    log('lead', `Updated lead ${dup.fullName} via webhook (${integ.name})`, dup.id)
+    logWebhookCall(integ.id, 'updated', `Matched lead ${dup.id}`)
+    return res.json({ status: 'updated', leadId: dup.id })
   }
 
   const lead = createLeadFrom(buildWebhookLeadPayload(resolved, integ, body))

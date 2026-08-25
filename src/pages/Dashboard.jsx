@@ -53,6 +53,15 @@ const tooltipStyle = () => ({
 })
 const AXIS = { fill: 'var(--axis)', fontSize: 11 }
 
+function RankMarker({ rank, attention = false }) {
+  const label = attention ? `Attention priority ${rank}` : `Rank ${rank}`
+  return (
+    <span className="associate-rank-marker" title={label} aria-label={label}>
+      <span aria-hidden="true">{rank}</span>
+    </span>
+  )
+}
+
 export default function Dashboard() {
   const { openLead, refreshData, boot, dataVersion } = useApp()
   const { data: ov, loading: l1, error: e1, reload: r1 } = useFetch(() => api.get('/api/analytics/overview'), [dataVersion])
@@ -409,65 +418,75 @@ export default function Dashboard() {
 
       {/* row 4: associate leaderboard, top vs bottom */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <div className="card p-5 associate-leaderboard-panel">
+        <div className="card p-5 associate-leaderboard-panel is-leading">
           <div className="associate-leaderboard-head">
-            <div>
-              <h3 className="font-display font-semibold text-white text-[15px]">Top associates</h3>
-              <p>{bestAssociate ? `${bestAssociate.name} leads by revenue · ${avgTeamConversion}% avg conversion` : 'No associate performance yet'}</p>
+            <div className="associate-leaderboard-title">
+              <span className="associate-leaderboard-icon"><Trophy size={15} /></span>
+              <div>
+                <h3>Top associates</h3>
+                <p>{bestAssociate ? `${bestAssociate.name} leads by revenue · ${avgTeamConversion}% avg conversion` : 'No associate performance yet'}</p>
+              </div>
             </div>
             <div className="associate-leaderboard-summary">
-              <span><strong>{teamRows.length}</strong><small>active</small></span>
-              <span><strong>{teamRows.reduce((sum, row) => sum + (row.won || 0), 0)}</strong><small>won</small></span>
-              <span><strong>{avgTeamConversion}%</strong><small>avg conv.</small></span>
+              <span><small>Active</small><strong>{teamRows.length}</strong></span>
+              <span><small>Won</small><strong>{teamRows.reduce((sum, row) => sum + (row.won || 0), 0)}</strong></span>
+              <span><small>Avg. conversion</small><strong>{avgTeamConversion}%</strong></span>
             </div>
+          </div>
+          <div className="associate-rank-columns" aria-hidden="true">
+            <span>Associate</span><span>Revenue</span><span>Conv.</span><span>Open</span><span>Won</span><span />
           </div>
           <div className="associate-rank-list">
             {topHalf.map((t, i) => (
-              <button key={t.associateId} className="associate-rank-row" onClick={() => setScorecardId(t.associateId)}>
-                <span className={`associate-rank-number ${i === 0 ? 'is-gold' : i === 1 ? 'is-silver' : i === 2 ? 'is-bronze' : 'is-good'}`}>{i + 1}</span>
-                <Avatar name={t.name} color={t.color} photoUrl={t.photoUrl} photoZoom={t.photoZoom} photoPosX={t.photoPosX} photoPosY={t.photoPosY} size={30} />
-                <div className="min-w-0 flex-1">
+              <button key={t.associateId} className="associate-rank-row" style={{ '--rank-delay': `${i * 45}ms` }} onClick={() => setScorecardId(t.associateId)} aria-label={`Open performance scorecard for ${t.name}`}>
+                <RankMarker rank={i + 1} />
+                <Avatar name={t.name} color={t.color} photoUrl={t.photoUrl} photoZoom={t.photoZoom} photoPosX={t.photoPosX} photoPosY={t.photoPosY} size={30} fallback="👤" />
+                <div className="associate-rank-identity">
                   <div className="associate-rank-name">{t.name}</div>
                   <div className="associate-rank-sub">{boot?.locations.find(l => l.id === t.locationId)?.name?.split(',')[0] || ''}</div>
                 </div>
                 <div className="associate-rank-revenue">{money(t.revenue)}</div>
-                <div className="associate-rank-metrics">
-                  <span>{t.conversion}%</span>
-                  <span>{t.open || 0} open</span>
-                  <strong>{t.won} won</strong>
-                </div>
+                <span className="associate-rank-conversion">{t.conversion}%</span>
+                <span className="associate-rank-open">{t.open || 0}</span>
+                <strong className="associate-rank-won">{t.won}</strong>
+                <ChevronRight className="associate-rank-chevron" size={15} />
               </button>
             ))}
             {!topHalf.length && <Empty icon={<Trophy size={20} />} title="No associate data" subtitle="Performance will appear once leads are worked." />}
           </div>
         </div>
 
-        <div className="card p-5 associate-leaderboard-panel">
+        <div className="card p-5 associate-leaderboard-panel is-attention">
           <div className="associate-leaderboard-head">
-            <div>
-              <h3 className="font-display font-semibold text-white text-[15px]">Needs attention</h3>
-              <p>{worstAssociate ? `${worstAssociate.name} trails the team · lowest conversion & revenue` : 'No associate performance yet'}</p>
+            <div className="associate-leaderboard-title">
+              <span className="associate-leaderboard-icon"><ShieldAlert size={15} /></span>
+              <div>
+                <h3>Needs attention</h3>
+                <p>{worstAssociate ? `${worstAssociate.name} trails the team · lowest conversion & revenue` : 'No associate performance yet'}</p>
+              </div>
             </div>
             <div className="associate-leaderboard-summary">
-              <span><strong>{bottomHalf.length}</strong><small>active</small></span>
-              <span><strong>{bottomHalf.reduce((sum, row) => sum + (row.won || 0), 0)}</strong><small>won</small></span>
+              <span><small>Flagged</small><strong>{bottomHalf.length}</strong></span>
+              <span><small>Won</small><strong>{bottomHalf.reduce((sum, row) => sum + (row.won || 0), 0)}</strong></span>
             </div>
+          </div>
+          <div className="associate-rank-columns" aria-hidden="true">
+            <span>Associate</span><span>Revenue</span><span>Conv.</span><span>Open</span><span>Won</span><span />
           </div>
           <div className="associate-rank-list">
             {bottomHalf.map((t, i) => (
-              <button key={t.associateId} className="associate-rank-row" onClick={() => setScorecardId(t.associateId)}>
-                <span className={`associate-rank-number ${i === 0 ? 'is-bad' : ''}`}>{i + 1}</span>
-                <Avatar name={t.name} color={t.color} photoUrl={t.photoUrl} photoZoom={t.photoZoom} photoPosX={t.photoPosX} photoPosY={t.photoPosY} size={30} />
-                <div className="min-w-0 flex-1">
+              <button key={t.associateId} className="associate-rank-row" style={{ '--rank-delay': `${i * 45}ms` }} onClick={() => setScorecardId(t.associateId)} aria-label={`Open performance scorecard for ${t.name}`}>
+                <RankMarker rank={i + 1} attention />
+                <Avatar name={t.name} color={t.color} photoUrl={t.photoUrl} photoZoom={t.photoZoom} photoPosX={t.photoPosX} photoPosY={t.photoPosY} size={30} fallback="👤" />
+                <div className="associate-rank-identity">
                   <div className="associate-rank-name">{t.name}</div>
                   <div className="associate-rank-sub">{boot?.locations.find(l => l.id === t.locationId)?.name?.split(',')[0] || ''}</div>
                 </div>
                 <div className="associate-rank-revenue">{money(t.revenue)}</div>
-                <div className="associate-rank-metrics">
-                  <span>{t.conversion}%</span>
-                  <span>{t.open || 0} open</span>
-                  <strong>{t.won} won</strong>
-                </div>
+                <span className="associate-rank-conversion">{t.conversion}%</span>
+                <span className="associate-rank-open">{t.open || 0}</span>
+                <strong className="associate-rank-won">{t.won}</strong>
+                <ChevronRight className="associate-rank-chevron" size={15} />
               </button>
             ))}
             {!bottomHalf.length && <Empty icon={<Trophy size={20} />} title="No associate data" subtitle="Performance will appear once leads are worked." />}

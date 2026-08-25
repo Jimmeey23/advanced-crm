@@ -1570,6 +1570,13 @@ function WebhookRow({ webhook, logs, logsOpen, onToggleLogs, onRename, onSaveMap
   const [testError, setTestError] = useState('')
   const [testing, setTesting] = useState(false)
   const [detecting, setDetecting] = useState(false)
+  const [docsOpen, setDocsOpen] = useState(false)
+  const [fieldRef, setFieldRef] = useState(null)
+
+  const toggleDocs = () => {
+    setDocsOpen(o => !o)
+    if (!fieldRef) api.get('/api/webhooks/field-reference').then(d => setFieldRef(d.fields)).catch(() => setFieldRef([]))
+  }
 
   const runTest = async () => {
     setTesting(true); setTestError(''); setTestResult(null)
@@ -1651,6 +1658,50 @@ function WebhookRow({ webhook, logs, logsOpen, onToggleLogs, onRename, onSaveMap
         )}
       </div>
 
+      <div>
+        <button className="btn btn-ghost !py-1.5 !text-[12px]" onClick={toggleDocs}><ScrollText size={12} /> {docsOpen ? 'Hide API docs' : 'API docs'}</button>
+        {docsOpen && (
+          <div className="mt-2 space-y-3 rounded-lg bg-black/20 border border-white/6 p-2.5 text-[11.5px]">
+            <div>
+              <div className="text-slate-500 mb-1">Auth: the <code className="mono">{webhook.key}</code> token embedded in the URL is the sole credential — anyone with the URL can post leads. No separate header needed. Regenerate to revoke it.</div>
+            </div>
+            <div>
+              <div className="text-slate-400 font-semibold mb-1">Create / update a lead ({webhook.method || 'POST'})</div>
+              <div className="text-slate-500 mb-1">Matches an existing lead by email or phone and updates it; otherwise creates a new lead. Send only the fields you want to set/change.</div>
+              <pre className="input !text-[11px] font-mono overflow-x-auto whitespace-pre">{webhook.method === 'GET'
+                ? `curl "${webhook.url}?name=Jane+Doe&email=jane@example.com&phone=9876543210"`
+                : `curl -X POST '${webhook.url}' \\\n  -H 'Content-Type: application/json' \\\n  -d '{\n    "name": "Jane Doe",\n    "email": "jane@example.com",\n    "phone": "9876543210",\n    "notes": "Interested in trial class"\n  }'`}</pre>
+            </div>
+            <div>
+              <div className="text-slate-400 font-semibold mb-1">Responses</div>
+              <div className="space-y-0.5 text-slate-500">
+                <div><code className="mono text-emerald-400">201</code> {'{status:"created", leadId}'} — no existing lead matched</div>
+                <div><code className="mono text-sky-400">200</code> {'{status:"updated", leadId}'} — matched by email/phone, fields merged in</div>
+                <div><code className="mono text-rose-400">400</code> missing name or a valid email/phone</div>
+                <div><code className="mono text-rose-400">404</code> unknown/regenerated key</div>
+                <div><code className="mono text-rose-400">405</code> wrong HTTP method for this webhook</div>
+                <div><code className="mono text-rose-400">429</code> rate limit exceeded (30 requests/min per webhook)</div>
+              </div>
+            </div>
+            <div>
+              <div className="text-slate-400 font-semibold mb-1">Recognized field ids</div>
+              <div className="text-slate-500 mb-1">Any of these incoming key spellings map automatically to the field, on top of whatever's set in the field mapping above.</div>
+              {!fieldRef && <p className="text-slate-500">Loading…</p>}
+              {fieldRef && (
+                <div className="max-h-40 overflow-y-auto space-y-1">
+                  {fieldRef.map(f => (
+                    <div key={f.field} className="flex items-start gap-2">
+                      <span className="text-slate-200 mono w-28 shrink-0">{f.field}</span>
+                      <span className="text-slate-500 mono truncate">{f.aliases.join(', ')}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+
       {logsOpen && (
         <div className="rounded-lg bg-black/20 border border-white/6 p-2.5 max-h-52 overflow-y-auto">
           {!logs && <p className="text-[11px] text-slate-500">Loading…</p>}
@@ -1671,6 +1722,7 @@ function WebhookRow({ webhook, logs, logsOpen, onToggleLogs, onRename, onSaveMap
 function OutcomeChip({ outcome }) {
   const styles = {
     created: 'bg-emerald-500/15 text-emerald-300',
+    updated: 'bg-sky-500/15 text-sky-300',
     duplicate: 'bg-amber-500/15 text-amber-300',
     validation_failed: 'bg-rose-500/15 text-rose-300',
     invalid_body: 'bg-rose-500/15 text-rose-300',

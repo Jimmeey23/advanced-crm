@@ -3,6 +3,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { seed } from './seed.js'
 import * as supabase from './supabaseStore.js'
+import { findDuplicateAmong } from './duplicateMatch.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const DATA_DIR = path.join(__dirname, '..', 'data')
@@ -150,8 +151,24 @@ function applyRemoteLeadChange({ eventType, id, data }) {
   if (eventType === 'DELETE') {
     if (idx !== -1) state.leads.splice(idx, 1)
   } else if (data) {
-    if (idx !== -1) state.leads[idx] = data
-    else state.leads.push(data)
+    if (idx !== -1) {
+      state.leads[idx] = data
+    } else {
+      // An id we don't recognize locally usually means this row was created
+      // by another server instance sharing this Supabase project. If it's
+      // actually the same person as a lead we already have (another instance
+      // raced the same email/phone past its own — necessarily local-only —
+      // dedup check before either write reached us), merge into the
+      // existing row instead of blindly appending a second one.
+      const existing = findDuplicateAmong(state.leads, data)
+      if (existing) {
+        const existingIdx = state.leads.indexOf(existing)
+        state.leads[existingIdx] = { ...existing, ...data, id: existing.id }
+        console.log(`[db] merged remote duplicate lead ${data.id} into existing ${existing.id}`)
+      } else {
+        state.leads.push(data)
+      }
+    }
   }
   scheduleRemoteWrite()
   remoteLeadChangeCount++
