@@ -3,7 +3,7 @@ import {
   Search, Send, Sparkles, MessageCircle, Phone, Mail, MessageSquareText,
   CheckCircle2, Circle, ListFilter, BookmarkPlus, ArrowUpDown, CheckCheck, Check,
   Building2, UserRound, Tag, Info, Ban, Globe2, Languages, Image as ImageIcon,
-  FileText, Mic, Clock
+  FileText, Mic, Clock, UserPlus, X, Headset, RefreshCcw, AlertTriangle
 } from 'lucide-react'
 import { useApp } from '../store.jsx'
 import { api, API_BASE } from '../api.js'
@@ -151,6 +151,83 @@ function DateSeparator({ sentAt }) {
   )
 }
 
+function NewConversationModal({ open, onClose, onCreated }) {
+  const [mode, setMode] = useState('search')
+  const [q, setQ] = useState('')
+  const [results, setResults] = useState([])
+  const [searching, setSearching] = useState(false)
+  const [fullName, setFullName] = useState('')
+  const [email, setEmail] = useState('')
+  const [phone, setPhone] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    if (mode !== 'search' || !q.trim()) { setResults([]); return }
+    setSearching(true)
+    const t = setTimeout(() => {
+      api.get(`/api/respondio/contacts/search?q=${encodeURIComponent(q.trim())}`)
+        .then(r => setResults(r.contacts || []))
+        .catch(() => setResults([]))
+        .finally(() => setSearching(false))
+    }, 350)
+    return () => clearTimeout(t)
+  }, [q, mode])
+
+  if (!open) return null
+
+  const createFrom = async (payload) => {
+    setSubmitting(true); setError('')
+    try {
+      const r = await api.post('/api/respondio/contacts', payload)
+      onCreated(r.key)
+    } catch (e) { setError(e.message) } finally { setSubmitting(false) }
+  }
+
+  return (
+    <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/50" onClick={onClose}>
+      <div className="card w-[420px] p-4 space-y-3" onClick={e => e.stopPropagation()} style={{ background: 'var(--tt-bg)' }}>
+        <div className="flex items-center justify-between">
+          <h3 className="font-display font-semibold text-white text-[14px]">New conversation</h3>
+          <button className="btn btn-ghost !p-1.5" onClick={onClose}><X size={14} /></button>
+        </div>
+        <div className="flex rounded-lg overflow-hidden border border-white/10">
+          <button className={`flex-1 py-1.5 text-[12px] font-semibold transition-colors ${mode === 'search' ? 'bg-white/15 text-white' : 'text-slate-400 hover:text-slate-200'}`} onClick={() => setMode('search')}>Search contacts</button>
+          <button className={`flex-1 py-1.5 text-[12px] font-semibold border-l border-white/10 transition-colors ${mode === 'new' ? 'bg-white/15 text-white' : 'text-slate-400 hover:text-slate-200'}`} onClick={() => setMode('new')}>New contact</button>
+        </div>
+        {mode === 'search' ? (
+          <div className="space-y-2">
+            <input className="input !py-1.5 !text-[12px]" placeholder="Search name, phone, or email…" value={q} onChange={e => setQ(e.target.value)} autoFocus />
+            <div className="max-h-[220px] overflow-y-auto scrollbar-thin space-y-1">
+              {searching && <div className="flex justify-center py-4"><Spinner size={14} /></div>}
+              {!searching && q.trim() && !results.length && <p className="text-[11.5px] text-slate-500 text-center py-3">No matches.</p>}
+              {results.map(c => (
+                <button key={c.id} className="w-full text-left px-2.5 py-2 rounded-lg hover:bg-white/10 flex items-center gap-2" onClick={() => createFrom({ fullName: c.name, email: c.email, phone: c.phone })} disabled={submitting}>
+                  <Avatar name={c.name} size={26} />
+                  <div className="min-w-0 flex-1">
+                    <div className="text-[12.5px] font-medium text-white truncate">{c.name}</div>
+                    <div className="text-[11px] text-slate-500 truncate">{c.phone || c.email}</div>
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : (
+          <div className="space-y-2">
+            <input className="input !py-1.5 !text-[12px]" placeholder="Full name" value={fullName} onChange={e => setFullName(e.target.value)} />
+            <input className="input !py-1.5 !text-[12px]" placeholder="Phone (with country code)" value={phone} onChange={e => setPhone(e.target.value)} />
+            <input className="input !py-1.5 !text-[12px]" placeholder="Email" value={email} onChange={e => setEmail(e.target.value)} />
+            <button className="btn btn-primary w-full !py-1.5 !text-[12px]" onClick={() => createFrom({ fullName, email, phone })} disabled={submitting || (!email.trim() && !phone.trim())}>
+              {submitting ? <Spinner size={12} /> : <UserPlus size={12} />} Create & open
+            </button>
+          </div>
+        )}
+        {error && <p className="text-[11.5px] text-rose-400">{error}</p>}
+      </div>
+    </div>
+  )
+}
+
 export default function Inbox() {
   const { boot, toast } = useApp()
   const [rows, setRows] = useState([])
@@ -183,10 +260,15 @@ export default function Inbox() {
   const templates = apiTemplates?.length ? apiTemplates : manualTemplates
   const [templateId, setTemplateId] = useState('')
   const [templateValues, setTemplateValues] = useState([])
+  const [sendMode, setSendMode] = useState('text')
 
   const threadEndRef = useRef(null)
   const [syncing, setSyncing] = useState(false)
   const autoSyncedRef = useRef(false)
+  const [newConvOpen, setNewConvOpen] = useState(false)
+  const [agents, setAgents] = useState([])
+
+  useEffect(() => { api.get('/api/respondio/agents').then(r => setAgents(r.agents || [])).catch(() => {}) }, [])
 
   const loadList = async () => {
     setLoadingList(true)
@@ -201,6 +283,18 @@ export default function Inbox() {
   }
 
   const loadSnippets = () => api.get('/api/inbox/snippets').then(setSnippets).catch(() => {})
+
+  const [syncingSnippets, setSyncingSnippets] = useState(false)
+  const syncSnippets = async () => {
+    setSyncingSnippets(true)
+    try {
+      const r = await api.post('/api/inbox/snippets/sync')
+      await loadSnippets()
+      toast(`Synced snippets from Respond.io — ${r.added} new, ${r.updated} updated`)
+    } catch (e) {
+      toast(e.message, 'error')
+    } finally { setSyncingSnippets(false) }
+  }
 
   const displayedRows = useMemo(() => {
     const filtered = unmatchedOnly ? rows.filter(r => r.unmatched) : rows
@@ -257,6 +351,7 @@ export default function Inbox() {
     setLoadingThread(true)
     setText('')
     setProfile(null)
+    setSendMode('text')
     try {
       const r = await api.get(`/api/inbox/${leadId}/messages`)
       setMessages(sortMessages(r.messages))
@@ -314,17 +409,28 @@ export default function Inbox() {
   const selectedTemplate = templates.find(t => t.id === templateId) || templates[0]
   const setTemplateValue = (idx, v) => setTemplateValues(curr => curr.map((x, i) => (i === idx ? v : x)))
 
-  const alreadyMessaged = messages.some(m => m.direction === 'outbound')
-  const mustUseTemplate = channelToSend === 'whatsapp' && !alreadyMessaged
+  // WhatsApp's 24-hour customer care window: free-form text is only allowed
+  // within 24h of the contact's last inbound message; respond.io has no API
+  // field for this, so it's computed the same way WhatsApp itself enforces
+  // it — 24h since the latest inbound message (or "never", if there hasn't
+  // been one, which also covers a brand-new conversation's first message).
+  const lastInboundAt = messages.reduce((max, m) => (m.direction === 'inbound' && m.sentAt > max ? m.sentAt : max), 0) || null
+  const windowExpired = channelToSend === 'whatsapp' && (!lastInboundAt || Date.now() - lastInboundAt > 24 * 60 * 60 * 1000)
+  const mustUseTemplate = windowExpired
+  const templateMode = mustUseTemplate || sendMode === 'template'
 
   const send = async () => {
     if (!selected) return
     setSending(true); setError('')
+    // Unmatched rows are keyed `contact:<respondio-id>` — no CRM lead to
+    // send through, so the target travels as `key` instead of `leadId` (see
+    // resolveSendTarget in server/index.js).
+    const target = selected.unmatched ? { key: selected.leadId } : { leadId: selected.leadId }
     try {
-      if (mustUseTemplate) {
+      if (templateMode) {
         if (!selectedTemplate) throw new Error('Select a WhatsApp template before sending.')
         await api.post('/api/respondio/send', {
-          leadId: selected.leadId, channel: 'whatsapp', useTemplate: true,
+          ...target, channel: 'whatsapp', useTemplate: true,
           template: {
             id: selectedTemplate.id, name: selectedTemplate.name, language: selectedTemplate.language || 'en',
             namespace: selectedTemplate.namespace || '', category: selectedTemplate.category || '',
@@ -335,7 +441,7 @@ export default function Inbox() {
         })
       } else {
         if (!text.trim()) throw new Error('Write a message first.')
-        await api.post('/api/respondio/send', { leadId: selected.leadId, channel: channelToSend, message: text.trim(), logFollowUp: true })
+        await api.post('/api/respondio/send', { ...target, channel: channelToSend, message: text.trim(), logFollowUp: true })
       }
       setText('')
       toast('Message sent')
@@ -357,6 +463,15 @@ export default function Inbox() {
     if (!selected) return
     await api.post(`/api/inbox/${selected.leadId}/assign`, { associateId })
     setRows(curr => curr.map(r => r.leadId === selected.leadId ? { ...r, assigneeId: associateId } : r))
+  }
+
+  // Assigns/unassigns on respond.io's own side (not just the local CRM
+  // mapping) — works for unmatched contact-only rows too, since :key
+  // accepts either a lead id or a `contact:<id>` key.
+  const setRespondioAgent = async (agentId) => {
+    if (!selected) return
+    await api.post(`/api/inbox/${selected.leadId}/agent`, { agentId: agentId || null })
+    loadList()
   }
 
   return (
@@ -411,6 +526,13 @@ export default function Inbox() {
               title="Pull every existing conversation from Respond.io"
             >
               {syncing ? <Spinner size={11} /> : <Sparkles size={11} />}
+            </button>
+            <button
+              className="btn btn-ghost !py-1.5 !px-2 !text-[11px]"
+              onClick={() => setNewConvOpen(true)}
+              title="Message any respond.io contact, or create a new one"
+            >
+              <UserPlus size={11} />
             </button>
           </div>
 
@@ -493,11 +615,13 @@ export default function Inbox() {
               <div ref={threadEndRef} />
             </div>
 
-            {selected.unmatched ? (
-              <div className="border-t border-white/8 p-3 text-[11.5px] text-slate-500 text-center">
-                This respond.io contact isn't linked to a CRM lead yet — add them as a lead to reply here.
+            {windowExpired && (
+              <div className="mx-3 mt-3 flex items-start gap-2 rounded-lg bg-amber-500/10 border border-amber-400/25 px-3 py-2 text-[11.5px] text-amber-300">
+                <Clock size={13} className="shrink-0 mt-0.5" />
+                <span>This conversation is outside the 24-hour customer care window{lastInboundAt ? ` (last reply ${timeAgo(lastInboundAt)} ago)` : ''}. You can only send an approved WhatsApp template until the contact messages again.</span>
               </div>
-            ) : (
+            )}
+
             <div className="border-t border-white/8 p-3 space-y-2">
               <div className="flex gap-1.5">
                 {Object.entries(CHANNEL_META).map(([k, m]) => {
@@ -515,11 +639,30 @@ export default function Inbox() {
                     </button>
                   )
                 })}
+                {channelToSend === 'whatsapp' && (
+                  <div className="flex items-center gap-1 ml-auto rounded-lg border border-white/10 p-0.5">
+                    <button
+                      onClick={() => setSendMode('text')}
+                      disabled={mustUseTemplate}
+                      className={`px-2 py-1 rounded-md text-[10.5px] font-semibold transition-colors ${!templateMode ? 'bg-white/15 text-white' : 'text-slate-400 hover:text-slate-200'} disabled:opacity-40 disabled:cursor-not-allowed`}
+                    >
+                      Message
+                    </button>
+                    <button
+                      onClick={() => setSendMode('template')}
+                      className={`px-2 py-1 rounded-md text-[10.5px] font-semibold transition-colors flex items-center gap-1 ${templateMode ? 'bg-white/15 text-white' : 'text-slate-400 hover:text-slate-200'}`}
+                    >
+                      <Sparkles size={10} /> Template
+                    </button>
+                  </div>
+                )}
               </div>
 
-              {mustUseTemplate ? (
+              {templateMode ? (
                 <div className="space-y-1.5">
-                  <div className="flex items-center gap-1.5 text-[10.5px] text-slate-500"><Sparkles size={11} /> First WhatsApp message must use an approved template</div>
+                  {mustUseTemplate && (
+                    <div className="flex items-center gap-1.5 text-[10.5px] text-slate-500"><Sparkles size={11} /> Free-form text isn't available right now — send an approved template</div>
+                  )}
                   <select className="input select-strong !py-1.5 !text-[12px]" value={templateId} onChange={e => setTemplateId(e.target.value)}>
                     {templates.map(t => <option key={t.id} value={t.id}>{t.label || t.name}</option>)}
                   </select>
@@ -556,11 +699,17 @@ export default function Inbox() {
                     <>
                       <div className="fixed inset-0 z-10" onClick={() => setShowSnippets(false)} />
                       <div className="absolute bottom-full left-0 mb-2 w-[280px] card !rounded-xl p-2 z-20 shadow-2xl space-y-1 max-h-[240px] overflow-y-auto scrollbar-thin">
+                        <div className="flex items-center justify-between px-1 pb-1">
+                          <span className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold">Snippets</span>
+                          <button className="btn btn-ghost !py-1 !px-1.5 !text-[10px]" onClick={syncSnippets} disabled={syncingSnippets} title="Pull Saved Replies from Respond.io">
+                            {syncingSnippets ? <Spinner size={10} /> : <RefreshCcw size={10} />} Sync
+                          </button>
+                        </div>
                         {snippets.map(s => (
                           <button
                             key={s.id}
                             className="w-full text-left px-2 py-1.5 rounded-lg hover:bg-white/10 text-[11.5px] text-slate-200"
-                            onClick={() => { setText(prev => (prev ? prev + ' ' : '') + s.text); setChannelToSend(c => c === 'whatsapp' && mustUseTemplate ? 'sms' : c); setShowSnippets(false) }}
+                            onClick={() => { setText(prev => (prev ? prev + ' ' : '') + s.text); if (!mustUseTemplate) setSendMode('text'); setShowSnippets(false) }}
                           >
                             <div className="font-semibold text-[10.5px] text-slate-400 uppercase tracking-wide">{s.label}</div>
                             {s.text}
@@ -577,7 +726,6 @@ export default function Inbox() {
                 </button>
               </div>
             </div>
-            )}
           </>
         )}
       </div>
@@ -690,6 +838,18 @@ export default function Inbox() {
             )}
           </div>
 
+          <div className="border-t border-white/8 pt-3 space-y-2">
+            <label className="text-[10.5px] uppercase tracking-wider text-slate-500 font-semibold flex items-center gap-1.5"><Headset size={11} /> Respond.io agent</label>
+            <select
+              className="input select-strong !py-1.5 !text-[11.5px] w-full"
+              value={selected.respondioAssignee || ''}
+              onChange={e => setRespondioAgent(e.target.value || null)}
+            >
+              <option value="">Unassigned</option>
+              {agents.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+            </select>
+          </div>
+
           {!selected.unmatched && (
             <button className="btn btn-ghost !text-[11.5px] justify-center" onClick={toggleStatus}>
               {selected.status === 'closed' ? <><Circle size={12} /> Reopen conversation</> : <><CheckCircle2 size={12} /> Close conversation</>}
@@ -701,6 +861,16 @@ export default function Inbox() {
           </div>
         </div>
       )}
+
+      <NewConversationModal
+        open={newConvOpen}
+        onClose={() => setNewConvOpen(false)}
+        onCreated={async (key) => {
+          setNewConvOpen(false)
+          await loadList()
+          openThread(key)
+        }}
+      />
     </div>
   )
 }

@@ -219,6 +219,16 @@ export function assign(db, key, associateId) {
   return c
 }
 
+// Records the raw respond.io agent (id or email) a conversation was assigned
+// to, separately from `assigneeId` (the local CRM associate mapping) — the
+// two can diverge when the respond.io-side agent has no matching associate
+// record, and the panel needs to show who actually owns it on respond.io.
+export function setRespondioAssignee(db, key, assignee) {
+  const c = conv(db, key)
+  c.respondioAssignee = assignee ?? null
+  return c
+}
+
 // ---------- respond.io contact profile enrichment ----------
 // Cached alongside the conversation record so the Inbox panel shows tags,
 // custom fields, assignee, language/country, etc. instantly instead of
@@ -270,6 +280,7 @@ export function listConversations(db, leads, { studio, associate, channel, statu
         status: c.status || 'open',
         unreadCount: c.unreadCount || 0,
         assigneeId: c.assigneeId || lead?.associateId || null,
+        respondioAssignee: c.respondioAssignee || null,
         lastMessage: last ? { content: last.content, direction: last.direction, channel: last.channel, sentAt: last.sentAt, templateName: last.templateName } : null,
         lastMessageAt: c.lastMessageAt || last?.sentAt || null
       }
@@ -311,6 +322,30 @@ export function updateSnippet(db, id, { label, text }) {
 export function deleteSnippet(db, id) {
   ensure(db)
   db.settings.inbox.snippets = db.settings.inbox.snippets.filter(x => x.id !== id)
+}
+
+// Merges respond.io's own snippets (from the internal API — see
+// respondioInternal.js) into the local snippet list, matched by
+// `respondioUid` so re-syncing updates existing entries in place instead of
+// duplicating them. Locally-created snippets (no respondioUid) are left
+// untouched.
+export function mergeRespondioSnippets(db, remoteSnippets) {
+  ensure(db)
+  const byUid = new Map(db.settings.inbox.snippets.filter(s => s.respondioUid).map(s => [s.respondioUid, s]))
+  let added = 0, updated = 0
+  for (const r of remoteSnippets) {
+    if (r.active === false) continue
+    const existing = byUid.get(r.uid)
+    if (existing) {
+      existing.label = r.name
+      existing.text = r.message
+      updated++
+    } else {
+      db.settings.inbox.snippets.push({ id: uid('snip'), label: r.name, text: r.message, respondioUid: r.uid })
+      added++
+    }
+  }
+  return { added, updated }
 }
 
 // Matches an inbound Respond.io webhook payload's contact to a known lead by

@@ -75,7 +75,7 @@ export default function SettingsPage() {
   const [testGpt, setTestGpt] = useState(false)
   const [testGptResult, setTestGptResult] = useState(null)
 
-  const [respSet, setRespSet] = useState({ apiKey: '', workspaceId: '' })
+  const [respSet, setRespSet] = useState({ apiKey: '', workspaceId: '', session: { token: '', cookie: '', botId: '', orgId: '' } })
   const [respStatus, setRespStatus] = useState(null)
   const [syncingContacts, setSyncingContacts] = useState(false)
   const [syncContactsResult, setSyncContactsResult] = useState(null)
@@ -194,7 +194,10 @@ export default function SettingsPage() {
       setGptStatus(s)
       setGptSet({ apiKey: '', model: s.model || 'gpt-4o-mini' })
     }).catch(() => {})
-    api.get('/api/respondio/status').then(s => setRespStatus(s)).catch(() => {})
+    api.get('/api/respondio/status').then(s => {
+      setRespStatus(s)
+      setRespSet(r => ({ ...r, session: { ...r.session, botId: r.session?.botId || s.snippetsBotId || '', orgId: r.session?.orgId || s.snippetsOrgId || '' } }))
+    }).catch(() => {})
     api.get('/api/mailtrap/status').then(s => {
       setMailStatus(s)
       setMailSet(m => ({ ...m, host: s.host || '', fromEmail: s.fromEmail || '', enabled: s.enabled === true }))
@@ -283,7 +286,12 @@ export default function SettingsPage() {
 
   const saveResp = async () => {
     try {
-      await api.put('/api/settings', { respondio: { ...respSet, wabaTemplates } })
+      // Blank session fields mean "leave as-is" (they're re-pasted only
+      // when the previous session expires), not "clear this" — omit them
+      // so the backend's merge doesn't wipe a still-valid token/cookie.
+      const session = Object.fromEntries(Object.entries(respSet.session || {}).filter(([, v]) => String(v || '').trim()))
+      await api.put('/api/settings', { respondio: { ...respSet, ...(Object.keys(session).length ? { session } : {}), wabaTemplates } })
+      setRespSet(r => ({ ...r, session: { ...r.session, token: '', cookie: '' } }))
       refreshData(); toast('Respond.io settings saved')
       api.get('/api/respondio/status').then(setRespStatus).catch(() => {})
     } catch (e) { toast(e.message, 'error') }
@@ -913,6 +921,24 @@ export default function SettingsPage() {
                   {syncContactsResult && <p className="mt-2 text-[11.5px] text-emerald-400">✓ Linked {syncContactsResult.linked} of {syncContactsResult.checked} checked ({syncContactsResult.alreadyLinked} were already linked)</p>}
                 </div>
               )}
+
+              <div className="mt-4 card p-4 bg-white/[0.02] border-white/6">
+                <div className="flex items-center justify-between gap-3 mb-1">
+                  <div>
+                    <div className="font-semibold text-white text-[13px]">Snippets sync (Saved Replies)</div>
+                    <div className="text-[11.5px] text-slate-500 mt-0.5">
+                      Respond.io has no public API for canned responses — this uses their internal web-app session instead, so it's unsupported and the token expires periodically. When it does, open respond.io in your browser, go to Settings &gt; Snippets, open DevTools &gt; Network, reload, and copy the <code>authorization</code>/<code>cookie</code> headers from any <code>snippet/list</code> request.
+                    </div>
+                  </div>
+                  {respStatus?.snippetsSessionConfigured && <span className="chip bg-emerald-500/10 text-emerald-300 border border-emerald-400/20 shrink-0"><ShieldCheck size={11} /> Configured</span>}
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
+                  <div className="sm:col-span-2"><label className="label">Session token (authorization bearer)</label><input className="input" type="password" value={respSet.session?.token || ''} onChange={e => setRespSet({ ...respSet, session: { ...respSet.session, token: e.target.value } })} placeholder={respStatus?.snippetsSessionConfigured ? '•••••••• (stored)' : 'eyJraWQiOi… (JWT from the authorization header)'} /></div>
+                  <div className="sm:col-span-2"><label className="label">Cookie header (optional)</label><input className="input" type="password" value={respSet.session?.cookie || ''} onChange={e => setRespSet({ ...respSet, session: { ...respSet.session, cookie: e.target.value } })} placeholder="leave blank unless the token alone gets rejected" /></div>
+                  <div><label className="label">Bot ID</label><input className="input" value={respSet.session?.botId || ''} onChange={e => setRespSet({ ...respSet, session: { ...respSet.session, botId: e.target.value } })} placeholder="e.g. 431351" /></div>
+                  <div><label className="label">Org ID</label><input className="input" value={respSet.session?.orgId || ''} onChange={e => setRespSet({ ...respSet, session: { ...respSet.session, orgId: e.target.value } })} placeholder="e.g. 424165" /></div>
+                </div>
+              </div>
 
               <div className="mt-4 card p-4 bg-white/[0.02] border-white/6">
                 <div className="flex items-center justify-between gap-3 mb-3">

@@ -10,6 +10,7 @@ import { assignLead } from './roundRobin.js'
 import * as momence from './momence.js'
 import * as gpt from './gpt.js'
 import * as respondio from './respondio.js'
+import * as respondioInternal from './respondioInternal.js'
 import * as inbox from './inbox.js'
 import * as mailer from './mailer.js'
 import * as supabase from './supabaseStore.js'
@@ -1426,12 +1427,47 @@ app.post('/api/momence/sync/:leadId', async (req, res) => {
 const SETTINGS_SECTIONS = ['org', 'ui', 'business', 'cadence', 'notifications', 'ai', 'roundRobin', 'reminders', 'momence', 'gpt', 'respondio', 'mailtrap']
 
 app.get('/api/settings', (req, res) => res.json(db.settings))
+// Mirrors respond.io's internal-API session (authToken/cookie/botId/orgId —
+// see respondioInternal.js) into the .env file too, per how it's configured,
+// so a fresh session pasted into Settings survives a server restart without
+// also having to hand-edit .env. Best-effort: a read-only filesystem just
+// means it falls back to the in-memory/db copy already saved.
+function persistEnvVars(pairs) {
+  const envFile = path.join(__dirname, '..', '.env')
+  try {
+    let lines = fs.existsSync(envFile) ? fs.readFileSync(envFile, 'utf8').split('\n') : []
+    for (const [key, value] of Object.entries(pairs)) {
+      process.env[key] = value
+      const idx = lines.findIndex(l => l.match(new RegExp(`^\\s*${key}\\s*=`)))
+      const line = `${key}=${value}`
+      if (idx >= 0) lines[idx] = line
+      else lines.push(line)
+    }
+    fs.writeFileSync(envFile, lines.join('\n'))
+  } catch (e) { /* best-effort — settings/db already have the values */ }
+}
+
 app.put('/api/settings', async (req, res) => {
   const body = req.body || {}
+  // respond.io's internal-API session is a nested object the caller only
+  // ever sends partial updates to (e.g. re-pasting just a fresh token) — the
+  // generic per-section merge below is shallow, so without this it would
+  // blow away whatever cookie/botId/orgId the un-sent fields already held.
+  const prevRespondioSession = db.settings.respondio?.session || null
   for (const section of SETTINGS_SECTIONS) {
     if (body[section] && typeof body[section] === 'object' && !Array.isArray(body[section])) {
       db.settings[section] = { ...(db.settings[section] || {}), ...body[section] }
     }
+  }
+  if (body.respondio?.session) {
+    db.settings.respondio.session = { ...(prevRespondioSession || {}), ...body.respondio.session }
+    const s = db.settings.respondio.session
+    persistEnvVars({
+      USER_RESPONDIO_SESSION_TOKEN: s.token || '',
+      USER_RESPONDIO_SESSION_COOKIE: s.cookie || '',
+      USER_RESPONDIO_BOT_ID: s.botId || '',
+      USER_RESPONDIO_ORG_ID: s.orgId || ''
+    })
   }
   if (Array.isArray(body.followUpChannels)) db.settings.followUpChannels = body.followUpChannels.filter(Boolean)
   try {
@@ -2472,7 +2508,10 @@ app.get('/api/respondio/status', async (req, res) => {
   res.json({
     configured: respondio.isConfigured(db),
     workspaceId: respondio.workspaceId(db),
-    inboundWebhookUrl: `${req.protocol}://${req.get('host')}/api/respondio/webhook/${db.settings.respondio.inboundWebhookKey}`
+    inboundWebhookUrl: `${req.protocol}://${req.get('host')}/api/respondio/webhook/${db.settings.respondio.inboundWebhookKey}`,
+    snippetsSessionConfigured: respondioInternal.isSessionConfigured(db),
+    snippetsBotId: db.settings.respondio?.session?.botId || '',
+    snippetsOrgId: db.settings.respondio?.session?.orgId || ''
   })
 })
 
@@ -2700,15 +2739,117 @@ app.get('/api/respondio/templates', async (req, res) => {
   }
 })
 
+// Resolves who a message/template goes to for POST /api/respondio/send.
+// Three shapes, in priority order: an existing CRM lead (`leadId`, the
+// original behavior); an existing inbox row with no matching lead
+// (`key`, formatted `contact:<respondio-id>` — see inbox.js); or someone
+// respond.io has never seen before (`newContact: { fullName, email, phone }`),
+// which creates the respond.io contact first. Returns a lead-shaped object
+// (real lead, or a synthetic one carrying just respondId/email/phone) plus
+// the inbox key its messages should be recorded under.
+async function resolveSendTarget(req) {
+  if (req.body.leadId) {
+    const lead = leadById(req.body.leadId)
+    if (!lead) throw Object.assign(new Error('Lead not found'), { status: 404 })
+    return { lead, key: lead.id }
+  }
+  if (req.body.key && req.body.key.startsWith('contact:')) {
+    return { lead: { respondId: req.body.key.slice('contact:'.length) }, key: req.body.key }
+  }
+  if (req.body.newContact) {
+    const { fullName, email, phone } = req.body.newContact
+    if (!String(email || '').trim() && !String(phone || '').trim()) {
+      throw Object.assign(new Error('Provide an email or phone to start a new conversation.'), { status: 400 })
+    }
+    const contact = await respondio.getOrCreateContact(db, { fullName, email, phone })
+    const matchedLead = inbox.matchLeadFromWebhook(db, { contact })
+    if (matchedLead) {
+      if (!matchedLead.respondId) matchedLead.respondId = contact.id
+      return { lead: matchedLead, key: matchedLead.id }
+    }
+    const key = inbox.contactKey(contact.id)
+    inbox.setContactInfo(db, key, inbox.contactDisplayInfo(contact))
+    return { lead: { respondId: contact.id }, key }
+  }
+  throw Object.assign(new Error('No recipient specified — pass leadId, key, or newContact.'), { status: 400 })
+}
+
+// Workspace agents (respond.io users) for the "change agent" picker.
+app.get('/api/respondio/agents', async (req, res) => {
+  if (!respondio.isConfigured(db)) return res.json({ configured: false, agents: [] })
+  try {
+    const users = await respondio.listUsers(db)
+    res.json({ configured: true, agents: users.map(u => ({ id: u.id, name: [u.firstName, u.lastName].filter(Boolean).join(' ') || u.email || `User ${u.id}`, email: u.email })) })
+  } catch (e) {
+    res.status(502).json({ configured: true, agents: [], error: e.message })
+  }
+})
+
+// Free-text search across every respond.io contact — powers the Inbox's
+// "message any contact" picker for contacts never synced locally.
+app.get('/api/respondio/contacts/search', async (req, res) => {
+  if (!respondio.isConfigured(db)) return res.json({ configured: false, contacts: [] })
+  const q = String(req.query.q || '').trim()
+  if (!q) return res.json({ configured: true, contacts: [] })
+  try {
+    const results = await respondio.searchContacts(db, q)
+    res.json({
+      configured: true,
+      contacts: results.map(c => ({
+        id: c.id,
+        name: [c.firstName, c.lastName].filter(Boolean).join(' ') || c.email || c.phone || 'Unknown contact',
+        email: c.email || '',
+        phone: c.phone || ''
+      }))
+    })
+  } catch (e) {
+    res.status(502).json({ configured: true, contacts: [], error: e.message })
+  }
+})
+
+// Creates (or updates) a respond.io contact standalone — not tied to sending
+// a message. If it matches an existing CRM lead by email/phone, links to
+// that lead; otherwise it becomes a contact-only inbox row.
+app.post('/api/respondio/contacts', async (req, res) => {
+  if (!respondio.isConfigured(db)) return res.status(400).json({ error: 'Respond.io is not configured.' })
+  const { fullName, email, phone } = req.body
+  if (!String(email || '').trim() && !String(phone || '').trim()) return res.status(400).json({ error: 'Provide an email or phone.' })
+  try {
+    const contact = await respondio.getOrCreateContact(db, { fullName, email, phone })
+    const matchedLead = inbox.matchLeadFromWebhook(db, { contact })
+    let key
+    if (matchedLead) {
+      key = matchedLead.id
+      if (!matchedLead.respondId) { matchedLead.respondId = contact.id; markDirty(matchedLead.id) }
+      // A matched lead with no prior messages has no db.inbox.conversations
+      // entry yet — listConversations only lists keys that already have one,
+      // so the new row would be invisible until the first message synced.
+      inbox.assign(db, key, matchedLead.associateId || null)
+    } else {
+      key = inbox.contactKey(contact.id)
+      inbox.setContactInfo(db, key, inbox.contactDisplayInfo(contact))
+    }
+    save()
+    broadcastChange('respondio-message')
+    res.status(201).json({ key, contact })
+  } catch (e) {
+    res.status(502).json({ error: e.message })
+  }
+})
+
 app.post('/api/respondio/send', async (req, res) => {
-  const lead = leadById(req.body.leadId)
-  if (!lead) return res.status(404).json({ error: 'Lead not found' })
+  if (!respondio.isConfigured(db)) return res.status(400).json({ error: 'Respond.io is not configured. Add your API key in Settings > Integrations.' })
+  let lead, key
+  try {
+    ({ lead, key } = await resolveSendTarget(req))
+  } catch (e) {
+    return res.status(e.status || 502).json({ error: e.message })
+  }
   const channel = ['call', 'whatsapp', 'email', 'sms'].includes(req.body.channel) ? req.body.channel : 'whatsapp'
   const text = String(req.body.message || '').trim()
   const template = req.body.template || null
   const useTemplate = req.body.useTemplate === true || !!template || (channel === 'whatsapp' && !(lead.respondio?.lastOutboundAt || (lead.followUps || []).some(f => f.via === 'respondio')))
   if (!useTemplate && !text) return res.status(400).json({ error: 'Message is required' })
-  if (!respondio.isConfigured(db)) return res.status(400).json({ error: 'Respond.io is not configured. Add your API key in Settings > Integrations.' })
   // useTemplate can be forced true for a lead's first WhatsApp message even
   // when the caller only meant to send free text (see the `useTemplate`
   // computation above). Previously a missing `template` silently fell back
@@ -2731,7 +2872,12 @@ app.post('/api/respondio/send', async (req, res) => {
     const msg = shouldUseTemplate
       ? await respondio.sendTemplateMessage(db, lead, template)
       : await respondio.sendMessage(db, lead, text, channel)
-    if (req.body.logFollowUp !== false) {
+    // `lead` is a real CRM lead only when it came through leadId or a
+    // matched newContact — synthetic contact-only targets (unmatched inbox
+    // rows, or a brand-new contact with no matching lead) have no
+    // `followUps` array and aren't in db.leads, so skip the CRM-side bookkeeping.
+    const isRealLead = Array.isArray(lead.followUps)
+    if (isRealLead && req.body.logFollowUp !== false) {
       lead.followUps.push({
         id: uid('fu'),
         date: new Date().toISOString().slice(0, 10),
@@ -2743,19 +2889,19 @@ app.post('/api/respondio/send', async (req, res) => {
         via: 'respondio',
         conversationId: lead.respondId
       })
+      lead.respondio = { ...(lead.respondio || {}), lastOutboundAt: nowIso(), lastOutboundType: shouldUseTemplate ? 'template' : 'text' }
+      lead.lastActivityAt = nowIso()
     }
-    lead.respondio = { ...(lead.respondio || {}), lastOutboundAt: nowIso(), lastOutboundType: shouldUseTemplate ? 'template' : 'text' }
-    lead.lastActivityAt = nowIso()
-    inbox.recordMessage(db, lead.id, {
+    inbox.recordMessage(db, key, {
       direction: 'outbound',
       channel,
       type: shouldUseTemplate ? 'whatsapp_template' : 'text',
       content: shouldUseTemplate ? '' : text,
       templateName: shouldUseTemplate ? (template?.name || '') : ''
     })
-    markDirty(lead.id)
+    if (isRealLead) markDirty(lead.id)
     save()
-    broadcastChange('respondio-message', { leadId: lead.id })
+    broadcastChange('respondio-message', { leadId: key })
     res.json({ ok: true, contactId: contact.id, message: msg })
   } catch (e) {
     res.status(502).json({ error: e.message })
@@ -2849,6 +2995,61 @@ app.post('/api/inbox/:leadId/assign', (req, res) => {
   const c = inbox.assign(db, lead.id, req.body.associateId || null)
   save()
   res.json(c)
+})
+
+// Assigns/unassigns the conversation to a respond.io workspace agent — the
+// real source of truth, visible in respond.io's own dashboard too (see
+// respondio.assignConversation). `agentId` is a workspace user id, or null
+// to unassign. Works for a matched CRM lead (:key is a lead id) or an
+// unmatched inbox row (:key is `contact:<respondio-id>`) alike. Also
+// updates the local CRM associate mapping when the agent's email matches an
+// associate record, so the "Assigned to" dropdown stays in sync.
+app.post('/api/inbox/:key/agent', async (req, res) => {
+  if (!respondio.isConfigured(db)) return res.status(400).json({ error: 'Respond.io is not configured.' })
+  const key = req.params.key
+  const agentId = req.body.agentId === undefined || req.body.agentId === '' ? null : req.body.agentId
+  let lead = null
+  let identifier
+  if (key.startsWith('contact:')) {
+    identifier = `id:${key.slice('contact:'.length)}`
+  } else {
+    lead = leadById(key)
+    if (!lead) return res.status(404).json({ error: 'Lead not found' })
+    identifier = respondio.leadIdentifier(db, lead) || (lead.respondId ? `id:${lead.respondId}` : null)
+    if (!identifier) return res.status(400).json({ error: 'Lead has no email, phone, or linked Respond.io contact.' })
+  }
+  try {
+    const contact = key.startsWith('contact:')
+      ? await respondio.assignConversationById(db, key.slice('contact:'.length), agentId)
+      : await respondio.assignConversation(db, lead, agentId)
+    const agents = await respondio.listUsers(db).catch(() => [])
+    const agent = agents.find(u => String(u.id) === String(agentId))
+    inbox.setRespondioAssignee(db, key, agentId)
+    inbox.assign(db, key, inbox.resolveAssigneeId(db.associates, agent?.email))
+    if (lead) markDirty(lead.id)
+    save()
+    broadcastChange('respondio-message', { leadId: key })
+    res.json({ ok: true, contact })
+  } catch (e) {
+    res.status(502).json({ error: e.message })
+  }
+})
+
+// Pulls snippets from respond.io's own "Saved Replies" (internal API, no
+// public equivalent — see respondioInternal.js) and merges them into the
+// local snippet list the composer's Snippets picker already reads from.
+app.post('/api/inbox/snippets/sync', async (req, res) => {
+  if (!respondioInternal.isSessionConfigured(db)) {
+    return res.status(400).json({ error: 'Respond.io session is not configured — paste a fresh authToken/botId/orgId in Settings > Integrations.' })
+  }
+  try {
+    const remote = await respondioInternal.listSnippets(db)
+    const result = inbox.mergeRespondioSnippets(db, remote)
+    await saveMetaNow()
+    res.json({ ok: true, fetched: remote.length, ...result })
+  } catch (e) {
+    res.status(e.name === 'SessionExpiredError' ? 401 : 502).json({ error: e.message })
+  }
 })
 
 app.get('/api/inbox/snippets', (req, res) => res.json(inbox.listSnippets(db)))

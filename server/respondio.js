@@ -301,6 +301,37 @@ export async function getOrCreateContact(db, lead) {
   return contact
 }
 
+// Assign or unassign the lead's conversation to a workspace agent
+// (POST /contact/{identifier}/conversation/assignee, body { assignee }).
+// `assignee` is a workspace user id (number), their email (string), or null
+// to unassign — confirmed live: the endpoint 400s with
+// "assignee is null or integer,email" for anything else.
+export async function assignConversation(db, lead, assignee) {
+  if (!leadIdentifier(db, lead)) return null
+  const data = await withContactRetry(db, lead, (identifier) =>
+    api(db, `/contact/${identifier}/conversation/assignee`, { method: 'POST', body: { assignee } })
+  )
+  return pickContact(data)
+}
+
+// Same as assignConversation, but for a bare respond.io contact id — used
+// for contact-only inbox rows that have no matching CRM lead to resolve an
+// identifier through.
+export async function assignConversationById(db, contactId, assignee) {
+  if (!contactId) return null
+  const data = await api(db, `/contact/id:${contactId}/conversation/assignee`, { method: 'POST', body: { assignee } })
+  return pickContact(data)
+}
+
+// Free-text search across every respond.io contact (POST /contact/list with
+// a `search` term) — powers the Inbox's "message any contact" picker, which
+// needs to find contacts that were never synced into the local inbox store.
+export async function searchContacts(db, q, limit = 20) {
+  const timezone = db?.settings?.org?.timezone || 'Asia/Kolkata'
+  const data = await api(db, `/contact/list?limit=${limit}`, { method: 'POST', body: { search: q, filter: { $and: [] }, timezone } })
+  return asList(data)
+}
+
 // Open / close the lead's conversation (sending also opens it implicitly).
 export async function setConversationStatus(db, lead, status) {
   if (!leadIdentifier(db, lead)) return null
