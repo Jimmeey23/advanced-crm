@@ -14,6 +14,17 @@ const deleted = new Set()
 let lastLocalWriteAt = 0
 let remoteChangeCb = null
 
+function ensureSettingsShape(target) {
+  if (!target.settings) target.settings = {}
+  if (!target.settings.zohoPeople) {
+    target.settings.zohoPeople = {
+      clientId: '', clientSecret: '', refreshToken: '', accessToken: '', tokenExpiresAt: '',
+      dataCenter: 'in', enabled: false, lastFetchAt: null, lastFetchError: null, onDuty: null
+    }
+  }
+  return target
+}
+
 export function onRemoteChange(cb) {
   remoteChangeCb = cb
 }
@@ -57,7 +68,9 @@ export function load() {
     state = seed()
     writeFile()
   }
-  return state
+  // An existing db.json predates a settings key added later — fill it in
+  // rather than requiring a manual migration or crashing on the missing key.
+  return ensureSettingsShape(state)
 }
 
 let saveTimer = null
@@ -150,6 +163,7 @@ const META_FIELDS = ['settings', 'locations', 'associates', 'stages', 'sources',
 function applyRemoteMetaChange({ data }) {
   if (Date.now() - lastLocalWriteAt < 2000 || !state || !data) return
   for (const field of META_FIELDS) if (field in data) state[field] = data[field]
+  ensureSettingsShape(state)
   scheduleRemoteWrite()
   console.log('[db] applied remote settings/meta change')
   if (remoteChangeCb) remoteChangeCb()
@@ -165,7 +179,7 @@ export async function init() {
   try {
     const remote = await supabase.loadState()
     if (remote && remote.leads) {
-      state = remote
+      state = ensureSettingsShape(remote)
       writeFile()
       console.log(`[db] loaded state from Supabase (${remote.leads.length} leads)`)
       supabase.subscribeChanges({ onLeadChange: applyRemoteLeadChange, onMetaChange: applyRemoteMetaChange })

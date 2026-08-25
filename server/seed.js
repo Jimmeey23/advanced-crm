@@ -299,6 +299,10 @@ export function seed() {
         clientId: '', clientSecret: '', refreshToken: '', accessToken: '', tokenExpiresAt: '',
         connectedEmail: '', sheetId: '', sheetTab: '', fieldMapping: {}, defaults: {},
         lastSyncAt: null, lastSyncCounts: null
+      },
+      zohoPeople: {
+        clientId: '', clientSecret: '', refreshToken: '', accessToken: '', tokenExpiresAt: '',
+        dataCenter: 'in', enabled: false, lastFetchAt: null, lastFetchError: null, onDuty: null
       }
     },
     locations,

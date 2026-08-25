@@ -4,9 +4,31 @@
 // "load-balanced" mode we pick the associate with the fewest open leads.
 
 export function activeAssociatesForLocation(db, locationId) {
-  return db.associates
+  const base = db.associates
     .filter(a => a.locationId === locationId && a.active !== false)
     .sort((a, b) => (a.order || 0) - (b.order || 0) || a.name.localeCompare(b.name))
+  return applyShiftFilter(db, base)
+}
+
+// Narrows the roster down to associates Zoho People says are on a working
+// shift today — only when shift-aware round robin is turned on and today's
+// on-duty cache is actually populated. If the cache is missing/stale (Zoho
+// unreachable, integration not yet refreshed today) or nobody in the
+// location's roster matches an on-duty email, this falls back to the full
+// roster rather than assigning nothing — a Zoho outage should never stop
+// leads from being assigned, it should just stop being shift-aware for a
+// bit.
+function applyShiftFilter(db, list) {
+  const zoho = db.settings.zohoPeople
+  if (!zoho?.enabled || !zoho.onDuty || zoho.onDuty.date !== todayKeyLocal()) return list
+  const onDutyEmails = new Set(zoho.onDuty.emails || [])
+  const shiftMatched = list.filter(a => a.email && onDutyEmails.has(String(a.email).toLowerCase().trim()))
+  return shiftMatched.length ? shiftMatched : list
+}
+
+function todayKeyLocal() {
+  const d = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }))
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 
 export function nextAssociate(db, locationId) {

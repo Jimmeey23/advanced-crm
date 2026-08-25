@@ -3,7 +3,7 @@ import {
   Building2, Link2, Zap, Bell, ShieldCheck, TestTube2, ExternalLink,
   Palette, ListChecks, Users, Bot, Database, Save, Plus, X,
   Sparkles, RotateCcw, Pencil, Check, KeyRound, MessageCircle, Mail, Cloud, Send,
-  Webhook, Copy, RefreshCcw, Trash2, ScrollText, Sheet, Filter
+  Webhook, Copy, RefreshCcw, Trash2, ScrollText, Sheet, Filter, ChevronLeft, CircleCheck
 } from 'lucide-react'
 import { useApp } from '../store.jsx'
 import { api } from '../api.js'
@@ -38,6 +38,7 @@ const TABS = [
 export default function SettingsPage() {
   const { boot, refreshData, toast, theme, setTheme, accent, setAccent } = useApp()
   const [tab, setTab] = useState(() => new URLSearchParams(window.location.search).get('tab') || 'general')
+  const [activeIntegration, setActiveIntegration] = useState(() => new URLSearchParams(window.location.search).get('app') || null)
   const settings = boot?.settings || {}
 
   const [org, setOrg] = useState(settings.org || {})
@@ -116,6 +117,32 @@ export default function SettingsPage() {
 
   const [sheetsMappingVersion, setSheetsMappingVersion] = useState(0)
 
+  const [zohoConfig, setZohoConfig] = useState(null)
+  const [zohoRefreshing, setZohoRefreshing] = useState(false)
+
+  const loadZohoConfig = () => api.get('/api/zoho-people/config').then(setZohoConfig).catch(() => {})
+
+  const toggleZohoShiftAware = async (on) => {
+    try {
+      const c = await api.put('/api/zoho-people/config', { enabled: on })
+      setZohoConfig(c)
+      if (on) refreshZohoShifts()
+    } catch (e) { toast(e.message, 'error') }
+  }
+
+  const refreshZohoShifts = async () => {
+    setZohoRefreshing(true)
+    try {
+      const c = await api.post('/api/zoho-people/refresh-now', {})
+      setZohoConfig(c)
+      toast(`On-duty shifts refreshed — ${c.onDuty?.emails?.length || 0} on shift today`)
+    } catch (e) {
+      loadZohoConfig()
+      toast(e.message, 'error')
+    }
+    finally { setZohoRefreshing(false) }
+  }
+
   const loadSheetsConfig = () => api.get('/api/google-sheets/config').then(c => {
     setSheetsConfig(c)
     setSheetsClientId(c.clientId || '')
@@ -166,6 +193,7 @@ export default function SettingsPage() {
     }).catch(() => {})
     loadWebhooks()
     loadSheetsConfig()
+    loadZohoConfig()
   }, [boot])
 
   // OAuth redirect lands back on ?tab=integrations&googleSheets=connected|error
@@ -736,6 +764,16 @@ export default function SettingsPage() {
                   <label className="flex items-center gap-2 text-[12px] text-slate-300"><input type="checkbox" className="accent-rose-500" checked={rr.autoAssignOnImport !== false} onChange={e => setRr({ ...rr, autoAssignOnImport: e.target.checked })} /> Auto-assign on CSV import</label>
                 </div>
               </Toggle>
+              <Toggle on={zohoConfig?.enabled === true} onChange={toggleZohoShiftAware} title="Shift-aware assignment (Zoho People)" desc="Only rotate leads to associates who are actually on a working shift today — checked against Zoho People's attendance/shift data. Falls back to the full roster if Zoho is unreachable or nobody in a studio's roster matches an on-duty email.">
+                {!zohoConfig?.clientId && <p className="text-[11.5px] text-amber-400">Add USER_ZOHO_PEOPLE_CLIENT_ID/SECRET/REFRESH_TOKEN in .env first (see Integrations tab).</p>}
+                {zohoConfig?.enabled && (
+                  <div className="flex items-center gap-3 flex-wrap">
+                    <button className="btn btn-soft !py-1.5" onClick={refreshZohoShifts} disabled={zohoRefreshing}>{zohoRefreshing ? <Spinner size={13} /> : <RefreshCcw size={13} />} Refresh shifts now</button>
+                    {zohoConfig.onDuty?.date && <span className="text-[11.5px] text-slate-400">{zohoConfig.onDuty.emails?.length || 0} on shift today ({zohoConfig.onDuty.date})</span>}
+                    {zohoConfig.lastFetchError && <span className="text-[11.5px] text-rose-400">Last fetch failed: {zohoConfig.lastFetchError}</span>}
+                  </div>
+                )}
+              </Toggle>
               <Toggle on={rem.followUpEnabled !== false} onChange={v => setRem({ ...rem, followUpEnabled: v })} title="Legacy reminder toggles" desc="Backward-compatible reminder switches.">
                 <label className="flex items-center gap-2 text-[12px] text-slate-300"><input type="checkbox" className="accent-rose-500" checked={rem.leadAgeEnabled !== false} onChange={e => setRem({ ...rem, leadAgeEnabled: e.target.checked })} /> Alert on cold leads with no follow-ups</label>
               </Toggle>
@@ -745,8 +783,30 @@ export default function SettingsPage() {
         )}
 
         {tab === 'integrations' && (
-          <>
-            <Section icon={<Link2 size={15} className={configured ? 'text-emerald-400' : 'text-slate-500'} />} title="Momence integration" desc="Map a lead's sales history, class history and memberships from their Momence member record.">
+          <IntegrationsPanel
+            active={activeIntegration}
+            setActive={setActiveIntegration}
+            items={[
+              { id: 'momence', label: 'Momence', icon: Link2, desc: 'Sales & class history sync', connected: Boolean(configured) },
+              { id: 'gpt', label: 'OpenAI GPT', icon: KeyRound, desc: 'AI enrichment & suggestions', connected: Boolean(gptStatus?.configured) },
+              { id: 'respondio', label: 'Respond.io', icon: MessageCircle, desc: 'WhatsApp / SMS / email messaging', connected: Boolean(respStatus?.configured) },
+              { id: 'mailtrap', label: 'Mailtrap', icon: Mail, desc: 'Email reminders & digests', connected: Boolean(mailStatus?.configured && mailSet.enabled) },
+              { id: 'webhooks', label: 'Lead webhooks', icon: Webhook, desc: 'Inbound signup forms & no-code tools', connected: webhooks.length > 0 },
+              { id: 'sheets', label: 'Google Sheets', icon: Sheet, desc: 'Import leads from a spreadsheet', connected: Boolean(sheetsConfig?.connected) },
+              { id: 'zoho', label: 'Zoho People', icon: Zap, desc: 'Shift-aware round robin', connected: Boolean(zohoConfig?.enabled) },
+              { id: 'zapier', label: 'Zapier', icon: Zap, desc: 'Connect thousands of apps via Zaps', comingSoon: true },
+              { id: 'typeform', label: 'Typeform', icon: ListChecks, desc: 'Create leads from form submissions', comingSoon: true },
+              { id: 'facebookLeads', label: 'Facebook Lead Ads', icon: Users, desc: 'Import leads from Facebook/Instagram ad forms', comingSoon: true },
+              { id: 'hubspot', label: 'HubSpot', icon: Cloud, desc: 'Two-way CRM contact sync', comingSoon: true },
+              { id: 'slack', label: 'Slack', icon: MessageCircle, desc: 'Post alerts & digests to a channel', comingSoon: true },
+              { id: 'calendly', label: 'Calendly', icon: RotateCcw, desc: 'Create leads from booked calls', comingSoon: true },
+              { id: 'twilio', label: 'Twilio', icon: Send, desc: 'SMS/voice as an alternate messaging channel', comingSoon: true },
+              { id: 'instagram', label: 'Instagram DMs', icon: MessageCircle, desc: 'Reply to Instagram DMs from the inbox', comingSoon: true },
+              { id: 'intercom', label: 'Intercom', icon: MessageCircle, desc: 'Sync live chat leads', comingSoon: true }
+            ]}
+          >
+            {activeIntegration === 'momence' && (
+            <Section bare>
               {configured && <span className="chip bg-emerald-500/10 text-emerald-300 border border-emerald-400/20"><ShieldCheck size={11} /> Connected</span>}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
                 <div><label className="label">Client ID</label><input className="input" value={mconfig.clientId} onChange={e => setMconfig({ ...mconfig, clientId: e.target.value })} placeholder="from momence.com dashboard" /></div>
@@ -769,8 +829,10 @@ export default function SettingsPage() {
                 <p className="mt-3 text-[11.5px] text-slate-500">Credentials stay on this server and are only used to call the Momence API (OAuth2 password grant).</p>
               )}
             </Section>
+            )}
 
-            <Section icon={<KeyRound size={15} className={gptStatus?.configured ? 'text-emerald-400' : 'text-slate-500'} />} title="OpenAI GPT enrichment" desc="Deep-dive summaries, insights and suggested messages per lead, generated by GPT.">
+            {activeIntegration === 'gpt' && (
+            <Section bare>
               {gptStatus?.configured && <span className="chip bg-emerald-500/10 text-emerald-300 border border-emerald-400/20"><ShieldCheck size={11} /> Configured · {gptStatus.model}</span>}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
                 <div className="sm:col-span-2"><label className="label">API key</label><input className="input" type="password" value={gptSet.apiKey} onChange={e => setGptSet({ ...gptSet, apiKey: e.target.value })} placeholder={gptStatus?.configured ? '•••••••• (stored)' : 'sk-… from platform.openai.com'} /></div>
@@ -794,8 +856,10 @@ export default function SettingsPage() {
                 <p className="mt-3 text-[11.5px] text-slate-500">Keys can also be set via the USER_OPENAI_API_KEY environment variable, which always wins over this setting.</p>
               )}
             </Section>
+            )}
 
-            <Section icon={<MessageCircle size={15} className={respStatus?.configured ? 'text-emerald-400' : 'text-slate-500'} />} title="Respond.io messaging" desc="Send WhatsApp / SMS / email to a lead from the table or drawer and read the full conversation history.">
+            {activeIntegration === 'respondio' && (
+            <Section bare>
               {respStatus?.configured && <span className="chip bg-emerald-500/10 text-emerald-300 border border-emerald-400/20"><ShieldCheck size={11} /> Configured</span>}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
                 <div className="sm:col-span-2"><label className="label">API key</label><input className="input" type="password" value={respSet.apiKey} onChange={e => setRespSet({ ...respSet, apiKey: e.target.value })} placeholder={respStatus?.configured ? '•••••••• (stored)' : 'pk_… from app.respond.io'} /></div>
@@ -879,8 +943,10 @@ export default function SettingsPage() {
                 <p className="mt-3 text-[11.5px] text-slate-500">Keys can also be set via the USER_RESPONDIO_API_KEY environment variable, which always wins over this setting.</p>
               )}
             </Section>
+            )}
 
-            <Section icon={<Mail size={15} className={mailStatus?.configured ? 'text-emerald-400' : 'text-slate-500'} />} title="Mailtrap email reminders" desc="SMTP sending for test emails and the daily follow-up digest. Off by default — nothing sends until enabled below, even if credentials are filled in.">
+            {activeIntegration === 'mailtrap' && (
+            <Section bare>
               <div className="flex flex-wrap items-center gap-2 mb-3">
                 {mailStatus?.configured ? (
                   <span className="chip bg-emerald-500/10 text-emerald-300 border border-emerald-400/20"><ShieldCheck size={11} /> Configured · {mailStatus.host}</span>
@@ -925,8 +991,10 @@ export default function SettingsPage() {
                 <p className="mt-3 text-[11.5px] text-slate-500">Keys can also be set via the USER_MAILTRAP_HOST / USER_MAILTRAP_USER / USER_MAILTRAP_PASS environment variables, which always win over these settings.</p>
               )}
             </Section>
+            )}
 
-            <Section icon={<Webhook size={15} className="text-emerald-400" />} title="Lead webhooks" desc="Let signup forms, landing pages or no-code tools (Zapier, Typeform, etc.) create leads automatically — pick GET, POST or PUT per integration.">
+            {activeIntegration === 'webhooks' && (
+            <Section bare>
               <div className="flex items-center gap-2 mb-4">
                 <input className="input flex-1" placeholder="Integration name, e.g. Landing Page Signup Form" value={newWebhookName} onChange={e => setNewWebhookName(e.target.value)} onKeyDown={e => e.key === 'Enter' && createWebhook()} />
                 <button className="btn btn-primary" onClick={createWebhook} disabled={creatingWebhook}>{creatingWebhook ? <Spinner size={14} /> : <Plus size={14} />} Create webhook</button>
@@ -952,8 +1020,10 @@ export default function SettingsPage() {
                 {!webhooks.length && <p className="text-[11.5px] text-slate-500">No webhook integrations yet — create one above to get a URL you can paste into any form tool.</p>}
               </div>
             </Section>
+            )}
 
-            <Section icon={<Sheet size={15} className={sheetsConfig?.connected ? 'text-emerald-400' : 'text-slate-500'} />} title="Google Sheets lead import" desc="Connect a Google account and pull new lead rows from a spreadsheet, deduplicated against existing leads.">
+            {activeIntegration === 'sheets' && (
+            <Section bare>
               <div className="flex items-center justify-between rounded-xl bg-white/[0.03] border border-white/6 px-4 py-3">
                 <div className="flex items-center gap-2.5">
                   <span className={`w-2 h-2 rounded-full shrink-0 ${sheetsConfig?.connected ? 'bg-emerald-400' : 'bg-slate-600'}`} />
@@ -1063,7 +1133,27 @@ export default function SettingsPage() {
                 </>
               )}
             </Section>
-          </>
+            )}
+
+            {activeIntegration === 'zoho' && (
+            <Section bare>
+              <div className="flex items-center justify-between">
+                <span className="text-[12.5px] text-slate-400">
+                  {zohoConfig?.hasRefreshToken ? `Credentials loaded from .env (${zohoConfig.dataCenter})` : 'Not configured — add keys to .env'}
+                </span>
+                {zohoConfig?.enabled && <span className="chip bg-emerald-500/10 text-emerald-300 border border-emerald-400/20"><ShieldCheck size={11} /> Shift-aware active</span>}
+              </div>
+              <p className="text-[11px] text-slate-500 mt-2">Credentials are read-only here by design — set them in the server's <code className="text-slate-300 bg-black/20 rounded px-1 py-0.5">.env</code> file: <code className="text-slate-300 bg-black/20 rounded px-1 py-0.5">USER_ZOHO_PEOPLE_CLIENT_ID</code>, <code className="text-slate-300 bg-black/20 rounded px-1 py-0.5">USER_ZOHO_PEOPLE_CLIENT_SECRET</code>, <code className="text-slate-300 bg-black/20 rounded px-1 py-0.5">USER_ZOHO_PEOPLE_REFRESH_TOKEN</code>, and optionally <code className="text-slate-300 bg-black/20 rounded px-1 py-0.5">USER_ZOHO_PEOPLE_DATA_CENTER</code> (in/com/eu/com.au, defaults to in). Restart the server after editing .env.</p>
+              <div className="flex items-center gap-3 mt-3">
+                <button className="btn btn-soft" onClick={refreshZohoShifts} disabled={zohoRefreshing || !zohoConfig?.hasRefreshToken}>{zohoRefreshing ? <Spinner size={14} /> : <RefreshCcw size={13} />} Refresh shifts now</button>
+              </div>
+              {zohoConfig?.onDuty?.date && (
+                <p className="mt-2 text-[11px] text-slate-500">Last fetched {zohoConfig.lastFetchAt ? new Date(zohoConfig.lastFetchAt).toLocaleString() : '—'} — {zohoConfig.onDuty.emails?.length || 0} on shift for {zohoConfig.onDuty.date}. Turn on "Shift-aware assignment" under Alerts & AI → Round-robin to use this.</p>
+              )}
+              {zohoConfig?.lastFetchError && <p className="mt-2 text-[11px] text-rose-400">Last fetch failed: {zohoConfig.lastFetchError}</p>}
+            </Section>
+            )}
+          </IntegrationsPanel>
         )}
 
         {tab === 'data' && (
@@ -1187,7 +1277,110 @@ export default function SettingsPage() {
   )
 }
 
-function Section({ icon, title, desc, children }) {
+// Brand-colored monogram badges stand in for official logos — embedding the
+// actual third-party logo artwork/SVGs would mean bundling trademarked
+// assets we don't have a license for. Real brand colors + a glyph reads as
+// "official" without that risk.
+const BRAND = {
+  momence: { bg: 'linear-gradient(135deg,#f43f5e,#be123c)', glyph: 'M' },
+  gpt: { bg: 'linear-gradient(135deg,#10a37f,#0d8a6c)', glyph: 'AI' },
+  respondio: { bg: 'linear-gradient(135deg,#2563eb,#0ea5e9)', glyph: 'R' },
+  mailtrap: { bg: 'linear-gradient(135deg,#065f46,#059669)', glyph: 'M' },
+  webhooks: { bg: 'linear-gradient(135deg,#475569,#1e293b)', glyph: 'W' },
+  sheets: { bg: 'linear-gradient(135deg,#0f9d58,#0b7a44)', glyph: 'S' },
+  zoho: { bg: 'linear-gradient(135deg,#e42527,#b91c1c)', glyph: 'Z' },
+  zapier: { bg: 'linear-gradient(135deg,#ff4a00,#c53400)', glyph: 'Zp' },
+  typeform: { bg: 'linear-gradient(135deg,#3a3a3a,#191919)', glyph: 'Tf' },
+  facebookLeads: { bg: 'linear-gradient(135deg,#1877f2,#0e5fc7)', glyph: 'f' },
+  hubspot: { bg: 'linear-gradient(135deg,#ff7a59,#e35f3d)', glyph: 'H' },
+  slack: { bg: 'linear-gradient(135deg,#611f69,#4a154b)', glyph: '#' },
+  calendly: { bg: 'linear-gradient(135deg,#006bff,#0052cc)', glyph: 'C' },
+  twilio: { bg: 'linear-gradient(135deg,#f22f46,#cf1f36)', glyph: 'T' },
+  instagram: { bg: 'linear-gradient(135deg,#f58529,#dd2a7b,#8134af)', glyph: 'IG' },
+  intercom: { bg: 'linear-gradient(135deg,#1f2937,#111827)', glyph: 'IC' }
+}
+
+function BrandLogo({ id, size = 36, icon: Icon }) {
+  const b = BRAND[id]
+  if (!b) return <Icon size={Math.round(size * 0.45)} className="text-slate-400" />
+  return (
+    <span
+      className="rounded-xl flex items-center justify-center text-white font-display font-bold shrink-0"
+      style={{ width: size, height: size, background: b.bg, fontSize: size * 0.36 }}
+    >
+      {b.glyph}
+    </span>
+  )
+}
+
+// Tile menu of every integration with a connected/setup-needed tick, plus
+// the detail panel (the matching <Section>, passed as children) for
+// whichever one is selected — clicking a tile drills in, "Back" returns to
+// the grid instead of scrolling through every integration's settings.
+function IntegrationsPanel({ active, setActive, items, children }) {
+  if (!active) {
+    return (
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+        {items.map(app => (
+          <button
+            key={app.id}
+            onClick={() => setActive(app.id)}
+            className={`card p-4 text-left transition-colors relative group ${app.comingSoon ? 'opacity-60 hover:opacity-80' : 'hover:border-white/20 hover:bg-white/[0.04]'}`}
+          >
+            {app.connected && (
+              <span className="absolute top-3 right-3 w-5 h-5 rounded-full bg-emerald-500/15 border border-emerald-400/30 text-emerald-400 flex items-center justify-center">
+                <CircleCheck size={12} />
+              </span>
+            )}
+            <div className="mb-3"><BrandLogo id={app.id} icon={app.icon} /></div>
+            <div className="font-display font-semibold text-white text-[13px]">{app.label}</div>
+            <div className="text-[11px] text-slate-500 mt-0.5 leading-snug">{app.desc}</div>
+            <div className="mt-2.5">
+              {app.comingSoon
+                ? <span className="chip !py-0.5 bg-white/5 border border-white/10 text-slate-500 text-[10px]">Coming soon</span>
+                : app.connected
+                  ? <span className="chip !py-0.5 bg-emerald-500/10 text-emerald-300 border border-emerald-400/20 text-[10px]">Connected</span>
+                  : <span className="chip !py-0.5 bg-white/5 border border-white/10 text-slate-400 text-[10px]">Setup needed</span>}
+            </div>
+          </button>
+        ))}
+      </div>
+    )
+  }
+
+  const app = items.find(i => i.id === active)
+  return (
+    <div className="space-y-4">
+      <button className="btn btn-ghost !py-1.5 !text-[12px]" onClick={() => setActive(null)}>
+        <ChevronLeft size={14} /> Back to integrations
+      </button>
+      {app && (
+        <div className="card p-5 flex items-center gap-3.5">
+          <BrandLogo id={app.id} icon={app.icon} size={44} />
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2 flex-wrap">
+              <div className="font-display font-semibold text-white text-[16px]">{app.label}</div>
+              {app.comingSoon
+                ? <span className="chip !py-0.5 bg-white/5 border border-white/10 text-slate-500 text-[10px]">Coming soon</span>
+                : app.connected
+                  ? <span className="chip !py-0.5 bg-emerald-500/10 text-emerald-300 border border-emerald-400/20 text-[10px]"><ShieldCheck size={10} /> Connected</span>
+                  : <span className="chip !py-0.5 bg-white/5 border border-white/10 text-slate-400 text-[10px]">Setup needed</span>}
+            </div>
+            <div className="text-[12px] text-slate-500 mt-0.5">{app.desc}</div>
+          </div>
+        </div>
+      )}
+      {app?.comingSoon ? (
+        <div className="card p-6 text-center">
+          <p className="text-[13px] text-slate-400">{app.label} isn't wired up yet — this app doesn't have a working integration for it today. Let your dev team know if you'd like it prioritized.</p>
+        </div>
+      ) : children}
+    </div>
+  )
+}
+
+function Section({ icon, title, desc, bare, children }) {
+  if (bare) return <div className="card p-5">{children}</div>
   return (
     <div className="card p-5">
       <div className="flex items-center gap-2 mb-1">

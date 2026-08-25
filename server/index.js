@@ -17,6 +17,7 @@ import { runReminderDigest, startReminderScheduler } from './reminders.js'
 import { parseCsv, autoMap, normalizeStage, normalizeStatus, parseFlexibleDate } from './csv.js'
 import { resolveLeadFields, buildLeadPayloadFromResolved, suggestMappingFromKeys, isValidEmail, isValidPhone } from './leadFieldMapping.js'
 import * as googleSheets from './googleSheets.js'
+import * as zohoPeople from './zohoPeople.js'
 import { findDuplicateAmong, clusterDuplicates } from './duplicateMatch.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -921,6 +922,47 @@ setInterval(() => {
     .then(() => save())
     .catch(e => logSheetSync('error', e.message))
 }, 30 * 60 * 1000)
+
+// ---------- Zoho People (shift-aware round robin) ----------
+
+app.get('/api/zoho-people/config', (req, res) => {
+  res.json(zohoPeople.sanitizedConfig(db))
+})
+
+// Credentials are env-only (USER_ZOHO_PEOPLE_*, see .env) — this endpoint
+// only toggles the shift-aware feature on/off, it never accepts secrets.
+app.put('/api/zoho-people/config', async (req, res) => {
+  const c = zohoPeople.config(db)
+  const { enabled } = req.body || {}
+  if (enabled !== undefined) c.enabled = Boolean(enabled)
+  try {
+    await saveMetaNow()
+    log('settings', `${c.enabled ? 'Enabled' : 'Disabled'} Zoho People shift-aware round robin`)
+    res.json(zohoPeople.sanitizedConfig(db))
+  } catch (e) {
+    res.status(502).json({ error: `Could not save Zoho People settings: ${e.message}` })
+  }
+})
+
+app.post('/api/zoho-people/refresh-now', async (req, res) => {
+  await zohoPeople.refreshOnDutyCache(db)
+  try {
+    await saveMetaNow()
+  } catch (e) {
+    return res.status(502).json({ error: `Could not save refreshed Zoho shifts: ${e.message}` })
+  }
+  const c = zohoPeople.sanitizedConfig(db)
+  if (c.lastFetchError) return res.status(502).json({ error: c.lastFetchError, ...c })
+  res.json(c)
+})
+
+// Background poll: keep today's on-duty snapshot fresh so nextAssociate()
+// never makes a Zoho API call inline — every 15 minutes is frequent enough
+// to catch someone clocking in/out without hammering Zoho's rate limits.
+setInterval(() => {
+  if (!db || !db.settings.zohoPeople?.enabled || !zohoPeople.isConfigured(db)) return
+  zohoPeople.refreshOnDutyCache(db).then(() => save())
+}, 15 * 60 * 1000)
 
 // ---------- CSV import ----------
 
@@ -2861,6 +2903,9 @@ async function start() {
   backfillFollowUps(db)
   backfillAssociatePhotos(db)
   startReminderScheduler(db)
+  if (db.settings.zohoPeople?.enabled && zohoPeople.isConfigured(db)) {
+    zohoPeople.refreshOnDutyCache(db).then(() => save())
+  }
   app.listen(PORT, () => {
     console.log(`[physique57-leads] server listening on http://localhost:${PORT}`)
     console.log(`[physique57-leads] storage: ${supabase.isEnabled() ? 'Supabase' : 'local JSON'}`)
