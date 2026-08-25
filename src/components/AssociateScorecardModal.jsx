@@ -1,7 +1,7 @@
 import React from 'react'
 import {
   Trophy, Target, Users, IndianRupee, CalendarCheck2,
-  AlertTriangle, MapPin, X
+  AlertTriangle, MapPin, X, MessageCircle, Phone, MoreHorizontal
 } from 'lucide-react'
 import {
   ResponsiveContainer, LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip
@@ -37,7 +37,12 @@ export default function AssociateScorecardModal({ associateId, onClose, openLead
               <div className="associate-scorecard-identity">
                 <span className="associate-scorecard-eyebrow">Associate performance</span>
                 <h2>{data.associate.name}</h2>
-                <div className="associate-scorecard-location"><MapPin size={12} />{data.associate.locationName || 'No studio'}<span className={`associate-scorecard-status ${data.associate.active ? 'is-active' : 'is-inactive'}`}>{data.associate.active ? 'Active' : 'Inactive'}</span></div>
+                <div className="associate-scorecard-location"><MapPin size={12} />{data.associate.locationName || 'No studio'}<span className={`associate-scorecard-status ${data.associate.active ? 'is-active' : 'is-inactive'}`}>{data.associate.active ? 'Active' : 'Inactive'}</span><span>Associate report</span></div>
+                <div className="associate-scorecard-actions" aria-label="Associate contact actions">
+                  <button type="button"><MessageCircle size={13} /> Message</button>
+                  <button type="button"><Phone size={13} /> Call</button>
+                  <button type="button" aria-label="More associate actions"><MoreHorizontal size={14} /></button>
+                </div>
               </div>
               <div className="associate-scorecard-monthly">
               <MiniStat label="Monthly revenue" value={money(data.thisMonth.revenue)} sub={`${money(data.thisMonth.revenueTarget)} target`} color={attainmentColor(data.thisMonth.attainmentPct)} />
