@@ -1069,7 +1069,7 @@ function ProgressBar({ label, target, actual, attainmentPct }) {
     <div>
       <div className="flex items-center justify-between text-[12px] mb-1">
         <span className="text-slate-300 truncate">{label}</span>
-        <span className="mono text-slate-400 shrink-0 ml-2">{actual}/{target} · <span style={{ color }}>{attainmentPct}%</span></span>
+        <span className="mono text-slate-400 shrink-0 ml-2">{money(actual)}/{money(target)} · <span style={{ color }}>{attainmentPct}%</span></span>
       </div>
       <div className="h-2 rounded-full bg-white/5 overflow-hidden">
         <div className="h-full rounded-full transition-all" style={{ width: `${width}%`, background: color }} />

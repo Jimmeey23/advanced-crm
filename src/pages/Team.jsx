@@ -40,7 +40,7 @@ export default function Team() {
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
         {(boot?.locations || []).map(loc => {
           const locLeads = leads.filter(l => l.locationId === loc.id)
-          const locTeam = (boot?.associates || []).filter(a => a.locationId === loc.id && a.active !== false)
+          const locTeam = (boot?.associates || []).filter(a => (a.locationIds || [a.locationId]).includes(loc.id) && a.active !== false)
           const won = locLeads.filter(l => l.status === 'won').length
           return (
             <div key={loc.id} className="card card-hover p-5">
@@ -138,34 +138,41 @@ function LocationModal({ open, onClose, onSaved }) {
 
 function AssociateModal({ modal, onClose, onSaved }) {
   const { boot } = useApp()
-  const [form, setForm] = useState({ name: '', role: 'Sales Associate', email: '', color: '#f43f5e', targetMonthly: 10, locationId: modal.locationId })
+  const emptyForm = () => ({ name: '', role: 'Sales Associate', email: '', color: '#f43f5e', revenueTargetMonthly: 0, conversionTargetPct: 0, locationId: modal.locationId, locationIds: modal.locationId ? [modal.locationId] : [] })
+  const [form, setForm] = useState(emptyForm)
   const [saving, setSaving] = useState(false)
   const [err, setErr] = useState('')
   const colors = ['#f43f5e', '#8b5cf6', '#06b6d4', '#f59e0b', '#10b981', '#6366f1', '#ec4899', '#14b8a6']
 
-  React.useEffect(() => { if (modal.open) setForm(f => ({ ...f, locationId: modal.locationId || (boot?.locations?.[0]?.id || '') })) }, [modal.open, modal.locationId])
+  React.useEffect(() => {
+    if (!modal.open) return
+    const locationId = modal.locationId || boot?.locations?.[0]?.id || ''
+    setForm(f => ({ ...f, locationId, locationIds: locationId ? [locationId] : [] }))
+  }, [modal.open, modal.locationId])
 
   if (!modal.open) return null
   const submit = async (e) => {
     e.preventDefault()
     if (!form.name.trim()) { setErr('Name required'); return }
     setSaving(true); setErr('')
-    try { await api.post('/api/associates', form); onSaved(); onClose(); setForm({ name: '', role: 'Sales Associate', email: '', color: '#f43f5e', targetMonthly: 10, locationId: modal.locationId }) }
+    try { await api.post('/api/associates', form); onSaved(); onClose(); setForm(emptyForm()) }
     catch (x) { setErr(x.message) }
     finally { setSaving(false) }
   }
   return (
-    <Modal open={modal.open} onClose={onClose} width={480}>
+    <Modal open={modal.open} onClose={onClose} width={620}>
       <ModalHeader title="Add associate" onClose={onClose} />
       <form onSubmit={submit} className="space-y-3">
         <div><label className="label">Full name *</label><input className="input" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} /></div>
         <div className="grid grid-cols-2 gap-3">
           <div><label className="label">Role</label><select className="input" value={form.role} onChange={e => setForm({ ...form, role: e.target.value })}><option>Sales Associate</option><option>Studio Manager</option><option>Lead Generator</option></select></div>
-          <div><label className="label">Location</label><select className="input" value={form.locationId} onChange={e => setForm({ ...form, locationId: e.target.value })}>{(boot?.locations || []).map(l => <option key={l.id} value={l.id}>{l.name}</option>)}</select></div>
+          <div><label className="label">Primary studio</label><select className="input" value={form.locationId} onChange={e => setForm({ ...form, locationId: e.target.value, locationIds: [e.target.value, ...(form.locationIds || []).filter(id => id !== e.target.value)] })}>{(boot?.locations || []).map(l => <option key={l.id} value={l.id}>{l.name}</option>)}</select></div>
         </div>
-        <div className="grid grid-cols-2 gap-3">
+        <div><label className="label">Studio coverage</label><div className="grid grid-cols-2 gap-2 rounded-lg border border-white/10 p-2">{(boot?.locations || []).map(location => <label key={location.id} className="flex items-center gap-2 text-[11px] text-slate-300"><input type="checkbox" checked={(form.locationIds || []).includes(location.id)} onChange={() => { const selected = form.locationIds || []; const locationIds = selected.includes(location.id) ? selected.filter(id => id !== location.id) : [...selected, location.id]; setForm({ ...form, locationIds, locationId: locationIds[0] || '' }) }} />{location.name}</label>)}</div></div>
+        <div className="grid grid-cols-3 gap-3">
           <div><label className="label">Email</label><input className="input" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} /></div>
-          <div><label className="label">Monthly target</label><input className="input" type="number" value={form.targetMonthly} onChange={e => setForm({ ...form, targetMonthly: e.target.value })} /></div>
+          <div><label className="label">Revenue target</label><input className="input" type="number" min="0" value={form.revenueTargetMonthly} onChange={e => setForm({ ...form, revenueTargetMonthly: Number(e.target.value) })} /></div>
+          <div><label className="label">Conversion target %</label><input className="input" type="number" min="0" max="100" value={form.conversionTargetPct} onChange={e => setForm({ ...form, conversionTargetPct: Number(e.target.value) })} /></div>
         </div>
         <div><label className="label">Avatar color</label>
           <div className="flex gap-2">{colors.map(c => <button key={c} type="button" onClick={() => setForm({ ...form, color: c })} className={`w-7 h-7 rounded-full transition-transform ${form.color === c ? 'ring-2 ring-white scale-110' : 'opacity-70'}`} style={{ background: c }} />)}</div>

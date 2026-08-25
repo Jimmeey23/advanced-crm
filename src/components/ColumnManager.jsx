@@ -157,7 +157,7 @@ function LookupForm({ onAdd, onCancel }) {
   const [relatedField, setRelatedField] = useState('name')
   const [type, setType] = useState('text')
   const fieldsFor = relatedTable === 'associate'
-    ? [{ id: 'name', label: 'Name' }, { id: 'email', label: 'Email' }, { id: 'phone', label: 'Phone' }, { id: 'targetMonthly', label: 'Monthly target' }, { id: 'locationId', label: 'Location ID' }]
+    ? [{ id: 'name', label: 'Name' }, { id: 'email', label: 'Email' }, { id: 'phone', label: 'Phone' }, { id: 'revenueTargetMonthly', label: 'Monthly revenue target' }, { id: 'conversionTargetPct', label: 'Conversion target %' }, { id: 'locationIds', label: 'Studio IDs' }]
     : [{ id: 'name', label: 'Name' }, { id: 'city', label: 'City' }, { id: 'active', label: 'Active' }]
   return (
     <div className="space-y-2">

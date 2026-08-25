@@ -37,7 +37,12 @@ export const LEAD_FIELD_OPTIONS = [
 export default function FieldMappingEditor({
   fieldMapping, defaults, onSaveMapping, onSaveDefaults,
   keyLabel = 'incoming key', keyPlaceholder = 'incoming key, e.g. full_name',
-  fieldOptions = LEAD_FIELD_OPTIONS
+  fieldOptions = LEAD_FIELD_OPTIONS,
+  // Optional [{field, aliases}] (from GET /api/webhooks/field-reference) —
+  // when present, shows which incoming keys already auto-map with no manual
+  // mapping row needed, and backs the key input with a datalist of them so
+  // admins pick a known spelling instead of typing one blind.
+  aliasReference = null
 }) {
   const [mapping, setMapping] = useState(() => Object.entries(fieldMapping || {}).map(([k, v]) => ({ key: k, field: v })))
   const [mappingDirty, setMappingDirty] = useState(false)
@@ -77,8 +82,33 @@ export default function FieldMappingEditor({
     setDefaultsDirty(false)
   }
 
+  const datalistId = 'field-mapping-known-keys'
+  const knownKeys = aliasReference ? [...new Set(aliasReference.flatMap(f => f.aliases))].sort() : []
+  const mappedKeys = new Set(mapping.map(r => r.key.trim()).filter(Boolean))
+
   return (
     <>
+      {aliasReference && (
+        <div>
+          <div className="text-[10.5px] uppercase tracking-wider text-slate-500 font-semibold mb-1.5">Auto-recognized — no mapping needed for these</div>
+          <div className="max-h-32 overflow-y-auto space-y-1 rounded-lg bg-white/[0.02] border border-white/6 p-2">
+            {aliasReference.map(f => (
+              <div key={f.field} className="flex items-start gap-2 text-[11px]">
+                <span className="text-slate-300 mono w-28 shrink-0">{fieldOptions.find(o => o.id === f.field)?.label || f.field}</span>
+                <span className="text-slate-500 mono truncate">{f.aliases.join(', ')}</span>
+              </div>
+            ))}
+          </div>
+          <p className="text-[10.5px] text-slate-600 mt-1">Only add a mapping row below for keys your source sends that aren't already listed here.</p>
+        </div>
+      )}
+
+      {aliasReference && (
+        <datalist id={datalistId}>
+          {knownKeys.map(k => <option key={k} value={k} />)}
+        </datalist>
+      )}
+
       <div>
         <div className="text-[10.5px] uppercase tracking-wider text-slate-500 font-semibold mb-1.5">Field mapping — {keyLabel} → lead field</div>
         <div className="space-y-1.5">
@@ -88,7 +118,11 @@ export default function FieldMappingEditor({
                 <button className="btn btn-ghost !p-0.5 !min-h-0 disabled:opacity-20" onClick={() => moveRow(i, -1)} disabled={i === 0} title="Move up"><ChevronUp size={11} /></button>
                 <button className="btn btn-ghost !p-0.5 !min-h-0 disabled:opacity-20" onClick={() => moveRow(i, 1)} disabled={i === mapping.length - 1} title="Move down"><ChevronDown size={11} /></button>
               </div>
-              <input className="input !py-1.5 !text-[12px] flex-1" placeholder={keyPlaceholder} value={r.key} onChange={e => updateRow(i, { key: e.target.value })} />
+              <input className="input !py-1.5 !text-[12px] flex-1" placeholder={keyPlaceholder} value={r.key} onChange={e => updateRow(i, { key: e.target.value })}
+                {...(aliasReference ? { list: datalistId } : {})} />
+              {aliasReference && mappedKeys.has(r.key.trim()) && knownKeys.includes(r.key.trim()) && (
+                <span className="text-[10px] text-amber-400/80 shrink-0" title="This key is already auto-recognized — this row overrides which field it maps to">override</span>
+              )}
               <span className="text-slate-600 text-[11px]">→</span>
               <select className="input !py-1.5 !text-[12px] !w-auto" value={r.field} onChange={e => updateRow(i, { field: e.target.value })}>
                 {fieldOptions.map(f => <option key={f.id} value={f.id}>{f.label}</option>)}

@@ -40,6 +40,10 @@ insert into app_state (key, data)
 values ('app', '{}'::jsonb)
 on conflict (key) do nothing;
 
+insert into app_state (key, data)
+values ('settings', '{}'::jsonb)
+on conflict (key) do nothing;
+
 -- Enables two-way sync: lets the server's Supabase Realtime subscription see
 -- changes made directly in the Supabase dashboard (or by another instance).
 alter publication supabase_realtime add table app_state;

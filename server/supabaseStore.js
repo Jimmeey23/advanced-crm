@@ -1,8 +1,8 @@
 // Supabase storage layer.
 // Keeps the in-memory db as the source of truth at runtime and mirrors it to
-// Supabase: a single "app_state" row holds the config/metadata tables, and a
-// "leads" table holds one row per lead. Only dirty leads are re-upserted on
-// each persist, so large imports stay efficient.
+// Supabase: app_state stores the full app snapshot plus a compact settings
+// overlay, while "leads" holds one row per lead. The overlay lets settings
+// saves avoid rewriting large runtime caches such as the messaging inbox.
 import { createClient } from '@supabase/supabase-js'
 import WebSocket from 'ws'
 import { normalizeEmail, normalizePhone } from './duplicateMatch.js'
@@ -14,10 +14,21 @@ if (typeof globalThis.WebSocket === 'undefined') globalThis.WebSocket = WebSocke
 const LEADS_TABLE = 'leads'
 const META_TABLE = 'app_state'
 const META_KEY = 'app'
+const SETTINGS_META_KEY = 'settings'
 const DELETE_BATCH_SIZE = 50
 const UPSERT_BATCH_SIZE = 500
 
 let client = null
+let supportsNormalizedLeadColumns = true
+
+function isMissingNormalizedLeadColumn(error) {
+  const message = String(error?.message || '')
+  return error?.code === 'PGRST204' && (message.includes("'email_norm'") || message.includes("'phone_norm'"))
+}
+
+function withoutNormalizedLeadColumns(rows) {
+  return rows.map(({ email_norm, phone_norm, ...row }) => row)
+}
 
 export function isEnabled() {
   const url = (process.env.USER_SUPABASE_URL || '').trim()
@@ -48,6 +59,10 @@ export async function loadState() {
   if (metaRes.error) throw new Error(`supabase load meta: ${metaRes.error.message}`)
   const meta = metaRes.data?.data || null
   if (!meta || !meta.settings) return null
+  const settingsRes = await c.from(META_TABLE).select('data').eq('key', SETTINGS_META_KEY).maybeSingle()
+  if (settingsRes.error) throw new Error(`supabase load settings: ${settingsRes.error.message}`)
+  const settingsMeta = settingsRes.data?.data || {}
+  const persisted = { ...meta, ...settingsMeta }
 
   const leads = []
   let from = 0
@@ -61,21 +76,21 @@ export async function loadState() {
   }
 
   return {
-    version: meta.version || 2,
-    seededAt: meta.seededAt || new Date().toISOString(),
-    settings: meta.settings,
-    locations: meta.locations || [],
-    associates: meta.associates || [],
-    stages: meta.stages || [],
-    sources: meta.sources || [],
-    channels: meta.channels || [],
-    classTypes: meta.classTypes || [],
+    version: persisted.version || 2,
+    seededAt: persisted.seededAt || new Date().toISOString(),
+    settings: persisted.settings,
+    locations: persisted.locations || [],
+    associates: persisted.associates || [],
+    stages: persisted.stages || [],
+    sources: persisted.sources || [],
+    channels: persisted.channels || [],
+    classTypes: persisted.classTypes || [],
     leads,
-    activity: meta.activity || [],
-    importHistory: meta.importHistory || [],
-    webhookIntegrations: meta.webhookIntegrations || [],
-    webhookLogs: meta.webhookLogs || [],
-    sheetSyncLogs: meta.sheetSyncLogs || [],
+    activity: persisted.activity || [],
+    importHistory: persisted.importHistory || [],
+    webhookIntegrations: persisted.webhookIntegrations || [],
+    webhookLogs: persisted.webhookLogs || [],
+    sheetSyncLogs: persisted.sheetSyncLogs || [],
     inbox: meta.inbox || { messages: [], conversations: {} }
   }
 }
@@ -141,7 +156,15 @@ export async function persistState(state, dirtyLeadIds = [], deletedLeadIds = []
     }
     for (let i = 0; i < rows.length; i += UPSERT_BATCH_SIZE) {
       const batch = rows.slice(i, i + UPSERT_BATCH_SIZE)
-      const { error } = await c.from(LEADS_TABLE).upsert(batch)
+      let { error } = await c.from(LEADS_TABLE).upsert(
+        supportsNormalizedLeadColumns ? batch : withoutNormalizedLeadColumns(batch)
+      )
+      if (isMissingNormalizedLeadColumn(error)) {
+        supportsNormalizedLeadColumns = false
+        console.warn('[supabase] leads table uses the legacy schema; persisting lead JSON without normalized columns until server/sql/migrations/20260825_add_lead_normalized_columns.sql is applied')
+        const retry = await c.from(LEADS_TABLE).upsert(withoutNormalizedLeadColumns(batch))
+        error = retry.error
+      }
       if (error) {
         // 23505 = unique_violation on email_norm/phone_norm — another
         // instance already persisted a lead with this email/phone under a
@@ -150,7 +173,9 @@ export async function persistState(state, dirtyLeadIds = [], deletedLeadIds = []
         // block every other dirty lead in the batch from saving.
         if (error.code === '23505' && batch.length > 1) {
           for (const row of batch) {
-            const single = await c.from(LEADS_TABLE).upsert([row])
+            const single = await c.from(LEADS_TABLE).upsert(
+              supportsNormalizedLeadColumns ? [row] : withoutNormalizedLeadColumns([row])
+            )
             if (single.error) {
               if (single.error.code === '23505') {
                 console.error(`[supabase] lead ${row.id} not saved — email/phone already belongs to another lead row (likely a second server instance racing this create): ${single.error.message}`)
@@ -172,7 +197,7 @@ export async function persistState(state, dirtyLeadIds = [], deletedLeadIds = []
 export async function persistMetaState(state) {
   const c = getClient()
   if (!c) return
-  const meta = {
+  const settingsMeta = {
     version: state.version,
     seededAt: state.seededAt,
     settings: state.settings,
@@ -186,10 +211,9 @@ export async function persistMetaState(state) {
     importHistory: state.importHistory,
     webhookIntegrations: state.webhookIntegrations,
     webhookLogs: state.webhookLogs,
-    sheetSyncLogs: state.sheetSyncLogs,
-    inbox: state.inbox
+    sheetSyncLogs: state.sheetSyncLogs
   }
-  const { error } = await c.from(META_TABLE).upsert({ key: META_KEY, data: meta, updated_at: new Date().toISOString() })
+  const { error } = await c.from(META_TABLE).upsert({ key: SETTINGS_META_KEY, data: settingsMeta, updated_at: new Date().toISOString() })
   if (error) throw new Error(`supabase persist meta: ${error.message}`)
 }
 

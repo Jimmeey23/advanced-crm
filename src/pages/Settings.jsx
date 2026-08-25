@@ -1,10 +1,17 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import {
   Building2, Link2, Zap, Bell, ShieldCheck, TestTube2, ExternalLink,
   Palette, ListChecks, Users, Bot, Database, Save, Plus, X,
   Sparkles, RotateCcw, Pencil, Check, KeyRound, MessageCircle, Mail, Cloud, Send,
-  Webhook, Copy, RefreshCcw, Trash2, ScrollText, Sheet, Filter, ChevronLeft, CircleCheck
+  Webhook, Copy, RefreshCcw, Trash2, ScrollText, Sheet, Filter, ChevronLeft, CircleCheck,
+  Search, ChevronRight, IndianRupee, CalendarRange, MapPin
 } from 'lucide-react'
+import {
+  siOpenai, siMailtrap, siGooglesheets, siZoho, siZapier, siTypeform,
+  siFacebook, siHubspot, siSlack, siCalendly, siTwilio, siInstagram,
+  siIntercom, siSalesforce, siGmail, siWhatsapp, siStripe, siAirtable,
+  siGooglecalendar, siZendesk, siAsana, siRazorpay
+} from 'simple-icons'
 import { useApp } from '../store.jsx'
 import { api } from '../api.js'
 import { Spinner, Modal, ModalHeader } from '../ui.jsx'
@@ -102,6 +109,7 @@ export default function SettingsPage() {
   const [creatingWebhook, setCreatingWebhook] = useState(false)
   const [webhookLogs, setWebhookLogs] = useState({})
   const [openWebhookLogs, setOpenWebhookLogs] = useState(null)
+  const [webhookFieldRef, setWebhookFieldRef] = useState(null)
 
   const loadWebhooks = () => api.get('/api/webhooks').then(setWebhooks).catch(() => {})
 
@@ -192,6 +200,7 @@ export default function SettingsPage() {
       setMailSet(m => ({ ...m, host: s.host || '', fromEmail: s.fromEmail || '', enabled: s.enabled === true }))
     }).catch(() => {})
     loadWebhooks()
+    api.get('/api/webhooks/field-reference').then(d => setWebhookFieldRef(d.fields)).catch(() => setWebhookFieldRef([]))
     loadSheetsConfig()
     loadZohoConfig()
   }, [boot])
@@ -562,13 +571,13 @@ export default function SettingsPage() {
   const configured = boot?.integrations?.momence
 
   return (
-    <div className="p-6 max-w-[980px]">
+    <div className={`p-6 settings-page ${['integrations', 'teams'].includes(tab) ? 'settings-integrations-page' : 'max-w-[980px]'}`}>
       <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
         <div>
           <h2 className="font-display font-bold text-white text-[18px]">Settings</h2>
           <p className="text-[12.5px] text-slate-500 mt-0.5">Tweak and edit every configuration for your studio network</p>
         </div>
-        <button className="btn btn-primary" onClick={() => saveSettings()}><Save size={14} /> Save all settings</button>
+        {tab !== 'integrations' && <button className="btn btn-primary" onClick={() => saveSettings()}><Save size={14} /> Save all settings</button>}
       </div>
 
       <div className="flex flex-wrap gap-1.5 mb-5 border-b border-white/6 pb-3">
@@ -697,25 +706,29 @@ export default function SettingsPage() {
                 <button className="btn btn-ghost !py-1.5 !text-[12px]" onClick={() => setLocations(ls => [...ls, { id: `loc_${Date.now()}`, name: 'New Studio', city: 'Mumbai', country: 'India', active: true, timeZone: 'Asia/Kolkata', accent: 'rose', address: '', fullAddress: '' }])}><Plus size={13} /> Add location</button>
               </div>
             </Section>
-            <Section icon={<Users size={15} className="text-emerald-400" />} title="Associates" desc="Sales team members, their studio, role and monthly target.">
+            <Section icon={<Users size={15} className="text-emerald-400" />} title="Associates" desc="Assign studio coverage and define monthly revenue and conversion targets.">
+              <div className="associate-settings-head" aria-hidden="true">
+                <span>Associate</span><span>Role</span><span>Studios</span><span>Revenue target</span><span>Conversion</span><span>State</span>
+              </div>
               <div className="space-y-2">
                 {associates.map(a => (
-                  <div key={a.id} className="flex items-center gap-2 rounded-xl bg-white/[0.03] border border-white/6 px-3 py-2">
-                    <input className="input !w-[180px] !py-1.5" value={a.name} onChange={e => setAssociates(as => as.map(x => x.id === a.id ? { ...x, name: e.target.value } : x))} />
-                    <input className="input !w-[130px] !py-1.5" value={a.role || ''} onChange={e => setAssociates(as => as.map(x => x.id === a.id ? { ...x, role: e.target.value } : x))} />
-                    <select className="input !w-auto !py-1.5" value={a.locationId} onChange={e => setAssociates(as => as.map(x => x.id === a.id ? { ...x, locationId: e.target.value } : x))}>
-                      {locations.map(l => <option key={l.id} value={l.id}>{l.name.split(',')[0]}</option>)}
-                    </select>
-                    <input className="input !w-[70px] !py-1.5" type="number" value={a.targetMonthly || 10} onChange={e => setAssociates(as => as.map(x => x.id === a.id ? { ...x, targetMonthly: Number(e.target.value) } : x))} title="Monthly target" />
+                  <div key={a.id} className="associate-settings-row">
+                    <input className="input !py-1.5" value={a.name} aria-label="Associate name" onChange={e => setAssociates(as => as.map(x => x.id === a.id ? { ...x, name: e.target.value } : x))} />
+                    <input className="input !py-1.5" value={a.role || ''} aria-label={`${a.name} role`} onChange={e => setAssociates(as => as.map(x => x.id === a.id ? { ...x, role: e.target.value } : x))} />
+                    <StudioAssignmentPicker associate={a} locations={locations} onChange={locationIds => setAssociates(as => as.map(x => x.id === a.id ? { ...x, locationIds, locationId: locationIds[0] || null } : x))} />
+                    <label className="associate-target-input"><IndianRupee size={13} /><input className="input !py-1.5" type="number" min="0" step="1000" value={a.revenueTargetMonthly || ''} placeholder="0" aria-label={`${a.name} monthly revenue target`} onChange={e => setAssociates(as => as.map(x => x.id === a.id ? { ...x, revenueTargetMonthly: Math.max(0, Number(e.target.value)) } : x))} /></label>
+                    <label className="associate-target-input"><input className="input !py-1.5" type="number" min="0" max="100" step="1" value={a.conversionTargetPct || ''} placeholder="0" aria-label={`${a.name} conversion target percentage`} onChange={e => setAssociates(as => as.map(x => x.id === a.id ? { ...x, conversionTargetPct: Math.min(100, Math.max(0, Number(e.target.value))) } : x))} /><span>%</span></label>
+                    <div className="associate-settings-actions">
                     <button className="btn btn-ghost !p-2" onClick={() => setAssociates(as => as.map(x => x.id === a.id ? { ...x, active: x.active === false } : x))} title="Toggle active">
                       {a.active === false ? <Sparkles size={14} className="text-slate-600" /> : <ShieldCheck size={14} className="text-emerald-400" />}
                     </button>
                     <button className="btn btn-ghost !p-2 text-rose-300" onClick={() => window.confirm(`Delete ${a.name}? Existing leads keep their stored associate id.`) && setAssociates(as => as.filter(x => x.id !== a.id))} title="Delete associate">
                       <Trash2 size={14} />
                     </button>
+                    </div>
                   </div>
                 ))}
-                <button className="btn btn-ghost !py-1.5 !text-[12px]" onClick={() => setAssociates(as => [...as, { id: `asn_${Date.now()}`, name: 'New Associate', role: 'Sales Associate', email: '', color: '#f43f5e', locationId: locations[0]?.id, active: true, targetMonthly: 10 }])}><Plus size={13} /> Add associate</button>
+                <button className="btn btn-ghost !py-1.5 !text-[12px]" onClick={() => setAssociates(as => [...as, { id: `asn_${Date.now()}`, name: 'New Associate', role: 'Sales Associate', email: '', color: '#f43f5e', locationId: locations[0]?.id, locationIds: locations[0]?.id ? [locations[0].id] : [], active: true, revenueTargetMonthly: 0, conversionTargetPct: 0 }])}><Plus size={13} /> Add associate</button>
               </div>
             </Section>
             <button className="btn btn-primary" onClick={saveTeams}><Save size={14} /> Save teams</button>
@@ -787,22 +800,31 @@ export default function SettingsPage() {
             active={activeIntegration}
             setActive={setActiveIntegration}
             items={[
-              { id: 'momence', label: 'Momence', icon: Link2, desc: 'Sales & class history sync', connected: Boolean(configured) },
-              { id: 'gpt', label: 'OpenAI GPT', icon: KeyRound, desc: 'AI enrichment & suggestions', connected: Boolean(gptStatus?.configured) },
-              { id: 'respondio', label: 'Respond.io', icon: MessageCircle, desc: 'WhatsApp / SMS / email messaging', connected: Boolean(respStatus?.configured) },
-              { id: 'mailtrap', label: 'Mailtrap', icon: Mail, desc: 'Email reminders & digests', connected: Boolean(mailStatus?.configured && mailSet.enabled) },
-              { id: 'webhooks', label: 'Lead webhooks', icon: Webhook, desc: 'Inbound signup forms & no-code tools', connected: webhooks.length > 0 },
-              { id: 'sheets', label: 'Google Sheets', icon: Sheet, desc: 'Import leads from a spreadsheet', connected: Boolean(sheetsConfig?.connected) },
-              { id: 'zoho', label: 'Zoho People', icon: Zap, desc: 'Shift-aware round robin', connected: Boolean(zohoConfig?.enabled) },
-              { id: 'zapier', label: 'Zapier', icon: Zap, desc: 'Connect thousands of apps via Zaps', comingSoon: true },
-              { id: 'typeform', label: 'Typeform', icon: ListChecks, desc: 'Create leads from form submissions', comingSoon: true },
-              { id: 'facebookLeads', label: 'Facebook Lead Ads', icon: Users, desc: 'Import leads from Facebook/Instagram ad forms', comingSoon: true },
-              { id: 'hubspot', label: 'HubSpot', icon: Cloud, desc: 'Two-way CRM contact sync', comingSoon: true },
-              { id: 'slack', label: 'Slack', icon: MessageCircle, desc: 'Post alerts & digests to a channel', comingSoon: true },
-              { id: 'calendly', label: 'Calendly', icon: RotateCcw, desc: 'Create leads from booked calls', comingSoon: true },
-              { id: 'twilio', label: 'Twilio', icon: Send, desc: 'SMS/voice as an alternate messaging channel', comingSoon: true },
-              { id: 'instagram', label: 'Instagram DMs', icon: MessageCircle, desc: 'Reply to Instagram DMs from the inbox', comingSoon: true },
-              { id: 'intercom', label: 'Intercom', icon: MessageCircle, desc: 'Sync live chat leads', comingSoon: true }
+              { id: 'momence', label: 'Momence', icon: Link2, category: 'Operations', desc: 'Sales and class history sync', connected: Boolean(configured) },
+              { id: 'gpt', label: 'OpenAI', icon: KeyRound, category: 'Intelligence', desc: 'AI enrichment and suggestions', connected: Boolean(gptStatus?.configured) },
+              { id: 'respondio', label: 'Respond.io', icon: MessageCircle, category: 'Messaging', desc: 'WhatsApp, SMS and email messaging', connected: Boolean(respStatus?.configured) },
+              { id: 'mailtrap', label: 'Mailtrap', icon: Mail, category: 'Messaging', desc: 'Email reminders and digests', connected: Boolean(mailStatus?.configured && mailSet.enabled) },
+              { id: 'webhooks', label: 'Lead webhooks', icon: Webhook, category: 'Developer tools', desc: 'Inbound forms and no-code tools', connected: webhooks.length > 0 },
+              { id: 'sheets', label: 'Google Sheets', icon: Sheet, category: 'Productivity', desc: 'Import leads from a spreadsheet', connected: Boolean(sheetsConfig?.connected) },
+              { id: 'zoho', label: 'Zoho People', icon: Zap, category: 'Operations', desc: 'Shift-aware round robin', connected: Boolean(zohoConfig?.enabled) },
+              { id: 'zapier', label: 'Zapier', icon: Zap, category: 'Automation', desc: 'Connect apps through automated Zaps', comingSoon: true },
+              { id: 'typeform', label: 'Typeform', icon: ListChecks, category: 'Lead capture', desc: 'Create leads from form submissions', comingSoon: true },
+              { id: 'facebookLeads', label: 'Facebook Lead Ads', icon: Users, category: 'Lead capture', desc: 'Import Facebook and Instagram form leads', comingSoon: true },
+              { id: 'hubspot', label: 'HubSpot', icon: Cloud, category: 'CRM', desc: 'Two-way contact and lifecycle sync', comingSoon: true },
+              { id: 'slack', label: 'Slack', icon: MessageCircle, category: 'Messaging', desc: 'Post alerts and digests to channels', comingSoon: true },
+              { id: 'calendly', label: 'Calendly', icon: RotateCcw, category: 'Scheduling', desc: 'Create leads from booked calls', comingSoon: true },
+              { id: 'twilio', label: 'Twilio', icon: Send, category: 'Messaging', desc: 'SMS and voice communication', comingSoon: true },
+              { id: 'instagram', label: 'Instagram', icon: MessageCircle, category: 'Messaging', desc: 'Manage Instagram lead conversations', comingSoon: true },
+              { id: 'intercom', label: 'Intercom', icon: MessageCircle, category: 'Messaging', desc: 'Sync live-chat leads and conversations', comingSoon: true },
+              { id: 'salesforce', label: 'Salesforce', icon: Cloud, category: 'CRM', desc: 'Sync contacts, opportunities and ownership', comingSoon: true },
+              { id: 'gmail', label: 'Gmail', icon: Mail, category: 'Messaging', desc: 'Send and track lead email', comingSoon: true },
+              { id: 'whatsapp', label: 'WhatsApp Business', icon: MessageCircle, category: 'Messaging', desc: 'Message leads from verified business numbers', comingSoon: true },
+              { id: 'stripe', label: 'Stripe', icon: IndianRupee, category: 'Payments', desc: 'Attach payment and subscription activity', comingSoon: true },
+              { id: 'airtable', label: 'Airtable', icon: Database, category: 'Productivity', desc: 'Sync lead records with Airtable bases', comingSoon: true },
+              { id: 'googleCalendar', label: 'Google Calendar', icon: CalendarRange, category: 'Scheduling', desc: 'Coordinate consultations and follow-ups', comingSoon: true },
+              { id: 'zendesk', label: 'Zendesk', icon: MessageCircle, category: 'Support', desc: 'Connect service tickets to lead profiles', comingSoon: true },
+              { id: 'asana', label: 'Asana', icon: ListChecks, category: 'Productivity', desc: 'Create tasks for operational follow-up', comingSoon: true },
+              { id: 'razorpay', label: 'Razorpay', icon: IndianRupee, category: 'Payments', desc: 'Link Indian payment activity to leads', comingSoon: true }
             ]}
           >
             {activeIntegration === 'momence' && (
@@ -1015,6 +1037,7 @@ export default function SettingsPage() {
                     onRegenerate={() => regenerateWebhook(w.id)}
                     onDelete={() => deleteWebhook(w.id)}
                     onCopy={() => copyWebhookUrl(w.url)}
+                    fieldRef={webhookFieldRef}
                   />
                 ))}
                 {!webhooks.length && <p className="text-[11.5px] text-slate-500">No webhook integrations yet — create one above to get a URL you can paste into any form tool.</p>}
@@ -1277,38 +1300,90 @@ export default function SettingsPage() {
   )
 }
 
-// Brand-colored monogram badges stand in for official logos — embedding the
-// actual third-party logo artwork/SVGs would mean bundling trademarked
-// assets we don't have a license for. Real brand colors + a glyph reads as
-// "official" without that risk.
 const BRAND = {
-  momence: { bg: 'linear-gradient(135deg,#f43f5e,#be123c)', glyph: 'M' },
-  gpt: { bg: 'linear-gradient(135deg,#10a37f,#0d8a6c)', glyph: 'AI' },
-  respondio: { bg: 'linear-gradient(135deg,#2563eb,#0ea5e9)', glyph: 'R' },
-  mailtrap: { bg: 'linear-gradient(135deg,#065f46,#059669)', glyph: 'M' },
-  webhooks: { bg: 'linear-gradient(135deg,#475569,#1e293b)', glyph: 'W' },
-  sheets: { bg: 'linear-gradient(135deg,#0f9d58,#0b7a44)', glyph: 'S' },
-  zoho: { bg: 'linear-gradient(135deg,#e42527,#b91c1c)', glyph: 'Z' },
-  zapier: { bg: 'linear-gradient(135deg,#ff4a00,#c53400)', glyph: 'Zp' },
-  typeform: { bg: 'linear-gradient(135deg,#3a3a3a,#191919)', glyph: 'Tf' },
-  facebookLeads: { bg: 'linear-gradient(135deg,#1877f2,#0e5fc7)', glyph: 'f' },
-  hubspot: { bg: 'linear-gradient(135deg,#ff7a59,#e35f3d)', glyph: 'H' },
-  slack: { bg: 'linear-gradient(135deg,#611f69,#4a154b)', glyph: '#' },
-  calendly: { bg: 'linear-gradient(135deg,#006bff,#0052cc)', glyph: 'C' },
-  twilio: { bg: 'linear-gradient(135deg,#f22f46,#cf1f36)', glyph: 'T' },
-  instagram: { bg: 'linear-gradient(135deg,#f58529,#dd2a7b,#8134af)', glyph: 'IG' },
-  intercom: { bg: 'linear-gradient(135deg,#1f2937,#111827)', glyph: 'IC' }
+  momence: { src: 'https://momence.com/momence-landing_260528/images/favicon.png' },
+  gpt: { icon: siOpenai },
+  respondio: { src: 'https://assets.respond.io/favicon/favicon.svg' },
+  mailtrap: { icon: siMailtrap },
+  sheets: { icon: siGooglesheets },
+  zoho: { icon: siZoho },
+  zapier: { icon: siZapier },
+  typeform: { icon: siTypeform },
+  facebookLeads: { icon: siFacebook },
+  hubspot: { icon: siHubspot },
+  slack: { icon: siSlack },
+  calendly: { icon: siCalendly },
+  twilio: { icon: siTwilio },
+  instagram: { icon: siInstagram },
+  intercom: { icon: siIntercom },
+  salesforce: { icon: siSalesforce },
+  gmail: { icon: siGmail },
+  whatsapp: { icon: siWhatsapp },
+  stripe: { icon: siStripe },
+  airtable: { icon: siAirtable },
+  googleCalendar: { icon: siGooglecalendar },
+  zendesk: { icon: siZendesk },
+  asana: { icon: siAsana },
+  razorpay: { icon: siRazorpay }
+}
+
+function StudioAssignmentPicker({ associate, locations, onChange }) {
+  const [open, setOpen] = useState(false)
+  const pickerRef = useRef(null)
+  const selected = associate.locationIds?.length ? associate.locationIds : (associate.locationId ? [associate.locationId] : [])
+  useEffect(() => {
+    if (!open) return undefined
+    const closeOnOutsideClick = event => {
+      if (!pickerRef.current?.contains(event.target)) setOpen(false)
+    }
+    const closeOnEscape = event => {
+      if (event.key !== 'Escape') return
+      setOpen(false)
+      pickerRef.current?.querySelector('button')?.focus()
+    }
+    document.addEventListener('pointerdown', closeOnOutsideClick)
+    document.addEventListener('keydown', closeOnEscape)
+    return () => {
+      document.removeEventListener('pointerdown', closeOnOutsideClick)
+      document.removeEventListener('keydown', closeOnEscape)
+    }
+  }, [open])
+  const toggle = (locationId) => {
+    const next = selected.includes(locationId)
+      ? selected.filter(id => id !== locationId)
+      : [...selected, locationId]
+    onChange(next)
+  }
+  const summary = selected.length
+    ? selected.map(id => locations.find(location => location.id === id)?.name?.split(',')[0]).filter(Boolean).join(', ')
+    : 'Select studios'
+
+  return (
+    <div className={`associate-studio-picker ${open ? 'is-open' : ''}`} ref={pickerRef}>
+      <button type="button" className="associate-studio-trigger" title={summary} aria-haspopup="listbox" aria-expanded={open} onClick={() => setOpen(value => !value)}><MapPin size={13} /><span>{summary}</span><ChevronRight size={13} /></button>
+      {open && <div className="associate-studio-menu" role="listbox" aria-multiselectable="true">
+        {locations.map(location => (
+          <label key={location.id}>
+            <input type="checkbox" checked={selected.includes(location.id)} onChange={() => toggle(location.id)} />
+            <span>{location.name}</span>
+            {selected[0] === location.id && <small>Primary</small>}
+          </label>
+        ))}
+      </div>}
+    </div>
+  )
 }
 
 function BrandLogo({ id, size = 36, icon: Icon }) {
   const b = BRAND[id]
-  if (!b) return <Icon size={Math.round(size * 0.45)} className="text-slate-400" />
+  const markSize = Math.round(size * 0.55)
   return (
-    <span
-      className="rounded-xl flex items-center justify-center text-white font-display font-bold shrink-0"
-      style={{ width: size, height: size, background: b.bg, fontSize: size * 0.36 }}
-    >
-      {b.glyph}
+    <span className="integration-brand-logo" style={{ width: size, height: size }}>
+      {b?.src ? <img src={b.src} alt="" width={markSize} height={markSize} /> : b?.icon ? (
+        <svg className="integration-brand-svg" width={markSize} height={markSize} viewBox="0 0 24 24" aria-hidden="true" style={{ '--brand-color': `#${b.icon.hex}`, '--brand-dark-color': b.icon.hex === '000000' ? '#f8fafc' : `#${b.icon.hex}` }}>
+          <path fill="currentColor" d={b.icon.path} />
+        </svg>
+      ) : <Icon size={markSize} aria-hidden="true" />}
     </span>
   )
 }
@@ -1318,32 +1393,42 @@ function BrandLogo({ id, size = 36, icon: Icon }) {
 // whichever one is selected — clicking a tile drills in, "Back" returns to
 // the grid instead of scrolling through every integration's settings.
 function IntegrationsPanel({ active, setActive, items, children }) {
+  const [query, setQuery] = useState('')
   if (!active) {
+    const normalizedQuery = query.trim().toLowerCase()
+    const visible = normalizedQuery
+      ? items.filter(app => `${app.label} ${app.desc} ${app.category}`.toLowerCase().includes(normalizedQuery))
+      : items
+    const available = visible.filter(app => !app.comingSoon)
+    const upcoming = visible.filter(app => app.comingSoon)
+    const connectedCount = items.filter(app => app.connected).length
+    const renderApp = (app, index) => (
+      <button key={app.id} onClick={() => setActive(app.id)} className="integration-app-card" style={{ '--integration-index': index }}>
+        <BrandLogo id={app.id} icon={app.icon} />
+        <div className="integration-app-copy">
+          <div className="integration-app-label">{app.label}</div>
+          <div className="integration-app-category">{app.category}</div>
+          <div className="integration-app-desc">{app.desc}</div>
+        </div>
+        <div className="integration-app-footer">
+          {app.comingSoon
+            ? <span className="integration-status is-upcoming">Coming soon</span>
+            : app.connected
+              ? <span className="integration-status is-connected"><CircleCheck size={11} /> Connected</span>
+              : <span className="integration-status">Setup needed</span>}
+          <ChevronRight size={15} className="integration-app-arrow" />
+        </div>
+      </button>
+    )
     return (
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
-        {items.map(app => (
-          <button
-            key={app.id}
-            onClick={() => setActive(app.id)}
-            className={`card p-4 text-left transition-colors relative group ${app.comingSoon ? 'opacity-60 hover:opacity-80' : 'hover:border-white/20 hover:bg-white/[0.04]'}`}
-          >
-            {app.connected && (
-              <span className="absolute top-3 right-3 w-5 h-5 rounded-full bg-emerald-500/15 border border-emerald-400/30 text-emerald-400 flex items-center justify-center">
-                <CircleCheck size={12} />
-              </span>
-            )}
-            <div className="mb-3"><BrandLogo id={app.id} icon={app.icon} /></div>
-            <div className="font-display font-semibold text-white text-[13px]">{app.label}</div>
-            <div className="text-[11px] text-slate-500 mt-0.5 leading-snug">{app.desc}</div>
-            <div className="mt-2.5">
-              {app.comingSoon
-                ? <span className="chip !py-0.5 bg-white/5 border border-white/10 text-slate-500 text-[10px]">Coming soon</span>
-                : app.connected
-                  ? <span className="chip !py-0.5 bg-emerald-500/10 text-emerald-300 border border-emerald-400/20 text-[10px]">Connected</span>
-                  : <span className="chip !py-0.5 bg-white/5 border border-white/10 text-slate-400 text-[10px]">Setup needed</span>}
-            </div>
-          </button>
-        ))}
+      <div className="integrations-catalogue">
+        <div className="integrations-catalogue-head">
+          <div><h2>Connected workspace</h2><p>{connectedCount} connected · {items.length} available apps</p></div>
+          <label className="integrations-search"><Search size={15} /><input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search integrations" aria-label="Search integrations" /></label>
+        </div>
+        {!!available.length && <section className="integrations-group"><div className="integrations-group-head"><h3>Available now</h3><span>{available.length}</span></div><div className="integrations-app-grid">{available.map(renderApp)}</div></section>}
+        {!!upcoming.length && <section className="integrations-group"><div className="integrations-group-head"><h3>More apps</h3><span>{upcoming.length}</span></div><div className="integrations-app-grid">{upcoming.map(renderApp)}</div></section>}
+        {!visible.length && <div className="integrations-empty"><Search size={20} /><p>No integrations match “{query}”.</p></div>}
       </div>
     )
   }
@@ -1355,7 +1440,7 @@ function IntegrationsPanel({ active, setActive, items, children }) {
         <ChevronLeft size={14} /> Back to integrations
       </button>
       {app && (
-        <div className="card p-5 flex items-center gap-3.5">
+        <div className="integration-detail-head">
           <BrandLogo id={app.id} icon={app.icon} size={44} />
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
@@ -1368,13 +1453,14 @@ function IntegrationsPanel({ active, setActive, items, children }) {
             </div>
             <div className="text-[12px] text-slate-500 mt-0.5">{app.desc}</div>
           </div>
+          {!app.comingSoon && <span className="integration-persistence"><Database size={11} /> Server persisted</span>}
         </div>
       )}
       {app?.comingSoon ? (
         <div className="card p-6 text-center">
           <p className="text-[13px] text-slate-400">{app.label} isn't wired up yet — this app doesn't have a working integration for it today. Let your dev team know if you'd like it prioritized.</p>
         </div>
-      ) : children}
+      ) : <div className="integration-config-shell">{children}</div>}
     </div>
   )
 }
@@ -1562,7 +1648,7 @@ function ThemeCard({ active, onClick, title, sub, swatch }) {
 
 const WEBHOOK_METHODS = ['POST', 'PUT', 'GET']
 
-function WebhookRow({ webhook, logs, logsOpen, onToggleLogs, onRename, onSaveMapping, onSaveDefaults, onSaveMethod, onTest, onDetectMapping, onRegenerate, onDelete, onCopy }) {
+function WebhookRow({ webhook, logs, logsOpen, onToggleLogs, onRename, onSaveMapping, onSaveDefaults, onSaveMethod, onTest, onDetectMapping, onRegenerate, onDelete, onCopy, fieldRef }) {
   const [nameDraft, setNameDraft] = useState(webhook.name)
   const [testOpen, setTestOpen] = useState(false)
   const [testPayload, setTestPayload] = useState('{\n  "name": "Jane Doe",\n  "phone_number": "9876543210",\n  "email": "jane@example.com"\n}')
@@ -1571,12 +1657,8 @@ function WebhookRow({ webhook, logs, logsOpen, onToggleLogs, onRename, onSaveMap
   const [testing, setTesting] = useState(false)
   const [detecting, setDetecting] = useState(false)
   const [docsOpen, setDocsOpen] = useState(false)
-  const [fieldRef, setFieldRef] = useState(null)
 
-  const toggleDocs = () => {
-    setDocsOpen(o => !o)
-    if (!fieldRef) api.get('/api/webhooks/field-reference').then(d => setFieldRef(d.fields)).catch(() => setFieldRef([]))
-  }
+  const toggleDocs = () => setDocsOpen(o => !o)
 
   const runTest = async () => {
     setTesting(true); setTestError(''); setTestResult(null)
@@ -1627,6 +1709,7 @@ function WebhookRow({ webhook, logs, logsOpen, onToggleLogs, onRename, onSaveMap
         onSaveDefaults={onSaveDefaults}
         keyLabel="incoming payload key"
         keyPlaceholder="incoming JSON key, e.g. full_name"
+        aliasReference={fieldRef}
       />
 
       <div>

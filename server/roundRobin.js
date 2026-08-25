@@ -5,7 +5,7 @@
 
 export function activeAssociatesForLocation(db, locationId) {
   const base = db.associates
-    .filter(a => a.locationId === locationId && a.active !== false)
+    .filter(a => (a.locationIds || [a.locationId]).filter(Boolean).includes(locationId) && a.active !== false)
     .sort((a, b) => (a.order || 0) - (b.order || 0) || a.name.localeCompare(b.name))
   return applyShiftFilter(db, base)
 }

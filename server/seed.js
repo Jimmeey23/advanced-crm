@@ -62,7 +62,14 @@ export function seed() {
     { locationId: 'loc_indiranagar', name: 'Shashi Singh', role: 'Sales Associate', email: 'shashi@physique57.in', color: '#059669' },
     { locationId: 'loc_indiranagar', name: 'Yashas K', role: 'Sales Associate', email: 'yashas@physique57.in', color: '#ea580c' }
   ]
-  const associates = associateDefs.map(a => ({ ...a, id: uid('asn'), active: true, targetMonthly: rand(8, 14) }))
+  const associates = associateDefs.map(a => ({
+    ...a,
+    id: uid('asn'),
+    active: true,
+    locationIds: [a.locationId],
+    revenueTargetMonthly: rand(4, 9) * 100000,
+    conversionTargetPct: rand(15, 30)
+  }))
 
   const sources = [
     'Client Referral', 'Instagram', 'Google Ads', 'Walk-in', 'Website Form',

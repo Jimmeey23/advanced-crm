@@ -45,7 +45,7 @@ export function Avatar({ name, color, size = 30, className = '', photoUrl, photo
 // origin in a split deployment) broke these: the file exists at the
 // frontend's own origin, not the API's, so the request 404'd there and the
 // image silently fell back to initials.
-function normalizePhotoUrl(photoUrl) {
+export function normalizePhotoUrl(photoUrl) {
   const raw = String(photoUrl || '').trim()
   if (!raw) return ''
   if (/^(https?:)?\/\//i.test(raw) || raw.startsWith('data:')) return raw

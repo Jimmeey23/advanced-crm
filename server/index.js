@@ -263,24 +263,46 @@ app.patch('/api/locations/:id', (req, res) => {
 
 // ---------- associates ----------
 
+function normalizeAssociate(input = {}) {
+  const locationIds = [...new Set(
+    (Array.isArray(input.locationIds) ? input.locationIds : [input.locationId])
+      .map(id => String(id || '').trim())
+      .filter(Boolean)
+  )]
+  return {
+    ...input,
+    locationIds,
+    locationId: locationIds[0] || null,
+    revenueTargetMonthly: Math.max(0, Number(input.revenueTargetMonthly) || 0),
+    conversionTargetPct: Math.min(100, Math.max(0, Number(input.conversionTargetPct) || 0))
+  }
+}
+
+function associateInLocation(associate, locationId) {
+  return (associate.locationIds || [associate.locationId]).filter(Boolean).includes(locationId)
+}
+
 app.get('/api/associates', (req, res) => res.json(db.associates))
-app.put('/api/associates', (req, res) => {
-  if (Array.isArray(req.body)) db.associates = req.body.map(a => ({ ...a }))
-  save()
+app.put('/api/associates', async (req, res) => {
+  if (Array.isArray(req.body)) db.associates = req.body.map(normalizeAssociate)
+  try { await saveMetaNow() }
+  catch (e) { return res.status(502).json({ error: `Could not save associates: ${e.message}` }) }
   res.json(db.associates)
 })
-app.post('/api/associates', (req, res) => {
-  const asn = { id: uid('asn'), active: true, order: db.associates.length, ...req.body }
+app.post('/api/associates', async (req, res) => {
+  const asn = normalizeAssociate({ id: uid('asn'), active: true, order: db.associates.length, ...req.body })
   db.associates.push(asn)
-  save()
   log('associate', `Added associate ${asn.name}`)
+  try { await saveMetaNow() }
+  catch (e) { return res.status(502).json({ error: `Could not save associate: ${e.message}` }) }
   res.status(201).json(asn)
 })
-app.patch('/api/associates/:id', (req, res) => {
+app.patch('/api/associates/:id', async (req, res) => {
   const asn = db.associates.find(a => a.id === req.params.id)
   if (!asn) return res.status(404).json({ error: 'Associate not found' })
-  Object.assign(asn, req.body)
-  save()
+  Object.assign(asn, normalizeAssociate({ ...asn, ...req.body }))
+  try { await saveMetaNow() }
+  catch (e) { return res.status(502).json({ error: `Could not save associate: ${e.message}` }) }
   res.json(asn)
 })
 
@@ -669,7 +691,7 @@ app.get('/api/webhooks', (req, res) => {
   res.json(db.webhookIntegrations.map(w => serializeWebhook(w, req)))
 })
 
-app.post('/api/webhooks', (req, res) => {
+app.post('/api/webhooks', async (req, res) => {
   const name = String(req.body?.name || '').trim()
   if (!name) return res.status(400).json({ error: 'Name is required' })
   const w = {
@@ -683,12 +705,16 @@ app.post('/api/webhooks', (req, res) => {
     lastUsedAt: null
   }
   db.webhookIntegrations.push(w)
-  save()
   log('webhook', `Created webhook integration "${w.name}"`)
+  try {
+    await saveMetaNow()
+  } catch (e) {
+    return res.status(502).json({ error: `Could not save webhook settings: ${e.message}` })
+  }
   res.status(201).json(serializeWebhook(w, req))
 })
 
-app.patch('/api/webhooks/:id', (req, res) => {
+app.patch('/api/webhooks/:id', async (req, res) => {
   const w = db.webhookIntegrations.find(x => x.id === req.params.id)
   if (!w) return res.status(404).json({ error: 'Webhook integration not found' })
   if ('name' in req.body) w.name = String(req.body.name || w.name).trim()
@@ -701,7 +727,11 @@ app.patch('/api/webhooks/:id', (req, res) => {
   if ('method' in req.body && ['GET', 'POST', 'PUT'].includes(req.body.method)) {
     w.method = req.body.method
   }
-  save()
+  try {
+    await saveMetaNow()
+  } catch (e) {
+    return res.status(502).json({ error: `Could not save webhook settings: ${e.message}` })
+  }
   res.json(serializeWebhook(w, req))
 })
 
@@ -742,22 +772,30 @@ app.post('/api/webhooks/:id/detect-mapping', (req, res) => {
   res.json({ keys, suggested })
 })
 
-app.post('/api/webhooks/:id/regenerate', (req, res) => {
+app.post('/api/webhooks/:id/regenerate', async (req, res) => {
   const w = db.webhookIntegrations.find(x => x.id === req.params.id)
   if (!w) return res.status(404).json({ error: 'Webhook integration not found' })
   w.key = genWebhookKey() // old URL 404s immediately since lookups match on key
-  save()
   log('webhook', `Regenerated key for webhook "${w.name}"`)
+  try {
+    await saveMetaNow()
+  } catch (e) {
+    return res.status(502).json({ error: `Could not save webhook settings: ${e.message}` })
+  }
   res.json(serializeWebhook(w, req))
 })
 
-app.delete('/api/webhooks/:id', (req, res) => {
+app.delete('/api/webhooks/:id', async (req, res) => {
   const before = db.webhookIntegrations.length
   const w = db.webhookIntegrations.find(x => x.id === req.params.id)
   db.webhookIntegrations = db.webhookIntegrations.filter(x => x.id !== req.params.id)
   db.webhookLogs = db.webhookLogs.filter(l => l.integrationId !== req.params.id)
-  save()
   if (w) log('webhook', `Deleted webhook integration "${w.name}"`)
+  try {
+    await saveMetaNow()
+  } catch (e) {
+    return res.status(502).json({ error: `Could not save webhook settings: ${e.message}` })
+  }
   res.json({ ok: true, deleted: before - db.webhookIntegrations.length })
 })
 
@@ -864,7 +902,7 @@ app.get('/api/google-sheets/config', (req, res) => {
   res.json(googleSheets.sanitizedConfig(db))
 })
 
-app.put('/api/google-sheets/config', (req, res) => {
+app.put('/api/google-sheets/config', async (req, res) => {
   const body = req.body || {}
   const current = db.settings.googleSheets || {}
   db.settings.googleSheets = {
@@ -876,8 +914,12 @@ app.put('/api/google-sheets/config', (req, res) => {
     ...(body.fieldMapping && typeof body.fieldMapping === 'object' ? { fieldMapping: body.fieldMapping } : {}),
     ...(body.defaults && typeof body.defaults === 'object' ? { defaults: body.defaults } : {})
   }
-  save()
   log('settings', 'Google Sheets config updated')
+  try {
+    await saveMetaNow()
+  } catch (e) {
+    return res.status(502).json({ error: `Could not save Google Sheets settings: ${e.message}` })
+  }
   res.json(googleSheets.sanitizedConfig(db))
 })
 
@@ -913,18 +955,22 @@ app.get('/api/google-sheets/oauth/callback', async (req, res) => {
     if (req.query.error) throw new Error(req.query.error_description || req.query.error)
     if (!req.query.code) throw new Error('No authorization code returned by Google')
     await googleSheets.exchangeCode(db, req.query.code, sheetsRedirectUri(req))
-    save()
     log('settings', `Connected Google Sheets (${db.settings.googleSheets.connectedEmail})`)
+    await saveMetaNow()
     res.redirect('/settings?tab=integrations&googleSheets=connected')
   } catch (e) {
     res.redirect(`/settings?tab=integrations&googleSheets=error&message=${encodeURIComponent(e.message)}`)
   }
 })
 
-app.post('/api/google-sheets/disconnect', (req, res) => {
+app.post('/api/google-sheets/disconnect', async (req, res) => {
   googleSheets.disconnect(db)
-  save()
   log('settings', 'Disconnected Google Sheets')
+  try {
+    await saveMetaNow()
+  } catch (e) {
+    return res.status(502).json({ error: `Could not save Google Sheets settings: ${e.message}` })
+  }
   res.json(googleSheets.sanitizedConfig(db))
 })
 
@@ -1211,13 +1257,15 @@ app.get('/api/analytics/team', (req, res) => {
     const won = owned.filter(l => l.status === 'won')
     const revenue = won.reduce((s, l) => s + (l.valueEstimate || 0), 0)
     return {
-      associateId: a.id, name: a.name, locationId: a.locationId, color: a.color, photoUrl: a.photoUrl, photoZoom: a.photoZoom, photoPosX: a.photoPosX, photoPosY: a.photoPosY,
+      associateId: a.id, name: a.name, locationId: a.locationId, locationIds: a.locationIds || [a.locationId], color: a.color, photoUrl: a.photoUrl, photoZoom: a.photoZoom, photoPosX: a.photoPosX, photoPosY: a.photoPosY,
       open: owned.filter(l => l.status === 'open').length,
       won: won.length,
       revenue,
       total: owned.length,
       conversion: owned.length ? Math.round((won.length / owned.length) * 100) : 0,
-      target: a.targetMonthly || 10
+      target: a.revenueTargetMonthly || 0,
+      revenueTargetMonthly: a.revenueTargetMonthly || 0,
+      conversionTargetPct: a.conversionTargetPct || 0
     }
   }).sort((a, b) => b.revenue - a.revenue)
   res.json(rows)
@@ -1235,7 +1283,7 @@ app.get('/api/momence/config', (req, res) => {
   })
 })
 
-app.put('/api/momence/config', (req, res) => {
+app.put('/api/momence/config', async (req, res) => {
   const c = momence.momenceConfig(db)
   const patch = req.body
   if ('clientId' in patch) c.clientId = String(patch.clientId || '').trim()
@@ -1246,8 +1294,12 @@ app.put('/api/momence/config', (req, res) => {
   c.token = null
   c.configured = momence.isConfigured(db)
   c.connected = c.configured
-  save()
   log('momence', 'Momence configuration updated')
+  try {
+    await saveMetaNow()
+  } catch (e) {
+    return res.status(502).json({ error: `Could not save Momence settings: ${e.message}` })
+  }
   res.json({ ok: true, configured: momence.isConfigured(db), connected: c.configured })
 })
 
@@ -1258,7 +1310,7 @@ app.post('/api/momence/test', async (req, res) => {
     momence.momenceConfig(db).lastSyncAt = nowIso()
     momence.momenceConfig(db).connected = true
     momence.momenceConfig(db).configured = true
-    save()
+    await saveMetaNow()
     res.json({ ok: true, profile })
   } catch (e) {
     res.status(502).json({ ok: false, error: e.message })
@@ -1727,7 +1779,7 @@ function periodFunnel(start, end, locationId, associateId) {
 // Full (not just top/bottom) associate leaderboard for a period, optionally scoped to one location.
 function periodLeaderboard(start, end, locationId) {
   const inRange = periodInRangeFn(start, end)
-  const associates = (locationId ? db.associates.filter(a => a.locationId === locationId) : db.associates).filter(a => a.active !== false)
+  const associates = (locationId ? db.associates.filter(a => associateInLocation(a, locationId)) : db.associates).filter(a => a.active !== false)
   return associates.map(a => {
     const owned = db.leads.filter(l => l.associateId === a.id)
     const newLeads = owned.filter(l => inRange(l.createdAt))
@@ -1907,8 +1959,8 @@ function periodCohortConversion(range, offset, now, locationId, associateId) {
   return cohorts
 }
 
-// Target vs actual for the current period, using the existing `targetMonthly`
-// field on associates (server/seed.js) pro-rated to the period length: a
+// Revenue target vs actual for the current period, using each associate's
+// monthly revenue target pro-rated to the period length: a
 // custom `&from&to` window is pro-rated by day-count against a 30-day month;
 // a `range=week` bucket is pro-rated by the average weeks-per-month; a plain
 // `range=month` bucket uses the monthly target as-is.
@@ -1921,14 +1973,16 @@ function periodGoalTracking(range, start, end, customRange, locationId) {
     return range === 'week' ? Math.round(monthly / WEEKS_PER_MONTH) : monthly
   }
 
-  const scopedAssociates = locationId ? db.associates.filter(a => a.locationId === locationId) : db.associates
+  const scopedAssociates = locationId ? db.associates.filter(a => associateInLocation(a, locationId)) : db.associates
   const perAssociate = scopedAssociates.filter(a => a.active !== false).map(a => {
-    const actual = db.leads.filter(l => l.associateId === a.id && l.status === 'won' && inRange(l.convertedAt)).length
-    const target = proRate(a.targetMonthly || 10)
+    const periodWins = db.leads.filter(l => l.associateId === a.id && l.status === 'won' && inRange(l.convertedAt))
+    const actual = periodWins.reduce((sum, lead) => sum + (Number(lead.valueEstimate) || 0), 0)
+    const target = proRate(a.revenueTargetMonthly || 0)
     return {
-      associateId: a.id, name: a.name, locationId: a.locationId,
+      associateId: a.id, name: a.name, locationId: a.locationId, locationIds: a.locationIds || [a.locationId],
       target, actual,
-      attainmentPct: target ? Math.round((actual / target) * 100) : 0
+      attainmentPct: target ? Math.round((actual / target) * 100) : 0,
+      conversionTargetPct: a.conversionTargetPct || 0
     }
   })
 
@@ -2376,11 +2430,15 @@ app.post('/api/leads/:id/enrich', async (req, res) => {
 
 // ---------- Respond.io messaging ----------
 
-app.get('/api/respondio/status', (req, res) => {
+app.get('/api/respondio/status', async (req, res) => {
   if (!db.settings.respondio) db.settings.respondio = {}
   if (!db.settings.respondio.inboundWebhookKey) {
     db.settings.respondio.inboundWebhookKey = genWebhookKey()
-    save()
+    try {
+      await saveMetaNow()
+    } catch (e) {
+      return res.status(502).json({ error: `Could not save Respond.io settings: ${e.message}` })
+    }
   }
   res.json({
     configured: respondio.isConfigured(db),
