@@ -16,6 +16,7 @@
 // db.settings.inbox.snippets: [{ id, label, text }]
 
 import { uid } from './db.js'
+import { messageIdToMs } from './respondio.js'
 
 export function contactKey(contactId) {
   return `contact:${contactId}`
@@ -29,6 +30,7 @@ export function ensure(db) {
   if (!Array.isArray(db.settings.inbox.snippets)) db.settings.inbox.snippets = defaultSnippets()
   if (!db.inbox.sentAtMigrated) migrateSentAt(db)
   if (!db.inbox.dedupedMessagesV2) dedupeMessages(db)
+  if (!db.inbox.sentAtFromMessageIdMigrated) migrateSentAtFromMessageId(db)
   return db.inbox
 }
 
@@ -72,6 +74,30 @@ function migrateSentAt(db) {
     if (db.inbox.conversations[key]) db.inbox.conversations[key].lastMessageAt = lastMessageAt
   }
   db.inbox.sentAtMigrated = true
+}
+
+// One-time fixup for messages backfilled before sentAt fell back to
+// messageIdToMs() — every incoming message backfilled under the old logic
+// got stamped with Date.now() at whatever moment the sync happened to pull
+// it (respond.io's message/list gives incoming messages no per-message
+// timestamp), scrambling chronological order across inbound/outbound.
+// `sourceId` carries respond.io's own messageId for every backfilled
+// message, so it can be recomputed now without re-fetching anything.
+function migrateSentAtFromMessageId(db) {
+  const byKey = new Map()
+  for (const m of db.inbox.messages) {
+    if (!m.sourceId) continue
+    const derived = messageIdToMs(m.sourceId)
+    if (derived) m.sentAt = derived
+  }
+  for (const m of db.inbox.messages) {
+    const cur = byKey.get(m.key)
+    if (cur === undefined || m.sentAt > cur) byKey.set(m.key, m.sentAt)
+  }
+  for (const [key, lastMessageAt] of byKey) {
+    if (db.inbox.conversations[key]) db.inbox.conversations[key].lastMessageAt = lastMessageAt
+  }
+  db.inbox.sentAtFromMessageIdMigrated = true
 }
 
 function defaultSnippets() {

@@ -319,6 +319,20 @@ export async function sendMessage(db, lead, text, channel) {
   return pickContact(data) || data
 }
 
+// respond.io's message/list gives incoming (member-sent) messages no
+// per-message timestamp at all — `status` is an empty array, unlike outgoing
+// messages which carry a status history. Recording those with `Date.now()`
+// (the old fallback) stamped each one with whenever the sync happened to run,
+// scrambling chronological order — verified live: every message's numeric
+// `messageId` is itself the send time as epoch microseconds (dividing by
+// 1000 lines up almost exactly with the neighboring outgoing messages' own
+// status timestamps), so it's a reliable ordering fallback for both directions.
+export function messageIdToMs(id) {
+  const n = Number(id)
+  if (!n || Number.isNaN(n)) return null
+  return n > 1e14 ? Math.round(n / 1000) : n
+}
+
 function countPlaceholders(text) {
   return (String(text || '').match(/\{\{\d+\}\}/g) || []).length
 }
@@ -490,7 +504,7 @@ export async function syncLeadConversations(db, lead) {
       direction: m.traffic === 'incoming' ? 'inbound' : 'outbound',
       type: m.message?.type || 'text',
       content: m.message?.text || m.message?.template?.name || '',
-      sentAt: m.timestamp || m.sentAt || m.createdAt || m.status?.[0]?.timestamp || null,
+      sentAt: m.timestamp || m.sentAt || m.createdAt || m.status?.[0]?.timestamp || messageIdToMs(m.messageId || m.id) || null,
       channel: m.channelId || null,
       status: Array.isArray(m.status) && m.status.length ? (m.status[m.status.length - 1]?.type || m.status[m.status.length - 1]?.status || null) : null
     }))

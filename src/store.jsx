@@ -128,13 +128,17 @@ export function AppProvider({ children }) {
 }
 
 export function Toasts() {
-  const { toasts } = useApp()
+  const { toasts, theme } = useApp()
+  const light = theme === 'light'
   return (
     <div className="fixed bottom-5 right-5 z-[100] flex flex-col gap-2">
       {toasts.map(t => (
         <div key={t.id}
           className="card px-4 py-3 text-[13px] font-medium flex items-center gap-2 animate-[fadeIn_.2s_ease]"
-          style={{ borderColor: t.kind === 'error' ? 'rgba(244,63,94,.5)' : 'rgba(52,211,153,.45)', color: t.kind === 'error' ? '#fecdd3' : '#d1fae5' }}>
+          style={{
+            borderColor: t.kind === 'error' ? 'rgba(244,63,94,.5)' : 'rgba(52,211,153,.45)',
+            color: light ? (t.kind === 'error' ? '#9f1239' : '#065f46') : (t.kind === 'error' ? '#fecdd3' : '#d1fae5')
+          }}>
           <span style={{ color: t.kind === 'error' ? '#f87171' : '#34d399' }}>{t.kind === 'error' ? '✕' : '✓'}</span>
           {t.message}
         </div>

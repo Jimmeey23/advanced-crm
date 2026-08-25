@@ -1143,11 +1143,27 @@ app.post('/api/leads/import/apply', (req, res) => {
 
 // ---------- analytics ----------
 
+// Dashboard filter scope: studio (location) + associate always narrow the
+// lead set structurally; `month` (YYYY-MM, defaults to the current month)
+// additionally bounds the "this month" style metrics to that period instead
+// of always meaning the literal calendar month.
+function scopeLeads(leads, { studio, associate } = {}) {
+  let out = leads
+  if (studio) out = out.filter(l => l.locationId === studio)
+  if (associate) out = out.filter(l => l.associateId === associate)
+  return out
+}
+
+function resolveMonth(req) {
+  return /^\d{4}-\d{2}$/.test(req.query.month || '') ? req.query.month : new Date().toISOString().slice(0, 7)
+}
+
 app.get('/api/analytics/overview', (req, res) => {
-  const leads = db.leads
+  const leads = scopeLeads(db.leads, req.query)
   const now = Date.now()
-  const thisMonth = new Date().toISOString().slice(0, 7)
-  const lastMonth = new Date(new Date().getFullYear(), new Date().getMonth() - 1, 1).toISOString().slice(0, 7)
+  const thisMonth = resolveMonth(req)
+  const [ty, tm] = thisMonth.split('-').map(Number)
+  const lastMonth = new Date(ty, tm - 2, 1).toISOString().slice(0, 7)
 
   const open = leads.filter(l => l.status === 'open')
   const won = leads.filter(l => l.status === 'won')
@@ -1196,13 +1212,14 @@ app.get('/api/analytics/overview', (req, res) => {
 })
 
 app.get('/api/analytics/timeline', (req, res) => {
+  const scoped = scopeLeads(db.leads, req.query)
   const months = []
   const now = new Date()
   for (let i = 11; i >= 0; i--) {
     const d = new Date(now.getFullYear(), now.getMonth() - i, 1)
     const key = d.toISOString().slice(0, 7)
-    const leads = db.leads.filter(l => (l.createdAt || '').slice(0, 7) === key)
-    const won = db.leads.filter(l => (l.convertedAt || '').slice(0, 7) === key)
+    const leads = scoped.filter(l => (l.createdAt || '').slice(0, 7) === key)
+    const won = scoped.filter(l => (l.convertedAt || '').slice(0, 7) === key)
     const open = leads.filter(l => l.status === 'open')
     months.push({
       month: d.toLocaleString('en-US', { month: 'short' }),
@@ -1241,8 +1258,10 @@ app.get('/api/analytics/funnel', (req, res) => {
 })
 
 app.get('/api/analytics/sources', (req, res) => {
+  const month = resolveMonth(req)
+  const leads = scopeLeads(db.leads, req.query).filter(l => (l.createdAt || '').slice(0, 7) === month)
   const map = {}
-  for (const l of db.leads) {
+  for (const l of leads) {
     const key = l.sourceName || 'Unknown'
     map[key] = map[key] || { source: key, count: 0, won: 0 }
     map[key].count++
@@ -1252,8 +1271,12 @@ app.get('/api/analytics/sources', (req, res) => {
 })
 
 app.get('/api/analytics/team', (req, res) => {
-  const rows = db.associates.filter(a => a.active !== false).map(a => {
-    const owned = db.leads.filter(l => l.associateId === a.id)
+  const month = resolveMonth(req)
+  const rows = db.associates.filter(a => a.active !== false)
+    .filter(a => !req.query.studio || a.locationId === req.query.studio || (a.locationIds || []).includes(req.query.studio))
+    .filter(a => !req.query.associate || a.id === req.query.associate)
+    .map(a => {
+    const owned = db.leads.filter(l => l.associateId === a.id && (l.createdAt || '').slice(0, 7) === month)
     const won = owned.filter(l => l.status === 'won')
     const revenue = won.reduce((s, l) => s + (l.valueEstimate || 0), 0)
     return {
@@ -1516,7 +1539,7 @@ app.get('/api/analytics/performance', (req, res) => {
 
   const validDate = (v) => v && v !== '-' && !isNaN(new Date(v).getTime())
 
-  for (const l of db.leads) {
+  for (const l of scopeLeads(db.leads, req.query)) {
     if (validDate(l.createdAt)) {
       const ck = fmt(new Date(l.createdAt))
       if (idx[ck] !== undefined) row[idx[ck]].newLeads++
@@ -2529,7 +2552,7 @@ async function backfillContactMessages(key, contactId) {
       const direction = m.traffic === 'incoming' ? 'inbound' : 'outbound'
       const keys = inbox.messageDedupeKeys(m.messageId, direction, content)
       if (!keys.some(k => known.has(k))) {
-        const sentAt = inbox.normalizeSentAt(m.timestamp || m.sentAt || m.createdAt || m.status?.[0]?.timestamp || null)
+        const sentAt = inbox.normalizeSentAt(m.timestamp || m.sentAt || m.createdAt || m.status?.[0]?.timestamp || respondio.messageIdToMs(m.messageId) || null)
         inbox.recordMessage(db, key, { direction, channel: 'whatsapp', type: m.message?.type || 'text', content, sentAt, sourceId: m.messageId || null, status: latestStatus(m.status) })
         keys.forEach(k => known.add(k))
       }

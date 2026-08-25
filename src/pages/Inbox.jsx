@@ -651,15 +651,22 @@ export default function Inbox() {
             </div>
           )}
 
-          {Array.isArray(profile?.customFields) && profile.customFields.filter(f => f?.value !== undefined && f?.value !== null && f?.value !== '').length > 0 && (
+          {profile?.lifecycle && (
+            <div className="border-t border-white/8 pt-3">
+              <label className="text-[10.5px] uppercase tracking-wider text-slate-500 font-semibold block mb-1">Lifecycle</label>
+              <span className="chip bg-violet-500/10 border border-violet-400/20 text-violet-300 !text-[10.5px]">{profile.lifecycle}</span>
+            </div>
+          )}
+
+          {Array.isArray(profile?.custom_fields) && profile.custom_fields.filter(f => f?.value !== undefined && f?.value !== null && f?.value !== '').length > 0 && (
             <div className="border-t border-white/8 pt-3 space-y-1.5">
               <label className="text-[10.5px] uppercase tracking-wider text-slate-500 font-semibold block">Custom fields</label>
               <div className="space-y-1">
-                {profile.customFields
+                {profile.custom_fields
                   .filter(f => f?.value !== undefined && f?.value !== null && f?.value !== '')
                   .map((f, i) => (
-                    <div key={f.id || i} className="flex items-center justify-between gap-2 text-[11.5px]">
-                      <span className="text-slate-500 truncate">{f.name || f.id}</span>
+                    <div key={f.name || i} className="flex items-center justify-between gap-2 text-[11.5px]">
+                      <span className="text-slate-500 truncate">{f.name}</span>
                       <span className="text-slate-300 truncate max-w-[130px] text-right">{String(f.value)}</span>
                     </div>
                   ))}

@@ -2,7 +2,7 @@ import React from 'react'
 import {
   Users, Trophy, TrendingUp, IndianRupee, Target, Flame, UserPlus,
   Sparkles, ChevronRight, ShieldAlert,
-  BarChart3, Award, CalendarRange,
+  BarChart3, Award, CalendarRange, SlidersHorizontal, X,
   Phone, MessageCircle, MessageSquareText, Mail
 } from 'lucide-react'
 import {
@@ -11,7 +11,7 @@ import {
 } from 'recharts'
 import { useApp } from '../store.jsx'
 import { useFetch } from '../hooks.js'
-import { api } from '../api.js'
+import { api, buildQuery } from '../api.js'
 import { money, stageClass, riskClass, fmtDate, timeAgo, initials } from '../lib.js'
 import { Avatar, Empty } from '../ui.jsx'
 import AssociateCompareModal from '../components/AssociateCompareModal.jsx'
@@ -62,12 +62,22 @@ function RankMarker({ rank, attention = false }) {
   )
 }
 
+const CURRENT_MONTH = new Date().toISOString().slice(0, 7)
+const EMPTY_DASH_FILTERS = { studio: '', associate: '', month: CURRENT_MONTH }
+
 export default function Dashboard() {
   const { openLead, refreshData, boot, dataVersion } = useApp()
-  const { data: ov, loading: l1, error: e1, reload: r1 } = useFetch(() => api.get('/api/analytics/overview'), [dataVersion])
-  const { data: tl, loading: l2 } = useFetch(() => api.get('/api/analytics/timeline'), [dataVersion])
-  const { data: sources, loading: l4 } = useFetch(() => api.get('/api/analytics/sources'), [dataVersion])
-  const { data: team, loading: l5 } = useFetch(() => api.get('/api/analytics/team'), [dataVersion])
+  const [filters, setFilters] = React.useState(EMPTY_DASH_FILTERS)
+  const [panelOpen, setPanelOpen] = React.useState(false)
+  const setF = (k) => (e) => setFilters(f => ({ ...f, [k]: e.target.value }))
+  const hasFilters = filters.studio || filters.associate || filters.month !== CURRENT_MONTH
+  const clearFilters = () => setFilters(EMPTY_DASH_FILTERS)
+  const scopeQuery = buildQuery({ studio: filters.studio, associate: filters.associate, month: filters.month })
+
+  const { data: ov, loading: l1, error: e1, reload: r1 } = useFetch(() => api.get(`/api/analytics/overview?${scopeQuery}`), [dataVersion, scopeQuery])
+  const { data: tl, loading: l2 } = useFetch(() => api.get(`/api/analytics/timeline?${buildQuery({ studio: filters.studio, associate: filters.associate })}`), [dataVersion, filters.studio, filters.associate])
+  const { data: sources, loading: l4 } = useFetch(() => api.get(`/api/analytics/sources?${scopeQuery}`), [dataVersion, scopeQuery])
+  const { data: team, loading: l5 } = useFetch(() => api.get(`/api/analytics/team?${scopeQuery}`), [dataVersion, scopeQuery])
   const { data: hotResp } = useFetch(() => api.get('/api/leads?risk=hot&pageSize=50'), [dataVersion])
   const { alerts } = useApp()
 
@@ -92,7 +102,7 @@ export default function Dashboard() {
     setComposeLead(lead)
     openLead(lead.id)
   }
-  const { data: perf } = useFetch(() => api.get(`/api/analytics/performance?range=${perfRange}`), [perfRange, dataVersion])
+  const { data: perf } = useFetch(() => api.get(`/api/analytics/performance?${buildQuery({ range: perfRange, studio: filters.studio, associate: filters.associate })}`), [perfRange, dataVersion, filters.studio, filters.associate])
 
   const hot = (hotResp?.items || []).slice().sort((a, b) => b.ai.score - a.ai.score).slice(0, 5)
   const srcData = (sources || []).slice(0, 7).map(s => ({
@@ -153,6 +163,37 @@ export default function Dashboard() {
 
   return (
     <div className="dashboard-page p-6 pt-4 space-y-5">
+      {/* filter toggle */}
+      <div className="flex items-center gap-2">
+        <button className={`btn ${panelOpen ? 'btn-soft' : 'btn-ghost'} !py-2`} onClick={() => setPanelOpen(o => !o)}>
+          <SlidersHorizontal size={14} /> Filters {hasFilters && <span className="chip !px-1.5 !py-0.5 !text-[10px] bg-rose-500/20 text-rose-300">!</span>}
+        </button>
+        {hasFilters && <button className="btn btn-ghost !py-2" onClick={clearFilters}><X size={14} /> Reset to this month</button>}
+      </div>
+
+      {panelOpen && (
+        <div className="card p-4 grid grid-cols-2 md:grid-cols-3 gap-3" style={{ animation: 'fadeIn .15s ease' }}>
+          <div>
+            <label className="text-[10.5px] uppercase tracking-wider text-slate-500 font-semibold mb-1 block">Studio</label>
+            <select className="input !py-1.5" value={filters.studio} onChange={setF('studio')}>
+              <option value="">All studios</option>
+              {(boot?.locations || []).map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="text-[10.5px] uppercase tracking-wider text-slate-500 font-semibold mb-1 block">Associate</label>
+            <select className="input !py-1.5" value={filters.associate} onChange={setF('associate')}>
+              <option value="">All associates</option>
+              {(boot?.associates || []).filter(a => a.active !== false).map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="text-[10.5px] uppercase tracking-wider text-slate-500 font-semibold mb-1 block">Month</label>
+            <input className="input !py-1.5" type="month" value={filters.month} onChange={setF('month')} />
+          </div>
+        </div>
+      )}
+
       {/* KPI row */}
       <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-6 gap-3">
         <MetricCard icon={Users} title="Total leads" value={ov.totalLeads} color="var(--accent)"
