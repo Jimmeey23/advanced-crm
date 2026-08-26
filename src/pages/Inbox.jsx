@@ -6,7 +6,7 @@ import {
   FileText, Mic, Clock, UserPlus, X, Headset, RefreshCcw, AlertTriangle
 } from 'lucide-react'
 import { useApp } from '../store.jsx'
-import { api, API_BASE } from '../api.js'
+import { api } from '../api.js'
 import { Avatar, Spinner, Empty } from '../ui.jsx'
 import { getLibrary, fromApiTemplate } from '../components/RespondioTemplateModal.jsx'
 
@@ -375,17 +375,22 @@ export default function Inbox() {
   // Inbox-scoped EventSource — refetch just the affected thread + the list
   // instead of the app's full bootstrap refresh.
   useEffect(() => {
-    const es = new EventSource(API_BASE + '/api/events')
-    es.onmessage = (evt) => {
-      try {
-        const data = JSON.parse(evt.data)
-        if (data.type !== 'respondio-message') return
-        loadList()
-        if (data.leadId && data.leadId === selectedLeadId) openThread(selectedLeadId)
-      } catch (e) { /* ignore malformed event */ }
-    }
-    es.onerror = () => { /* browser auto-reconnects */ }
-    return () => es.close()
+    let es = null
+    let cancelled = false
+    api.resolveBase().then(base => {
+      if (cancelled) return
+      es = new EventSource(base + '/api/events')
+      es.onmessage = (evt) => {
+        try {
+          const data = JSON.parse(evt.data)
+          if (data.type !== 'respondio-message') return
+          loadList()
+          if (data.leadId && data.leadId === selectedLeadId) openThread(selectedLeadId)
+        } catch (e) { /* ignore malformed event */ }
+      }
+      es.onerror = () => { /* browser auto-reconnects */ }
+    })
+    return () => { cancelled = true; es?.close() }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedLeadId])
 

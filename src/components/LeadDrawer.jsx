@@ -2,13 +2,14 @@ import React, { useEffect, useMemo, useState } from 'react'
 import {
   X, Phone, Mail, MapPin, Sparkles, CalendarPlus, RefreshCw, Link2,
   CheckCircle2, Send, Clock, Lightbulb, TrendingUp, Tags, Receipt,
-  Award, MessageSquare, Bot, MessageCircle, Loader2, Inbox
+  Award, MessageSquare, Bot, MessageCircle, Loader2, Inbox,
+  ChevronDown, BarChart3, IndianRupee
 } from 'lucide-react'
 import { useApp } from '../store.jsx'
 import { useFetch } from '../hooks.js'
 import { api } from '../api.js'
 import { Avatar, ScorePill, Spinner } from '../ui.jsx'
-import { fmtDate, fmtDateTime, timeAgo, stageClass, riskClass, money } from '../lib.js'
+import { fmtDate, fmtDateTime, timeAgo, stageClass, stageBadgeStyle, riskClass, money } from '../lib.js'
 import ComposeModal from './ComposeModal.jsx'
 import RespondioTemplateModal from './RespondioTemplateModal.jsx'
 
@@ -30,6 +31,8 @@ export default function LeadDrawer() {
   const [replyError, setReplyError] = useState({})
   const [enriching, setEnriching] = useState(false)
   const [autoSyncLeadId, setAutoSyncLeadId] = useState('')
+  const [momenceOpen, setMomenceOpen] = useState(true)
+  const [momenceProfileOpen, setMomenceProfileOpen] = useState(true)
   const [drawerWidth, setDrawerWidth] = useState(() => Number(localStorage.getItem('p57_lead_drawer_width')) || MIN_DRAWER_WIDTH)
   const commentsRef = React.useRef(null)
 
@@ -187,6 +190,9 @@ export default function LeadDrawer() {
   const m = lead.momence
   const classesAttended = m?.classHistory?.filter(c => c.checkedIn).length || 0
   const classesCancelled = m?.classHistory?.filter(c => !c.checkedIn && /cancel/i.test(c.status || '')).length || 0
+  const classesOther = Math.max(0, (m?.classHistory?.length || 0) - classesAttended - classesCancelled)
+  const attendanceRate = classesAttended + classesCancelled > 0 ? Math.round((classesAttended / (classesAttended + classesCancelled)) * 100) : 0
+  const lifetimeSales = (m?.salesHistory || []).reduce((sum, sale) => sum + (Number(sale.totalInCurrency ?? sale.total ?? sale.amount) || 0), 0)
 
   // A follow-up slot with neither a real date nor a comment is a blank
   // placeholder row (common in imported data with a fixed number of
@@ -210,41 +216,50 @@ export default function LeadDrawer() {
       <div className="fixed inset-0 z-[80] flex justify-end">
       <div className="absolute inset-0 bg-black/55 backdrop-blur-[2px]" onClick={closeLead} />
       <aside className="lead-drawer lead-detail-panel relative w-full h-full border-l border-white/10 flex flex-col shadow-2xl" style={{ maxWidth: 'calc(100vw - 16px)', width: drawerWidth, animation: 'slideIn .2s ease' }}>
-        <button className="lead-drawer-resizer" onMouseDown={startDrawerResize} title="Drag to resize detail drawer" />
+        <button className="lead-drawer-resizer" onMouseDown={startDrawerResize} title="Drag to resize detail drawer" aria-label="Resize lead details drawer" />
         {/* header */}
         <div className="lead-detail-header px-6 pt-5 pb-4 border-b border-white/8 bg-white/[0.02] backdrop-blur-xl">
-          <div className="flex items-start gap-3">
-            <Avatar name={lead.fullName} color={owner?.color} size={46} />
+          <div className="lead-profile-row flex items-start gap-3">
+            <div className="lead-profile-avatar"><Avatar name={lead.fullName} color={owner?.color} size={48} /></div>
             <div className="flex-1 min-w-0">
-              <h2 className="font-display text-[18px] font-bold text-white truncate">{lead.fullName}</h2>
-              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1 text-[12px] text-slate-400">
-                <span className="flex items-center gap-1"><Phone size={11} />{lead.phone || '—'}</span>
-                <span className="flex items-center gap-1 truncate"><Mail size={11} />{lead.email}</span>
+              <div className="lead-profile-eyebrow">Lead profile <span>#{String(lead.id).slice(-6)}</span></div>
+              <h2 className="font-display text-[19px] font-bold text-white truncate">{lead.fullName}</h2>
+              <div className="lead-contact-line flex flex-wrap items-center gap-x-3 gap-y-1 mt-1 text-[12px] text-slate-400">
+                <span className="flex items-center gap-1"><Phone size={12} />{lead.phone || 'No phone'}</span>
+                <span className="flex items-center gap-1 truncate"><Mail size={12} />{lead.email || 'No email'}</span>
               </div>
             </div>
-            <button className="btn btn-ghost !p-2 modal-close" onClick={closeLead}><X size={16} /></button>
+            <button className="btn btn-ghost !p-2 modal-close" onClick={closeLead} aria-label="Close lead details"><X size={18} /></button>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2 mt-3">
-            <select className="input !w-auto !py-1.5 !text-[12px]" value={lead.stage} onChange={e => patch({ stage: e.target.value }, `Moved to ${e.target.value}`)}>
-              {(boot?.stages || []).map(s => <option key={s}>{s}</option>)}
-            </select>
-            <select className="input !w-auto !py-1.5 !text-[12px]" value={lead.associateId || ''} onChange={e => patch({ associateId: e.target.value }, e.target.value ? 'Owner updated' : 'Owner cleared')}>
-              <option value="">Unassigned</option>
-              {ownerOptions.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
-            </select>
-            <span className={`chip ${stageClass(lead.stage)}`}>{lead.stage}</span>
-            <span className={`chip ${riskClass(lead.ai.risk)}`}>{lead.ai.risk}</span>
-            <span className="chip bg-white/5 border border-white/10 text-slate-300">{lead.status}</span>
+          <div className="lead-control-grid">
+            <label className="lead-control-field">
+              <span>Pipeline stage</span>
+              <select className="input !text-[12px]" value={lead.stage} onChange={e => patch({ stage: e.target.value }, `Moved to ${e.target.value}`)}>
+                {(boot?.stages || []).map(s => <option key={s}>{s}</option>)}
+              </select>
+            </label>
+            <label className="lead-control-field">
+              <span>Lead owner</span>
+              <select className="input !text-[12px]" value={lead.associateId || ''} onChange={e => patch({ associateId: e.target.value }, e.target.value ? 'Owner updated' : 'Owner cleared')}>
+                <option value="">Unassigned</option>
+                {ownerOptions.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+              </select>
+            </label>
+            <div className="lead-status-stack">
+              <span className={`chip ${stageClass(lead.stage)}`} style={stageBadgeStyle(lead.stage)}>{lead.stage}</span>
+              <span className={`chip ${riskClass(lead.ai.risk)}`}>{lead.ai.risk} risk</span>
+              <span className="chip bg-white/5 border border-white/10 text-slate-300">{lead.status}</span>
+            </div>
           </div>
 
-          <div className="flex items-center gap-3 mt-3 text-[11.5px] text-slate-500">
+          <div className="lead-context-strip flex items-center gap-3 mt-3 text-[11.5px] text-slate-500">
             <span className="flex items-center gap-1"><MapPin size={11} />{loc?.name || lead.center || '—'}</span>
             {owner && <span className="flex items-center gap-1"><Avatar name={owner.name} color={owner.color} photoUrl={owner.photoUrl} photoZoom={owner.photoZoom} photoPosX={owner.photoPosX} photoPosY={owner.photoPosY} size={14} /> {owner.name}</span>}
             <span className="ml-auto">{lead.memberId ? `Momence #${lead.memberId}` : 'No member link'}</span>
           </div>
 
-          <div className="flex items-center gap-2 mt-4">
+          <div className="lead-primary-actions flex items-center gap-2 mt-4">
             <button
               className="btn btn-primary !py-2 !text-[12px] flex-1"
               onClick={() => setComposeOpen(true)}
@@ -262,7 +277,7 @@ export default function LeadDrawer() {
 
         {/* cadence deviation banner */}
         {hasCadenceIssue && (
-          <div className="px-6 py-3 border-b border-white/8 bg-rose-500/[0.06]">
+          <div className="lead-cadence-alert px-6 py-3 border-b border-white/8 bg-rose-500/[0.06]">
             <div className="flex flex-wrap items-center gap-2 text-[12px]">
               <span className="font-semibold text-rose-300 flex items-center gap-1.5"><Clock size={13} /> Cadence deviation</span>
               {overdueFu && <span className="chip !px-2 !py-0.5 text-[10px] bg-rose-500/20 text-rose-300">next follow-up overdue {Math.abs(dueIn)}d</span>}
@@ -274,6 +289,7 @@ export default function LeadDrawer() {
 
         {/* body */}
         <div className="lead-detail-body flex-1 overflow-y-auto scrollbar-thin px-6 py-5">
+        <div className="lead-detail-kicker"><span>Intelligence &amp; activity</span><span>Live lead record</span></div>
         <div className="modern-card !rounded-2xl lead-detail-consolidated">
           {/* AI panel */}
           <section className="lead-section ai-panel">
@@ -420,12 +436,18 @@ export default function LeadDrawer() {
           </section>
 
           {/* Momence */}
-          <section className="lead-section">
-            <div className="flex items-center gap-2 mb-3">
-              <Link2 size={14} className="text-emerald-400" />
-              <h3 className="font-display font-semibold text-white text-[13px]">Momence · sales & class history</h3>
-            </div>
+          <section className={`lead-section momence-workspace ${momenceOpen ? 'is-open' : ''}`}>
+            <button className="momence-section-header" onClick={() => setMomenceOpen(v => !v)} aria-expanded={momenceOpen}>
+              <span className="momence-header-icon"><Link2 size={16} /></span>
+              <span className="min-w-0 text-left">
+                <span className="momence-header-eyebrow">Connected member intelligence</span>
+                <span className="momence-header-title">Momence profile &amp; activity</span>
+              </span>
+              {m && <span className="momence-sync-state"><span /> Synced</span>}
+              <ChevronDown size={17} className={`momence-chevron ${momenceOpen ? 'is-open' : ''}`} />
+            </button>
 
+            {momenceOpen && <div className="momence-section-content">
             {!boot?.integrations?.momence ? (
               <div className="text-[12.5px] text-slate-400 flex items-center gap-2"><span>Connect Momence in Settings to pull sales and class history automatically.</span></div>
             ) : !m ? (
@@ -476,24 +498,33 @@ export default function LeadDrawer() {
             ) : (
               <div>
                 {m.member && (
-                  <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 mb-3">
-                    <Stat label="Home location" value={m.member.homeLocationName || m.member.homeLocation || m.member.locationName || loc?.name?.split(',')[0] || '—'} />
-                    <Stat label="Sessions completed" value={classesAttended} />
-                    <Stat label="Sessions cancelled" value={classesCancelled} />
-                    <Stat label="Active plans" value={m.memberships.length} />
-                    <Stat label="First seen" value={fmtDate(m.member.firstSeen)} />
+                  <div className="momence-metric-grid">
+                    <MomenceMetric icon={IndianRupee} label="Lifetime sales" value={money(lifetimeSales)} detail={`${m.salesHistory?.length || 0} transactions`} tone="emerald" />
+                    <MomenceMetric icon={Award} label="Completed" value={classesAttended} detail={`${attendanceRate}% attendance`} tone="blue" />
+                    <MomenceMetric icon={CalendarPlus} label="Active plans" value={m.memberships?.length || 0} detail={`${m.appointments?.length || 0} appointments`} tone="violet" />
+                    <MomenceMetric icon={Clock} label="Last visit" value={fmtDate(m.member?.visits?.lastVisit || m.member?.lastSeen || m.member?.lastVisit)} detail={`First seen ${fmtDate(m.member.firstSeen)}`} tone="amber" />
                   </div>
                 )}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-3">
-                  <InfoTile label="Momence member" value={[m.member?.firstName, m.member?.lastName].filter(Boolean).join(' ') || lead.fullName} sub={`#${lead.memberId || m.member?.id || '—'}`} />
-                  <InfoTile label="Contact context" value={m.member?.email || lead.email || '—'} sub={m.member?.phoneNumber || m.member?.phone || lead.phone || '—'} />
-                  <InfoTile label="Visit context" value={`${m.member?.visits?.total ?? classesAttended} total visits`} sub={`Last visit ${fmtDate(m.member?.visits?.lastVisit || m.member?.lastSeen || m.member?.lastVisit)}`} />
-                  <InfoTile label="Membership context" value={(m.memberships || []).find(p => !p.isFrozen)?.name || 'No active plan'} sub={`${m.memberships?.length || 0} active/linked membership records`} />
+
+                <div className="momence-overview-grid">
+                  <ActivityChart attended={classesAttended} cancelled={classesCancelled} other={classesOther} />
+                  <div className="momence-profile-card">
+                    <button className="momence-subsection-heading" onClick={() => setMomenceProfileOpen(v => !v)} aria-expanded={momenceProfileOpen}>
+                      <span><span className="momence-subsection-kicker">Member record</span>Profile details</span>
+                      <ChevronDown size={15} className={momenceProfileOpen ? 'is-open' : ''} />
+                    </button>
+                    {momenceProfileOpen && <div className="momence-profile-grid">
+                      <InfoTile label="Momence member" value={[m.member?.firstName, m.member?.lastName].filter(Boolean).join(' ') || lead.fullName} sub={`#${lead.memberId || m.member?.id || '—'}`} />
+                      <InfoTile label="Contact" value={m.member?.email || lead.email || '—'} sub={m.member?.phoneNumber || m.member?.phone || lead.phone || '—'} />
+                      <InfoTile label="Home location" value={m.member?.homeLocationName || m.member?.homeLocation || m.member?.locationName || loc?.name?.split(',')[0] || '—'} sub={`${m.member?.visits?.total ?? classesAttended} total visits`} />
+                      <InfoTile label="Current plan" value={(m.memberships || []).find(p => !p.isFrozen)?.name || 'No active plan'} sub={`${m.memberships?.length || 0} linked plan records`} />
+                    </div>}
+                  </div>
                 </div>
                 {m.customFields && Object.keys(m.customFields).length > 0 && (
-                  <div className="rounded-xl bg-white/[0.03] border border-white/8 p-3 mb-3">
+                  <div className="momence-custom-fields rounded-xl bg-white/[0.03] border border-white/8 p-3 mb-3">
                     <div className="text-[10.5px] uppercase tracking-wider text-slate-500 font-semibold mb-2">Custom fields</div>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <div className="momence-custom-grid grid gap-2">
                       {Object.entries(m.customFields).slice(0, 8).map(([key, value]) => <InfoTile key={key} label={key} value={String(value || '—')} />)}
                     </div>
                   </div>
@@ -504,6 +535,7 @@ export default function LeadDrawer() {
                   </div>
                 )}
 
+                <div className="momence-data-panel">
                 <Tabbed
                   tabs={[
                     { key: 'sales', label: `Sales (${m.salesHistory?.length || 0})`, icon: Receipt },
@@ -543,9 +575,11 @@ export default function LeadDrawer() {
                     {!m.notes?.length && <EmptyNote text="No notes recorded on this member's Momence profile." />}
                   </div>
                 </Tabbed>
+                </div>
                 <p className="text-[10.5px] text-slate-600 mt-2 flex items-center gap-1"><RefreshCw size={10} /> Synced {timeAgo(lead.momenceSyncedAt)}</p>
               </div>
             )}
+            </div>}
           </section>
 
           {/* remarks */}
@@ -609,9 +643,43 @@ export default function LeadDrawer() {
 
 function Stat({ label, value }) {
   return (
-    <div className="rounded-xl bg-black/20 border border-white/8 px-3 py-2 text-center">
+    <div className="lead-stat rounded-xl bg-black/20 border border-white/8 px-3 py-2 text-center">
       <div className="font-display text-[15px] font-bold text-white mono">{value}</div>
       <div className="text-[9.5px] uppercase tracking-wider text-slate-500 mt-0.5">{label}</div>
+    </div>
+  )
+}
+
+function MomenceMetric({ icon: Icon, label, value, detail, tone }) {
+  return (
+    <div className={`momence-metric tone-${tone}`}>
+      <span className="momence-metric-icon"><Icon size={15} /></span>
+      <div className="momence-metric-label">{label}</div>
+      <div className="momence-metric-value">{value}</div>
+      <div className="momence-metric-detail">{detail}</div>
+    </div>
+  )
+}
+
+function ActivityChart({ attended, cancelled, other }) {
+  const rows = [
+    { label: 'Attended', value: attended, tone: 'emerald' },
+    { label: 'Cancelled', value: cancelled, tone: 'rose' },
+    { label: 'Other bookings', value: other, tone: 'slate' }
+  ]
+  const max = Math.max(1, ...rows.map(row => row.value))
+  return (
+    <div className="momence-chart-card">
+      <div className="momence-card-heading"><span><span>Session activity</span><small>Synced class history</small></span><BarChart3 size={16} /></div>
+      <div className="momence-bars">
+        {rows.map(row => (
+          <div className="momence-bar-row" key={row.label}>
+            <span>{row.label}</span>
+            <div><i className={`tone-${row.tone}`} style={{ width: `${Math.max(row.value ? 8 : 0, (row.value / max) * 100)}%` }} /></div>
+            <strong>{row.value}</strong>
+          </div>
+        ))}
+      </div>
     </div>
   )
 }
@@ -628,7 +696,7 @@ function InfoTile({ label, value, sub }) {
 
 function Row({ icon, title, sub, right, meta }) {
   return (
-    <div className="flex items-center gap-3 py-2 border-b border-white/5 last:border-0">
+    <div className="momence-table-row">
       <span className="w-6 h-6 rounded-lg bg-white/5 flex items-center justify-center shrink-0">{icon}</span>
       <div className="flex-1 min-w-0">
         <div className="text-[12.5px] font-semibold text-slate-200 truncate">{title}</div>
@@ -659,18 +727,19 @@ function Tabbed({ tabs, children }) {
   const childList = React.Children.toArray(children)
   const activeChild = childList.find(c => String(c.key || '').replace(/^\.\$/, '').replace(/^\./, '') === activeTab.key) || childList[tabs.findIndex(t => t.key === activeTab.key)]
   return (
-    <div>
-      <div className="flex gap-1.5 mb-3">
+    <div className="momence-tabs">
+      <div className="momence-tab-list">
         {tabs.map(t => {
           const Icon = t.icon
           return (
-            <button key={t.key} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11.5px] font-semibold transition-colors ${active === t.key ? 'bg-white/10 text-white' : 'text-slate-500 hover:text-slate-300'}`} onClick={() => setActive(t.key)}>
+            <button key={t.key} className={active === t.key ? 'is-active' : ''} onClick={() => setActive(t.key)}>
               <Icon size={12} /> {t.label}
             </button>
           )
         })}
       </div>
-      {activeChild}
+      <div className="momence-table-head"><span>Record</span><span>Value / status</span></div>
+      <div className="momence-table-body">{activeChild}</div>
     </div>
   )
 }

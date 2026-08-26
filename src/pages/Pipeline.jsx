@@ -4,7 +4,7 @@ import { useApp } from '../store.jsx'
 import { useFetch } from '../hooks.js'
 import { api, buildQuery } from '../api.js'
 import { Avatar, ScorePill } from '../ui.jsx'
-import { stageClass, riskClass, fmtDate, daysFromNow } from '../lib.js'
+import { stageClass, stageBadgeStyle, stageColor, riskClass, fmtDate, daysFromNow } from '../lib.js'
 
 export default function Pipeline() {
   const { boot, lookup, openLead, refreshData, toast, dataVersion } = useApp()
@@ -75,9 +75,9 @@ export default function Pipeline() {
                 onDrop={e => { e.preventDefault(); e.currentTarget.style.borderColor = ''; const id = e.dataTransfer.getData('text/lead'); if (id && id !== dragId) moveStage(id, col.stage) }}
               >
                 <div className="pipeline-column-head px-3.5 py-3 flex items-center gap-2.5">
-                  <span className="w-2 h-2 rounded-full" style={{ background: columnColor((boot?.stageStatusGroups || {})[col.stage]) }} />
+                  <span className="w-2 h-2 rounded-full" style={{ background: stageColor(col.stage).solid }} />
                   <div className="min-w-0">
-                    <div className="font-display text-[13px] font-semibold text-slate-200 truncate">{col.stage}</div>
+                    <div className={`pipeline-stage-badge ${stageClass(col.stage)}`} style={stageBadgeStyle(col.stage)} title={col.stage}>{col.stage}</div>
                     <div className="text-[10px] text-slate-500 truncate">{(boot?.stageStatusGroups || {})[col.stage]}</div>
                   </div>
                   <span className="ml-auto chip bg-white/6 border border-white/10 text-slate-400 mono !py-0.5 !px-2 text-[11px]">{count}</span>

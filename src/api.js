@@ -3,10 +3,29 @@
 // (e.g. https://your-app.up.railway.app). Empty by default so relative paths
 // keep working when both are served from the same origin (local dev via the
 // Vite proxy, or a single combined deployment).
-function getApiBases() {
-  const configured = import.meta.env.VITE_API_BASE_URL?.trim()
+const configuredApiBase = import.meta.env.VITE_API_BASE_URL?.trim()?.replace(/\/$/, '') || ''
+const localApiStartPort = Number(import.meta.env.VITE_API_PORT) || 3001
+let localDiscoveryPromise = null
+
+async function discoverLocalApiBase() {
+  if (typeof window === 'undefined' || !['localhost', '127.0.0.1'].includes(window.location.hostname)) return ''
+  if (localDiscoveryPromise) return localDiscoveryPromise
+  localDiscoveryPromise = Promise.all(Array.from({ length: 20 }, async (_, index) => {
+    const base = `http://localhost:${localApiStartPort + index}`
+    try {
+      const res = await fetch(`${base}/api/runtime`, { signal: AbortSignal.timeout(500) })
+      if (!res.ok) return null
+      const runtime = await res.json()
+      return runtime.app === 'physique57-leads' ? { base, startedAt: Date.parse(runtime.startedAt) || 0 } : null
+    } catch (e) { return null }
+  })).then(results => results.filter(Boolean).sort((a, b) => b.startedAt - a.startedAt)[0]?.base || '')
+  return localDiscoveryPromise
+}
+
+function getApiBases(preferred = '') {
   const bases = []
-  if (configured) bases.push(configured.replace(/\/$/, ''))
+  if (preferred) bases.push(preferred)
+  if (configuredApiBase) bases.push(configuredApiBase)
 
   // Same-origin works for combined deployments and most hosted previews.
   if (typeof window !== 'undefined' && window.location?.origin) {
@@ -15,7 +34,7 @@ function getApiBases() {
     // Local dev fallback: if the app is being opened on a frontend port,
     // the API server usually runs on 3001 next door.
     if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
-      bases.push('http://localhost:3001')
+      bases.push(`http://localhost:${localApiStartPort}`)
     }
   }
 
@@ -25,7 +44,11 @@ function getApiBases() {
   return [...new Set(bases)]
 }
 
-export const API_BASE = getApiBases()[0]
+export const API_BASE = configuredApiBase || (typeof window !== 'undefined' ? window.location.origin.replace(/\/$/, '') : '')
+
+export async function resolveApiBase() {
+  return configuredApiBase || await discoverLocalApiBase() || API_BASE
+}
 
 async function req(method, path, body, isForm) {
   const opts = { method, headers: {} }
@@ -35,7 +58,8 @@ async function req(method, path, body, isForm) {
   }
 
   let lastError = null
-  for (const base of getApiBases()) {
+  const preferredBase = await resolveApiBase()
+  for (const base of getApiBases(preferredBase)) {
     try {
       const res = await fetch(base + path, opts)
       if (res.ok) return res.json()
@@ -59,6 +83,7 @@ async function req(method, path, body, isForm) {
 }
 
 export const api = {
+  resolveBase: resolveApiBase,
   get: (p) => req('GET', p),
   post: (p, b) => req('POST', p, b),
   patch: (p, b) => req('PATCH', p, b),

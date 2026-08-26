@@ -43,10 +43,41 @@ export const money = (n, currency = 'INR') => {
 export const initials = (name) =>
   (name || '?').split(' ').filter(Boolean).slice(0, 2).map(w => w[0]).join('').toUpperCase()
 
-export const stageClass = (stage) => {
-  const key = (stage || '').toLowerCase().replace(/[^a-z]+/g, '-').replace(/^-|-$/g, '')
-  return `stage-${key}` || 'stage-new'
+const normalizedStage = (stage) => String(stage || 'Unspecified').trim().toLocaleLowerCase('en-IN').replace(/\s+/g, ' ')
+
+export const stageColor = (stage) => {
+  const key = normalizedStage(stage)
+  let hash = 2166136261
+  for (let i = 0; i < key.length; i += 1) {
+    hash ^= key.charCodeAt(i)
+    hash = Math.imul(hash, 16777619)
+  }
+  const unsigned = hash >>> 0
+  const hue = ((unsigned / 0xffffffff) * 360).toFixed(2)
+  const saturation = 68 + (unsigned % 13)
+  return {
+    solid: `hsl(${hue} ${saturation}% 52%)`,
+    background: `hsl(${hue} ${saturation}% 52% / .16)`,
+    border: `hsl(${hue} ${saturation}% 62% / .46)`,
+    ink: `hsl(${hue} 88% 82%)`,
+    lightInk: `hsl(${hue} 76% 31%)`,
+    lightBackground: `hsl(${hue} ${saturation}% 48% / .13)`
+  }
 }
+
+export const stageBadgeStyle = (stage) => {
+  const color = stageColor(stage)
+  return {
+    '--stage-solid': color.solid,
+    '--stage-bg': color.background,
+    '--stage-border': color.border,
+    '--stage-ink': color.ink,
+    '--stage-light-ink': color.lightInk,
+    '--stage-light-bg': color.lightBackground
+  }
+}
+
+export const stageClass = () => 'stage-badge'
 
 export const riskClass = (risk) => `risk-${risk || 'cold'}`
 

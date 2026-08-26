@@ -1,13 +1,13 @@
 import React, { useEffect, useState } from 'react'
 import {
   Users, Trophy, IndianRupee, CalendarCheck2, CalendarClock, ChevronRight,
-  BarChart3, RotateCcw, TrendingUp, TrendingDown, Wallet, SlidersHorizontal, X, Search
+  BarChart3, RotateCcw, TrendingUp, TrendingDown, Wallet, SlidersHorizontal, X
 } from 'lucide-react'
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip } from 'recharts'
 import { useApp } from '../store.jsx'
 import { api, buildQuery } from '../api.js'
 import { Spinner } from '../ui.jsx'
-import { money } from '../lib.js'
+import { fmtDate, money } from '../lib.js'
 import MetricCard from '../components/MetricCard.jsx'
 
 const ACCENT_HEX = { violet: '#8b5cf6', emerald: '#10b981', rose: '#f43f5e', amber: '#f59e0b', sky: '#38bdf8' }
@@ -73,8 +73,6 @@ export default function Performance() {
   const followUpTrend = chartData.map(b => ({ label: b.label, value: b.followUps ? Math.round(((b.followUps - (b.missed || 0)) / b.followUps) * 100) : 0 }))
   const lostTrend = chartData.map(b => ({ label: b.label, value: b.lost || 0 }))
 
-  const drawerDetail = drawerBucket ? details?.buckets?.find(x => x.key === drawerBucket.key) : null
-
   return (
     <div className="p-6 space-y-5">
       <div className="flex flex-wrap items-center gap-3">
@@ -135,22 +133,22 @@ export default function Performance() {
             <MetricCard
               icon={Users} title="New leads" value={t.newLeads} color={ACCENT_HEX.violet}
               description={`Best: ${bestNew ? `${bestNew.label} (${bestNew.newLeads})` : '—'} · ${t.won || 0} converted (${winRate}%) · avg ${money(avgPerLead)}/lead`}
-              trend={newLeadsTrend} mom={momOf(newLeadsTrend)}
+              trend={newLeadsTrend} mom={momOf(newLeadsTrend)} yoy={data.yoy?.newLeads}
             />
             <MetricCard
               icon={Trophy} title="Won deals" value={t.won} color={ACCENT_HEX.emerald}
               description={`Win rate ${winRate}% · avg deal ${money(avgDeal)} · best ${bestWon ? `${bestWon.label} (${bestWon.won})` : '—'}`}
-              trend={wonTrend} mom={momOf(wonTrend)}
+              trend={wonTrend} mom={momOf(wonTrend)} yoy={data.yoy?.won}
             />
             <MetricCard
               icon={TrendingDown} title="Lost deals" value={t.lost || 0} color={ACCENT_HEX.rose}
               description={`Loss rate ${t.lossRate || 0}% of decided deals · ${money(t.lostRevenue || 0)} in lost pipeline value`}
-              trend={lostTrend} mom={momOf(lostTrend)}
+              trend={lostTrend} mom={momOf(lostTrend)} yoy={data.yoy?.lost}
             />
             <MetricCard
               icon={IndianRupee} title="Revenue" value={money(t.revenue)} color={ACCENT_HEX.amber}
               description={`Avg deal ${money(avgDeal)} · ${money(avgPerLead)}/lead · best ${bestRevenue ? `${bestRevenue.label} (${money(bestRevenue.revenue)})` : '—'}`}
-              trend={revenueTrend} mom={momOf(revenueTrend)}
+              trend={revenueTrend} mom={momOf(revenueTrend)} yoy={data.yoy?.revenue}
             />
             <MetricCard
               icon={Wallet} title="Open pipeline" value={money(t.openPipelineValue || 0)} color={ACCENT_HEX.sky}
@@ -160,7 +158,7 @@ export default function Performance() {
             <MetricCard
               icon={CalendarCheck2} title="Follow-up completion" value={`${t.followUpRate || 0}%`} color={ACCENT_HEX.amber}
               description={`${t.missed || 0} missed of ${t.followUps || 0} · worst ${worstFollowUp ? `${worstFollowUp.label} (${Math.round(worstFollowUp.rate * 100)}%)` : '—'}`}
-              trend={followUpTrend} mom={momOf(followUpTrend)}
+              trend={followUpTrend} mom={momOf(followUpTrend)} yoy={data.yoy?.followUpRate}
             />
           </div>
 
@@ -215,8 +213,8 @@ export default function Performance() {
                     const rowWinRate = b.newLeads ? Math.round((b.won / b.newLeads) * 100) : 0
                     const rowAvgDeal = b.won ? b.revenue / b.won : 0
                     return (
+                      <React.Fragment key={b.key}>
                       <tr
-                        key={b.key}
                         className={`border-b border-white/5 transition-colors ${hasDetail ? 'cursor-pointer hover:bg-white/[0.05]' : 'cursor-default'} ${i % 2 === 1 ? 'bg-white/[0.015]' : ''} ${isActive ? 'bg-white/[0.06]' : ''}`}
                         onClick={() => hasDetail && setDrawerBucket(isActive ? null : b)}
                       >
@@ -236,11 +234,28 @@ export default function Performance() {
                         <td className="px-3 py-2.5 text-center text-[12.5px] text-slate-200 mono">{money(b.revenue || 0)}</td>
                         <td className="px-3 py-2.5 text-center text-[12px] text-slate-400 mono">{b.won ? money(rowAvgDeal) : '—'}</td>
                         <td className="px-3 py-2.5 text-center">
-                          <span className={`inline-flex items-center justify-center w-6 h-6 rounded-lg border transition-all ${hasDetail ? 'bg-white/5 border-white/10 text-slate-400' : 'bg-transparent border-transparent text-slate-700'}`}>
+                          <span className={`performance-row-toggle inline-flex items-center justify-center w-6 h-6 rounded-lg border transition-all ${isActive ? 'is-open' : ''} ${hasDetail ? 'bg-white/5 border-white/10 text-slate-400' : 'bg-transparent border-transparent text-slate-700'}`}>
                             <ChevronRight size={12} />
                           </span>
                         </td>
                       </tr>
+                      {isActive && det && (
+                        <tr className="performance-inline-drill-row">
+                          <td colSpan={9} className="performance-inline-drill-cell">
+                            <div className="performance-inline-drill">
+                              <div className="performance-inline-drill-head">
+                                <div>
+                                  <strong>{b.label} lead details</strong>
+                                  <span>{b.newLeads || 0} new · {b.won || 0} won · {b.lost || 0} lost · {b.missed || 0} missed follow-ups</span>
+                                </div>
+                                <button className="btn btn-ghost !py-1.5 !px-2.5 !text-[11px]" onClick={(event) => { event.stopPropagation(); setDrawerBucket(null) }}><X size={12} /> Close</button>
+                              </div>
+                              <PerformanceDetailTable detail={det} boot={boot} openLead={openLead} />
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                      </React.Fragment>
                     )
                   })}
                 </tbody>
@@ -267,62 +282,49 @@ export default function Performance() {
         </div>
       )}
 
-      <BucketDrawer bucket={drawerBucket} detail={drawerDetail} onClose={() => setDrawerBucket(null)} openLead={openLead} />
     </div>
   )
 }
 
-// Slide-in detail panel (same animation/backdrop pattern as LeadDrawer) —
-// replaces the old inline expand-row: the bucket table row never changes
-// height, and each lead in the panel still opens the real LeadDrawer on top.
-function BucketDrawer({ bucket, detail, onClose, openLead }) {
-  const [q, setQ] = useState('')
-  useEffect(() => { setQ('') }, [bucket?.key])
-  if (!bucket) return null
-
-  const filterList = (items) => !q.trim() ? items : items.filter(it => it.fullName.toLowerCase().includes(q.trim().toLowerCase()))
+function PerformanceDetailTable({ detail, boot, openLead }) {
+  const safeList = (value) => Array.isArray(value) ? value : []
+  const groups = [
+    ['New', 'violet', safeList(detail?.newLeads)],
+    ['Won', 'emerald', safeList(detail?.won)],
+    ['Lost', 'rose', safeList(detail?.lost)],
+    ['Missed FU', 'amber', safeList(detail?.missed)]
+  ]
+  const rows = groups.flatMap(([category, tone, items]) => items.filter(Boolean).map((lead, index) => ({ ...lead, category, tone, rowKey: `${category}-${lead.id || 'unknown'}-${index}` })))
+  const associates = Object.fromEntries(safeList(boot?.associates).map(associate => [associate.id, associate.name]))
+  const locations = Object.fromEntries(safeList(boot?.locations).map(location => [location.id, location.name]))
 
   return (
-    <div className="fixed inset-0 z-[70] flex justify-end">
-      <div className="absolute inset-0 bg-black/55 backdrop-blur-[2px]" onClick={onClose} />
-      <aside className="relative w-full max-w-[480px] h-full border-l border-white/10 flex flex-col shadow-2xl bg-[linear-gradient(180deg,rgba(15,18,32,0.98),rgba(9,12,22,0.98))]" style={{ animation: 'slideIn .2s ease' }}>
-        <div className="px-5 pt-5 pb-4 border-b border-white/8 bg-white/[0.02]">
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <h3 className="font-display text-[15px] font-bold text-white">{bucket.label}</h3>
-              <p className="text-[11.5px] text-slate-500 mt-0.5">{bucket.newLeads || 0} new · {bucket.won || 0} won · {bucket.lost || 0} lost · {bucket.missed || 0} missed follow-ups</p>
-            </div>
-            <button className="btn btn-ghost !p-2" onClick={onClose}><X size={14} /></button>
-          </div>
-          <div className="relative mt-3">
-            <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-500" />
-            <input className="input !pl-8 !py-1.5 !text-[12px]" placeholder="Filter by name…" value={q} onChange={e => setQ(e.target.value)} />
-          </div>
-        </div>
-        <div className="flex-1 overflow-y-auto scrollbar-thin p-5 space-y-5">
-          <DetailSection title="New leads" color="#a78bfa" items={filterList(detail?.newLeads || [])} openLead={openLead} />
-          <DetailSection title="Won" color="#34d399" items={filterList(detail?.won || [])} openLead={openLead} moneyValue />
-          <DetailSection title="Lost" color="#f87171" items={filterList(detail?.lost || [])} openLead={openLead} moneyValue />
-          <DetailSection title="Missed follow-ups" color="#fbbf24" items={filterList(detail?.missed || [])} openLead={openLead} />
-        </div>
-      </aside>
-    </div>
-  )
-}
-
-function DetailSection({ title, color, items, openLead, moneyValue }) {
-  return (
-    <div>
-      <div className="text-[10.5px] uppercase tracking-wider font-bold mb-1.5 flex items-center gap-1.5" style={{ color }}>{title} ({items.length})</div>
-      {!items.length && <p className="text-[11.5px] text-slate-500">None in this period.</p>}
-      <div className="space-y-1">
-        {items.map(it => (
-          <button key={it.id} className="w-full text-left flex items-center justify-between gap-2 text-[12.5px] text-slate-300 bg-white/[0.03] border border-white/8 rounded-lg px-3 py-2 hover:bg-white/[0.07] transition-colors" onClick={() => openLead(it.id)}>
-            <span className="truncate">{it.fullName}</span>
-            {moneyValue && it.value ? <span className="mono text-emerald-400 shrink-0">{money(it.value)}</span> : it.comments ? <span className="text-slate-500 truncate max-w-[140px]">{it.comments}</span> : <span className="chip !px-1.5 !py-0.5 text-[9px] bg-white/5 border border-white/10 text-slate-400 shrink-0">{it.stage}</span>}
-          </button>
-        ))}
-      </div>
+    <div className="performance-detail-table-wrap">
+      <table className="performance-detail-table">
+        <thead>
+          <tr>
+            <th>Category</th><th>Lead</th><th>Created at</th><th>Source</th><th>Status</th>
+            <th>Associate</th><th>Center</th><th>Class type</th><th>Remarks</th><th>Value</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map(row => (
+            <tr key={row.rowKey} onClick={() => row.id && openLead(row.id)}>
+              <td><span className={`performance-detail-category tone-${row.tone}`}>{row.category}</span></td>
+              <td><strong>{row.fullName || '—'}</strong><small>{row.stage || 'No stage'}</small></td>
+              <td className="mono">{fmtDate(row.createdAt)}</td>
+              <td>{row.sourceName || '—'}</td>
+              <td><span className="performance-detail-status">{row.status || '—'}</span></td>
+              <td>{associates[row.associateId] || 'Unassigned'}</td>
+              <td>{row.center || locations[row.locationId] || '—'}</td>
+              <td>{row.classType || '—'}</td>
+              <td className="performance-detail-remarks" title={row.comments || row.remarks || ''}>{row.comments || row.remarks || '—'}</td>
+              <td className="mono performance-detail-value">{row.value ? money(row.value) : '—'}</td>
+            </tr>
+          ))}
+          {!rows.length && <tr><td colSpan={10} className="performance-detail-empty">No lead records in this period.</td></tr>}
+        </tbody>
+      </table>
     </div>
   )
 }

@@ -11,7 +11,7 @@ import { useApp } from '../store.jsx'
 import { useFetch } from '../hooks.js'
 import { api, buildQuery } from '../api.js'
 import { Avatar, ScorePill, Empty } from '../ui.jsx'
-import { fmtDate, stageClass, riskClass, daysFromNow, downloadText, money, baseColumnValue, buildFormulaContext, evalFormula, lookupColumnValue, formatColumnValue } from '../lib.js'
+import { fmtDate, stageClass, stageBadgeStyle, stageColor, riskClass, daysFromNow, downloadText, money, baseColumnValue, buildFormulaContext, evalFormula, lookupColumnValue, formatColumnValue } from '../lib.js'
 import Tip from '../components/Tip.jsx'
 import ComposeModal from '../components/ComposeModal.jsx'
 import RespondioTemplateModal from '../components/RespondioTemplateModal.jsx'
@@ -65,7 +65,7 @@ const STAGE_CATEGORIES = [
 ]
 function stageVisual(stage) {
   const hit = STAGE_CATEGORIES.find(c => c.test.test(stage || ''))
-  return hit || { icon: CircleDot, color: '#94a3b8' }
+  return { icon: hit?.icon || CircleDot, color: stageColor(stage).solid }
 }
 
 const GROUP_OPTIONS = [
@@ -693,13 +693,14 @@ function TableGrid({ items, boot, lookup, openLead, changeStage, toggleManualFla
                 </td>
                 <td className={`px-4 ${py}`} style={{ width: stageW, minWidth: stageW }}>
                   {(() => {
-                    const { icon: StageIcon, color } = stageVisual(l.stage)
+                    const { icon: StageIcon } = stageVisual(l.stage)
+                    const badgeStyle = stageBadgeStyle(l.stage)
                     return (
                           <div className="relative w-full max-w-[170px] shrink-0">
-                        <StageIcon size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" style={{ color }} />
+                        <StageIcon size={12} className="stage-select-icon absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" style={badgeStyle} />
                         <select
-                          className="input stage-select !py-1 !pl-7 !text-[11.5px] !w-[170px] !rounded-full truncate"
-                          style={{ background: `${color}14`, borderColor: `${color}40`, color }}
+                          className={`input stage-select ${stageClass(l.stage)} !py-1 !pl-7 !text-[11.5px] !w-[170px] !rounded-full truncate`}
+                          style={badgeStyle}
                           title={l.stage} value={l.stage} onClick={e => e.stopPropagation()} onChange={e => changeStage(l, e.target.value)}
                         >
                           {(boot?.stages || []).map(s => <option key={s}>{s}</option>)}
@@ -1213,7 +1214,7 @@ function KanbanView({ items, boot, lookup, openLead, changeStage }) {
       {cols.map(col => (
         <div key={col.stage} className="flex flex-col w-[240px] shrink-0 rounded-2xl bg-white/[0.03] border border-white/6">
           <div className="px-3 py-2.5 flex items-center gap-2">
-            <span className="font-display text-[12.5px] font-semibold text-slate-200">{col.stage}</span>
+            <span className={`pipeline-stage-badge ${stageClass(col.stage)}`} style={stageBadgeStyle(col.stage)} title={col.stage}>{col.stage}</span>
             <span className="ml-auto chip bg-white/6 border border-white/10 text-slate-400 mono !py-0.5 !px-2 text-[11px]">{col.leads.length}</span>
           </div>
           <div className="flex-1 px-2 pb-2 space-y-2 max-h-[560px] overflow-y-auto scrollbar-thin">
@@ -1284,7 +1285,7 @@ function TimelineView({ items, lookup, openLead }) {
                     <div className="text-[12.5px] font-semibold text-white truncate">{l.fullName}</div>
                     <div className="text-[11px] text-slate-500 truncate">{l.ai?.nextAction?.text}</div>
                   </div>
-                  <span className={`chip !py-0.5 !px-2 text-[10px] ${stageClass(l.stage)}`}>{l.stage}</span>
+                  <span className={`chip !py-0.5 !px-2 text-[10px] ${stageClass(l.stage)}`} style={stageBadgeStyle(l.stage)}>{l.stage}</span>
                   <span className="text-[11px] text-slate-500 mono hidden sm:block">{fmtDate(l.createdAt)}</span>
                 </button>
               )

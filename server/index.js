@@ -38,6 +38,8 @@ try {
 } catch (e) { /* ignore */ }
 
 const app = express()
+const serverStartedAt = new Date().toISOString()
+let activePort = null
 // Railway (and most PaaS hosts) terminate TLS at a proxy in front of this
 // process, so the request Express actually sees is plain HTTP — without this,
 // req.protocol always reports "http" even on the public https:// URL, which
@@ -62,6 +64,10 @@ app.use((req, res, next) => {
 
 app.use(express.json({ limit: '200mb' }))
 app.use(express.urlencoded({ extended: true, limit: '200mb' }))
+
+// Lets the local frontend discover this instance if the preferred API port
+// was occupied and startup moved to the next available port.
+app.get('/api/runtime', (req, res) => res.json({ app: 'physique57-leads', port: activePort, startedAt: serverStartedAt }))
 
 // express.json() throws a raw SyntaxError (which the default Express handler
 // would render as an HTML error page) when the body isn't valid JSON — most
@@ -1616,7 +1622,50 @@ app.get('/api/analytics/performance', (req, res) => {
   // within scope, regardless of when they were created.
   totals.openPipelineValue = scoped.filter(l => l.status === 'open').reduce((s, l) => s + (l.valueEstimate || 0), 0)
 
-  res.json({ range, buckets: row, totals })
+  // Growth cards need a genuine same-period-last-year comparison. The chart
+  // window (7 days / 12 months) is presentation-only and must not be used as
+  // the comparison dataset, otherwise the first visible bucket is mistaken
+  // for last year and filtered views collapse to zero.
+  const currentStart = range === 'week' ? weekStart(now) : new Date(now.getFullYear(), now.getMonth(), 1)
+  const currentEnd = new Date(now.getTime() + 1)
+  const priorStart = new Date(currentStart); priorStart.setFullYear(priorStart.getFullYear() - 1)
+  const priorEnd = new Date(currentEnd); priorEnd.setFullYear(priorEnd.getFullYear() - 1)
+  const inPeriod = (value, start, end) => validDate(value) && new Date(value) >= start && new Date(value) < end
+  const periodMetrics = (start, end) => {
+    let newLeads = 0; let won = 0; let lost = 0; let revenue = 0; let followUps = 0; let missed = 0
+    for (const lead of scoped) {
+      if (inPeriod(lead.createdAt, start, end)) {
+        newLeads++
+        if (lead.status === 'lost') lost++
+      }
+      if (lead.status === 'won' && inPeriod(lead.convertedAt, start, end)) {
+        won++
+        revenue += lead.valueEstimate || 0
+      }
+      for (const followUp of lead.followUps || []) {
+        if (!inPeriod(followUp.date, start, end)) continue
+        followUps++
+        if (followUp.done === false) missed++
+      }
+    }
+    return { newLeads, won, lost, revenue, followUps, missed, followUpRate: followUps ? ((followUps - missed) / followUps) * 100 : null }
+  }
+  const currentPeriod = periodMetrics(currentStart, currentEnd)
+  const priorYearPeriod = periodMetrics(priorStart, priorEnd)
+  const growthPct = (current, previous) => {
+    if (previous === null || previous === undefined) return null
+    if (previous === 0) return current > 0 ? 100 : null
+    return ((current - previous) / Math.abs(previous)) * 100
+  }
+  const yoy = {
+    newLeads: growthPct(currentPeriod.newLeads, priorYearPeriod.newLeads),
+    won: growthPct(currentPeriod.won, priorYearPeriod.won),
+    lost: growthPct(currentPeriod.lost, priorYearPeriod.lost),
+    revenue: growthPct(currentPeriod.revenue, priorYearPeriod.revenue),
+    followUpRate: growthPct(currentPeriod.followUpRate, priorYearPeriod.followUpRate)
+  }
+
+  res.json({ range, buckets: row, totals, yoy, comparison: { currentPeriod, priorYearPeriod } })
 })
 
 // Per-studio breakdown for a single week/month period. `offset` counts periods
@@ -3141,24 +3190,38 @@ app.get('/api/analytics/performance/details', (req, res) => {
   const idx = Object.fromEntries(row.map((r, i) => [r.key, i]))
 
   const validDate2 = (v) => v && v !== '-' && !isNaN(new Date(v).getTime())
+  const detailLead = (lead) => ({
+    id: lead.id,
+    fullName: lead.fullName,
+    createdAt: lead.createdAt,
+    sourceName: lead.sourceName,
+    stage: lead.stage,
+    status: lead.status,
+    associateId: lead.associateId,
+    locationId: lead.locationId,
+    center: lead.center,
+    classType: lead.classType,
+    remarks: lead.remarks,
+    value: lead.valueEstimate || 0
+  })
 
   for (const l of scopeLeads(db.leads, req.query)) {
     if (validDate2(l.createdAt)) {
       const ck = fmt(new Date(l.createdAt))
-      if (idx[ck] !== undefined && row[idx[ck]].newLeads.length < 200) row[idx[ck]].newLeads.push({ id: l.id, fullName: l.fullName, stage: l.stage, status: l.status })
+      if (idx[ck] !== undefined && row[idx[ck]].newLeads.length < 200) row[idx[ck]].newLeads.push(detailLead(l))
     }
     if (l.status === 'won' && validDate2(l.convertedAt)) {
       const wk = fmt(new Date(l.convertedAt))
-      if (idx[wk] !== undefined && row[idx[wk]].won.length < 200) row[idx[wk]].won.push({ id: l.id, fullName: l.fullName, stage: l.stage, value: l.valueEstimate })
+      if (idx[wk] !== undefined && row[idx[wk]].won.length < 200) row[idx[wk]].won.push({ ...detailLead(l), eventAt: l.convertedAt })
     }
     if (l.status === 'lost' && validDate2(l.createdAt)) {
       const lk = fmt(new Date(l.createdAt))
-      if (idx[lk] !== undefined && row[idx[lk]].lost.length < 200) row[idx[lk]].lost.push({ id: l.id, fullName: l.fullName, stage: l.stage, value: l.valueEstimate })
+      if (idx[lk] !== undefined && row[idx[lk]].lost.length < 200) row[idx[lk]].lost.push(detailLead(l))
     }
     for (const f of l.followUps || []) {
       if (!validDate2(f.date) || f.done !== false) continue
       const fk = fmt(new Date(f.date))
-      if (idx[fk] !== undefined && row[idx[fk]].missed.length < 200) row[idx[fk]].missed.push({ id: l.id, fullName: l.fullName, date: f.date, comments: f.comments })
+      if (idx[fk] !== undefined && row[idx[fk]].missed.length < 200) row[idx[fk]].missed.push({ ...detailLead(l), eventAt: f.date, comments: f.comments })
     }
   }
 
@@ -3208,7 +3271,8 @@ if (fs.existsSync(dist)) {
   app.get(/^\/(?!api\/).*/, (req, res) => res.sendFile(path.join(dist, 'index.html')))
 }
 
-const PORT = process.env.PORT || 3001
+const PREFERRED_PORT = Number(process.env.PORT) || 3001
+const MAX_PORT_ATTEMPTS = 20
 
 // One-time backfill: older CSV imports created follow-ups without an id,
 // channel or done flag, which silently breaks the per-channel outreach
@@ -3271,14 +3335,34 @@ async function start() {
   if (db.settings.zohoPeople?.enabled && zohoPeople.isConfigured(db)) {
     zohoPeople.refreshOnDutyCache(db).then(() => save())
   }
-  app.listen(PORT, () => {
-    console.log(`[physique57-leads] server listening on http://localhost:${PORT}`)
-    console.log(`[physique57-leads] storage: ${supabase.isEnabled() ? 'Supabase' : 'local JSON'}`)
-    console.log(`[physique57-leads] gpt: ${gpt.isEnabled(db) ? gpt.modelName(db) : 'heuristics only'}`)
-    console.log(`[physique57-leads] respondio: ${respondio.isConfigured(db) ? 'configured' : 'not configured'}`)
-    console.log(`[physique57-leads] mailtrap: ${mailer.isConfigured(db) ? 'configured' : 'not configured'}`)
-    console.log(`[physique57-leads] momence configured: ${momence.isConfigured(db)}`)
+  const server = await listenOnAvailablePort(PREFERRED_PORT)
+  activePort = server.address().port
+  console.log(`[physique57-leads] server listening on http://localhost:${activePort}`)
+  console.log(`[physique57-leads] storage: ${supabase.isEnabled() ? 'Supabase' : 'local JSON'}`)
+  console.log(`[physique57-leads] gpt: ${gpt.isEnabled(db) ? gpt.modelName(db) : 'heuristics only'}`)
+  console.log(`[physique57-leads] respondio: ${respondio.isConfigured(db) ? 'configured' : 'not configured'}`)
+  console.log(`[physique57-leads] mailtrap: ${mailer.isConfigured(db) ? 'configured' : 'not configured'}`)
+  console.log(`[physique57-leads] momence configured: ${momence.isConfigured(db)}`)
+}
+
+function listenOnAvailablePort(startPort) {
+  return new Promise((resolve, reject) => {
+    let port = startPort
+    const tryListen = () => {
+      const server = app.listen(port)
+      server.once('listening', () => resolve(server))
+      server.once('error', error => {
+        if (error.code !== 'EADDRINUSE' || port >= startPort + MAX_PORT_ATTEMPTS - 1) return reject(error)
+        console.warn(`[physique57-leads] port ${port} is busy; trying ${port + 1}`)
+        port += 1
+        tryListen()
+      })
+    }
+    tryListen()
   })
 }
 
-start()
+start().catch(error => {
+  console.error('[physique57-leads] failed to start:', error)
+  process.exitCode = 1
+})
