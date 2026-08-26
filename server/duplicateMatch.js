@@ -38,7 +38,7 @@ export function isDuplicatePair(a, b) {
   const emailA = normalizeEmail(a.email), emailB = normalizeEmail(b.email)
   if (emailA && emailB && emailA === emailB) return true
   const phoneA = normalizePhone(a.phone), phoneB = normalizePhone(b.phone)
-  if (phoneA && phoneA.length === 10 && phoneA === phoneB) return true
+  if (phoneA && phoneA === phoneB) return true
   return rawContactMatch(a, b)
 }
 
@@ -64,7 +64,7 @@ export function findDuplicateAmong(leads, candidate) {
   const emailNorm = normalizeEmail(candidate.email)
   const phoneNorm = normalizePhone(candidate.phone)
   const hasRawContact = String(candidate.email || '').trim() || String(candidate.phone || '').trim()
-  if (!emailNorm && !(phoneNorm && phoneNorm.length === 10) && !hasRawContact) return null
+  if (!emailNorm && !phoneNorm && !hasRawContact) return null
   return leads.find(l => isDuplicatePair(candidate, l)) || null
 }
 
@@ -83,7 +83,7 @@ export function clusterDuplicates(leads) {
     const email = normalizeEmail(l.email)
     if (email) { if (!emailBuckets.has(email)) emailBuckets.set(email, []); emailBuckets.get(email).push(i) }
     const phone = normalizePhone(l.phone)
-    if (phone && phone.length === 10) { if (!phoneBuckets.has(phone)) phoneBuckets.set(phone, []); phoneBuckets.get(phone).push(i) }
+    if (phone) { if (!phoneBuckets.has(phone)) phoneBuckets.set(phone, []); phoneBuckets.get(phone).push(i) }
   })
 
   // Exact match (email or phone) is sufficient on its own — union the whole bucket.
