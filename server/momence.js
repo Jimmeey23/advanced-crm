@@ -109,6 +109,29 @@ async function request(db, path, { method = 'GET', query, body } = {}) {
   return res.json()
 }
 
+export async function createMember(db, input = {}) {
+  const email = String(input.email || '').trim()
+  const firstName = String(input.firstName || '').trim()
+  const lastName = String(input.lastName || '').trim()
+  const phoneNumber = String(input.phoneNumber || '').trim()
+  const homeLocationId = Number(input.homeLocationId)
+
+  if (!email || !firstName || !lastName) {
+    throw new Error('Email, first name and last name are required to create a Momence member.')
+  }
+  if (email.length > 100 || firstName.length > 100 || lastName.length > 100) {
+    throw new Error('Email, first name and last name must each be 100 characters or fewer.')
+  }
+
+  const payload = { email, firstName, lastName }
+  if (phoneNumber) payload.phoneNumber = phoneNumber
+  if (Number.isInteger(homeLocationId) && homeLocationId > 0) payload.homeLocationId = homeLocationId
+
+  const created = await request(db, '/api/v2/host/members', { method: 'POST', body: payload })
+  if (!isValidMemberId(created?.memberId)) throw new Error('Momence created the member but returned no valid member ID.')
+  return { memberId: String(created.memberId) }
+}
+
 async function paginate(db, path, { pageSize = 100, extra = {} } = {}) {
   const all = []
   let page = 0

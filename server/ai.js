@@ -48,7 +48,15 @@ function sentimentOf(lead) {
   for (const k of NEUTRAL) if (text.includes(k)) neu++
   if (pos > neg) return 'positive'
   if (neg > pos) return 'negative'
-  return neu > 0 ? 'neutral' : 'unknown'
+  if (neu > 0) return 'neutral'
+
+  // Do not leave every sparse/imported lead as "unknown". When there is no
+  // explicit member-language signal, use lifecycle outcome as a conservative
+  // fallback and otherwise report neutral rather than inventing emotion.
+  const group = statusGroupOf(lead.stage)
+  if (lead.status === 'won' || group === 'Won') return 'positive'
+  if (lead.status === 'lost' || ['Lost', 'Not Interested', 'Disqualified'].includes(group)) return 'negative'
+  return 'neutral'
 }
 
 function scoreLead(lead, db) {

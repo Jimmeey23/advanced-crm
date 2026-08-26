@@ -148,6 +148,11 @@ export default function Leads({ initialSearch = '' }) {
     catch (e) { toast(e.message, 'error') }
   }
 
+  const changeAssociate = async (lead, associateId) => {
+    try { await api.patch(`/api/leads/${lead.id}`, { associateId: associateId || null }); refreshData() }
+    catch (e) { toast(e.message, 'error') }
+  }
+
   const toggleManualFlag = async (lead) => {
     const currentFlags = manualFlagOverrides[lead.id] || lead.manualFlags || []
     const flagged = currentFlags.some(f => f.id === 'focus')
@@ -459,7 +464,7 @@ export default function Leads({ initialSearch = '' }) {
           {view === 'table' && (
             <TableView
               items={items} boot={boot} lookup={lookup} openLead={openLead}
-              changeStage={changeStage} grouped={grouped} collapsed={collapsed} toggleGroup={toggleGroup}
+              changeStage={changeStage} changeAssociate={changeAssociate} grouped={grouped} collapsed={collapsed} toggleGroup={toggleGroup}
               toggleManualFlag={toggleManualFlag}
                   onMessage={setComposeLead}
                   onTemplateMessage={setTemplateLead}
@@ -558,7 +563,7 @@ function GroupSummary({ list }) {
   )
 }
 
-function TableView({ items, boot, lookup, openLead, changeStage, toggleManualFlag, grouped, collapsed, toggleGroup, onMessage, onTemplateMessage, selected, toggleSelect, toggleSelectAll, columns, density, rowHeight, tableZoom, colWidths, setColWidths, manualFlagOverrides, headerPinned = true, focusLeadIds = [], clearFocus, sortBy, sortDir, setSortBy, setSortDir }) {
+function TableView({ items, boot, lookup, openLead, changeStage, changeAssociate, toggleManualFlag, grouped, collapsed, toggleGroup, onMessage, onTemplateMessage, selected, toggleSelect, toggleSelectAll, columns, density, rowHeight, tableZoom, colWidths, setColWidths, manualFlagOverrides, headerPinned = true, focusLeadIds = [], clearFocus, sortBy, sortDir, setSortBy, setSortDir }) {
   const focusedItems = focusLeadIds.length ? items.filter(l => focusLeadIds.includes(l.id)) : items
   if (grouped) {
     return (
@@ -579,7 +584,7 @@ function TableView({ items, boot, lookup, openLead, changeStage, toggleManualFla
               </button>
               {isOpen && (
                 <div className="lead-group-table">
-                  <TableGrid items={focusLeadIds.length ? g.list.filter(l => focusLeadIds.includes(l.id)) : g.list} boot={boot} lookup={lookup} openLead={openLead} changeStage={changeStage} toggleManualFlag={toggleManualFlag} onMessage={onMessage} onTemplateMessage={onTemplateMessage} selected={selected} toggleSelect={toggleSelect} toggleSelectAll={toggleSelectAll} columns={columns} density={density} rowHeight={rowHeight} tableZoom={tableZoom} colWidths={colWidths} setColWidths={setColWidths} manualFlagOverrides={manualFlagOverrides} headerPinned={headerPinned} focusLeadIds={focusLeadIds} clearFocus={clearFocus} sortBy={sortBy} sortDir={sortDir} setSortBy={setSortBy} setSortDir={setSortDir} />
+                  <TableGrid items={focusLeadIds.length ? g.list.filter(l => focusLeadIds.includes(l.id)) : g.list} boot={boot} lookup={lookup} openLead={openLead} changeStage={changeStage} changeAssociate={changeAssociate} toggleManualFlag={toggleManualFlag} onMessage={onMessage} onTemplateMessage={onTemplateMessage} selected={selected} toggleSelect={toggleSelect} toggleSelectAll={toggleSelectAll} columns={columns} density={density} rowHeight={rowHeight} tableZoom={tableZoom} colWidths={colWidths} setColWidths={setColWidths} manualFlagOverrides={manualFlagOverrides} headerPinned={headerPinned} focusLeadIds={focusLeadIds} clearFocus={clearFocus} sortBy={sortBy} sortDir={sortDir} setSortBy={setSortBy} setSortDir={setSortDir} />
                 </div>
               )}
             </div>
@@ -588,10 +593,10 @@ function TableView({ items, boot, lookup, openLead, changeStage, toggleManualFla
       </div>
     )
   }
-  return <TableGrid items={focusedItems} boot={boot} lookup={lookup} openLead={openLead} changeStage={changeStage} toggleManualFlag={toggleManualFlag} onMessage={onMessage} onTemplateMessage={onTemplateMessage} selected={selected} toggleSelect={toggleSelect} toggleSelectAll={toggleSelectAll} columns={columns} density={density} rowHeight={rowHeight} tableZoom={tableZoom} colWidths={colWidths} setColWidths={setColWidths} manualFlagOverrides={manualFlagOverrides} headerPinned={headerPinned} focusLeadIds={focusLeadIds} clearFocus={clearFocus} sortBy={sortBy} sortDir={sortDir} setSortBy={setSortBy} setSortDir={setSortDir} />
+  return <TableGrid items={focusedItems} boot={boot} lookup={lookup} openLead={openLead} changeStage={changeStage} changeAssociate={changeAssociate} toggleManualFlag={toggleManualFlag} onMessage={onMessage} onTemplateMessage={onTemplateMessage} selected={selected} toggleSelect={toggleSelect} toggleSelectAll={toggleSelectAll} columns={columns} density={density} rowHeight={rowHeight} tableZoom={tableZoom} colWidths={colWidths} setColWidths={setColWidths} manualFlagOverrides={manualFlagOverrides} headerPinned={headerPinned} focusLeadIds={focusLeadIds} clearFocus={clearFocus} sortBy={sortBy} sortDir={sortDir} setSortBy={setSortBy} setSortDir={setSortDir} />
 }
 
-function TableGrid({ items, boot, lookup, openLead, changeStage, toggleManualFlag, onMessage, onTemplateMessage, selected, toggleSelect, toggleSelectAll, columns, density, rowHeight = 58, tableZoom = 100, colWidths = {}, setColWidths, manualFlagOverrides = {}, headerPinned = true, focusLeadIds = [], clearFocus, sortBy, sortDir, setSortBy, setSortDir }) {
+function TableGrid({ items, boot, lookup, openLead, changeStage, changeAssociate, toggleManualFlag, onMessage, onTemplateMessage, selected, toggleSelect, toggleSelectAll, columns, density, rowHeight = 58, tableZoom = 100, colWidths = {}, setColWidths, manualFlagOverrides = {}, headerPinned = true, focusLeadIds = [], clearFocus, sortBy, sortDir, setSortBy, setSortDir }) {
   const cadenceDays = boot?.settings?.cadence?.outreachDays || 7
   const allChecked = items.length > 0 && items.every(l => selected?.has(l.id))
   const visibleCols = (columns || []).filter(c => !c.hidden && c.field !== 'created')
@@ -681,7 +686,7 @@ function TableGrid({ items, boot, lookup, openLead, changeStage, toggleManualFla
                   </div>
                 </td>
                 <td className={`px-4 ${py}`} style={{ width: leadW, minWidth: leadW }}>
-                  <div className="min-w-0">
+                  <div className="min-w-0" data-cell-value onClick={e => e.stopPropagation()}>
                     <div className="text-[13px] font-semibold text-white truncate flex items-center gap-1.5">
                       {l.fullName}
                       {[...rowManualFlags, ...(l.flags || [])].map(f => (
@@ -691,7 +696,7 @@ function TableGrid({ items, boot, lookup, openLead, changeStage, toggleManualFla
                     {density !== 'compact' && <div className="text-[11px] text-slate-500 truncate">{l.email}</div>}
                   </div>
                 </td>
-                <td className={`px-4 ${py}`} style={{ width: stageW, minWidth: stageW }}>
+                <td className={`px-4 ${py}`} style={{ width: stageW, minWidth: stageW }} onClick={e => e.stopPropagation()}>
                   {(() => {
                     const { icon: StageIcon } = stageVisual(l.stage)
                     const badgeStyle = stageBadgeStyle(l.stage)
@@ -709,21 +714,36 @@ function TableGrid({ items, boot, lookup, openLead, changeStage, toggleManualFla
                     )
                   })()}
                 </td>
-                <td className={`px-4 ${py} text-[12px] text-slate-400 mono`} style={{ width: widthOf('createdAt', 150), minWidth: widthOf('createdAt', 150) }}>{fmtDate(l.createdAt)}</td>
+                <td className={`px-4 ${py} text-[12px] text-slate-400 mono`} style={{ width: widthOf('createdAt', 150), minWidth: widthOf('createdAt', 150) }}><span data-cell-value onClick={e => e.stopPropagation()}>{fmtDate(l.createdAt)}</span></td>
                 {visibleCols.map(c => {
                   if (c.field === 'source') {
                     return (
                       <td key={c.id} className={`px-4 ${py} text-[12.5px] text-slate-400 truncate`}>
-                        {l.sourceName || '—'}
+                        <span data-cell-value onClick={e => e.stopPropagation()}>{l.sourceName || '—'}</span>
                       </td>
                     )
                   }
                   if (c.field === 'owner') {
                     return (
-                      <td key={c.id} className={`px-4 ${py}`}>
-                        <div className="flex items-center gap-2 min-w-0">
+                      <td key={c.id} className={`px-4 ${py}`} onClick={e => {
+                        e.stopPropagation()
+                        if (e.target.tagName !== 'SELECT') {
+                          const select = e.currentTarget.querySelector('select')
+                          select?.focus()
+                          select?.showPicker?.()
+                        }
+                      }}>
+                        <div className="relative flex items-center gap-2 min-w-0 max-w-[180px]">
                           <Avatar name={owner?.name || '?'} color={owner?.color} photoUrl={owner?.photoUrl} photoZoom={owner?.photoZoom} photoPosX={owner?.photoPosX} photoPosY={owner?.photoPosY} size={28} />
-                          <span className="text-[12px] text-slate-300 truncate max-w-[110px]">{owner?.name || 'Unassigned'}</span>
+                          <select
+                            className="input associate-cell-select !py-1 !px-2 !text-[12px] min-w-0"
+                            aria-label={`Assign ${l.fullName} to an associate`}
+                            value={l.associateId || ''}
+                            onChange={e => changeAssociate(l, e.target.value)}
+                          >
+                            <option value="">Unassigned</option>
+                            {(boot?.associates || []).filter(a => a.active !== false && (a.locationIds || [a.locationId]).includes(l.locationId)).map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+                          </select>
                         </div>
                       </td>
                     )
@@ -740,17 +760,17 @@ function TableGrid({ items, boot, lookup, openLead, changeStage, toggleManualFla
                   const val = getColumnValue(c, l, lookup)
                   return (
                     <td key={c.id} className={`px-4 ${py} text-[12.5px] ${c.type === 'number' || c.type === 'currency' || c.type === 'percent' ? 'mono text-slate-300' : 'text-slate-400'}`}>
-                      <span className="table-cell-fit" title={String(formatColumnValue(val, c) ?? '')}>{formatColumnValue(val, c)}</span>
+                      <span className="table-cell-fit" data-cell-value onClick={e => e.stopPropagation()} title={String(formatColumnValue(val, c) ?? '')}>{formatColumnValue(val, c)}</span>
                     </td>
                   )
                 })}
                 <td className={`px-4 ${py}`}>
-                  <span className="table-remarks-wrap">
+                  <span className="table-remarks-wrap" data-cell-value onClick={e => e.stopPropagation()}>
                     <span className="table-remarks" title={l.remarks || ''}>{l.remarks || '—'}</span>
                   </span>
                 </td>
                 {['call', 'whatsapp', 'email', 'sms'].map(ch => (
-                  <td key={ch} className="px-1 text-center">
+                  <td key={ch} className="px-1 text-center" onClick={e => e.stopPropagation()}>
                     <FuCell lead={l} ch={ch} forceMissed={cadenceMissedOpen} />
                   </td>
                 ))}

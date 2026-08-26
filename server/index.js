@@ -1388,6 +1388,46 @@ app.post('/api/momence/link/:leadId', async (req, res) => {
   }
 })
 
+// Creates a new member through Momence's Host API, then persists the returned
+// member ID on this lead. Profile hydration is best-effort because a newly
+// created member can take a moment to become readable from the member endpoint.
+app.post('/api/momence/create/:leadId', async (req, res) => {
+  const lead = leadById(req.params.leadId)
+  if (!lead) return res.status(404).json({ ok: false, error: 'Lead not found' })
+  if (!momence.isConfigured(db)) return res.status(400).json({ ok: false, error: 'Momence is not configured' })
+  if (momence.isValidMemberId(lead.memberId)) {
+    return res.status(409).json({ ok: false, error: `This lead is already linked to Momence member #${lead.memberId}.` })
+  }
+
+  const email = String(req.body?.email || '').trim()
+  const firstName = String(req.body?.firstName || '').trim()
+  const lastName = String(req.body?.lastName || '').trim()
+  const phoneNumber = String(req.body?.phoneNumber || '').trim()
+  if (!email || !/^\S+@\S+\.\S+$/.test(email)) return res.status(400).json({ ok: false, error: 'Enter a valid email address.' })
+  if (!firstName || !lastName) return res.status(400).json({ ok: false, error: 'First name and last name are required.' })
+
+  try {
+    const created = await momence.createMember(db, {
+      email, firstName, lastName, phoneNumber,
+      homeLocationId: req.body?.homeLocationId
+    })
+    lead.memberId = created.memberId
+    lead.lastActivityAt = nowIso()
+    let syncWarning = ''
+    try {
+      await momence.syncLeadMomence(db, lead)
+    } catch (e) {
+      syncWarning = 'Member created and linked. Profile details will appear after the next sync.'
+    }
+    markDirty(lead.id)
+    save()
+    log('sync', `Created Momence member #${created.memberId} for ${lead.fullName}`, lead.id)
+    res.json({ ok: true, memberId: created.memberId, profile: enrichLead(lead, db).momence || null, warning: syncWarning })
+  } catch (e) {
+    res.status(502).json({ ok: false, error: e.message })
+  }
+})
+
 app.post('/api/momence/sync/:leadId', async (req, res) => {
   const lead = leadById(req.params.leadId)
   if (!lead) return res.status(404).json({ error: 'Lead not found' })

@@ -3,7 +3,7 @@ import {
   X, Phone, Mail, MapPin, Sparkles, CalendarPlus, RefreshCw, Link2,
   CheckCircle2, Send, Clock, Lightbulb, TrendingUp, Tags, Receipt,
   Award, MessageSquare, Bot, MessageCircle, Loader2, Inbox,
-  ChevronDown, BarChart3, IndianRupee
+  ChevronDown, BarChart3, IndianRupee, UserPlus
 } from 'lucide-react'
 import { useApp } from '../store.jsx'
 import { useFetch } from '../hooks.js'
@@ -31,8 +31,11 @@ export default function LeadDrawer() {
   const [replyError, setReplyError] = useState({})
   const [enriching, setEnriching] = useState(false)
   const [autoSyncLeadId, setAutoSyncLeadId] = useState('')
-  const [momenceOpen, setMomenceOpen] = useState(true)
-  const [momenceProfileOpen, setMomenceProfileOpen] = useState(true)
+  const [momenceOpen, setMomenceOpen] = useState(false)
+  const [momenceProfileOpen, setMomenceProfileOpen] = useState(false)
+  const [createMemberOpen, setCreateMemberOpen] = useState(false)
+  const [creatingMember, setCreatingMember] = useState(false)
+  const [memberDraft, setMemberDraft] = useState({ firstName: '', lastName: '', email: '', phoneNumber: '' })
   const [drawerWidth, setDrawerWidth] = useState(() => Number(localStorage.getItem('p57_lead_drawer_width')) || MIN_DRAWER_WIDTH)
   const commentsRef = React.useRef(null)
 
@@ -53,7 +56,19 @@ export default function LeadDrawer() {
   )
 
   useEffect(() => { if (lead) setRemarkDraft(lead.remarks || '') }, [lead?.id])
-  useEffect(() => { setSyncError(''); setCandidates(null); setManualLink(false); setManualMemberId(''); setAutoSyncLeadId('') }, [drawerLeadId])
+  useEffect(() => {
+    setSyncError(''); setCandidates(null); setManualLink(false); setManualMemberId(''); setAutoSyncLeadId(''); setCreateMemberOpen(false)
+  }, [drawerLeadId])
+  useEffect(() => {
+    if (!lead) return
+    const nameParts = String(lead.fullName || '').trim().split(/\s+/).filter(Boolean)
+    setMemberDraft({
+      firstName: nameParts[0] || '',
+      lastName: nameParts.slice(1).join(' '),
+      email: lead.email || '',
+      phoneNumber: lead.phone || ''
+    })
+  }, [lead?.id])
 
   const doEnrich = async () => {
     setEnriching(true)
@@ -98,7 +113,7 @@ export default function LeadDrawer() {
     if (!lead || !boot?.integrations?.momence || lead.momence || syncing || candidates || autoSyncLeadId === lead.id) return
     if (!lead.email && !lead.phone && !lead.memberId) return
     setAutoSyncLeadId(lead.id)
-    doSync()
+    doSync({ silent: true })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lead?.id, lead?.momence, boot?.integrations?.momence])
 
@@ -160,17 +175,20 @@ export default function LeadDrawer() {
   // Auto-lookup by the lead's email/phone — no manual member ID required.
   // The server searches Momence's member directory itself; this only
   // surfaces a pick-list when more than one member matches.
-  const doSync = async () => {
+  const doSync = async ({ silent = false } = {}) => {
     setSyncing(true); setSyncError(''); setCandidates(null)
     try {
       await api.post(`/api/momence/sync/${lead.id}`)
-      toast('Momence profile synced')
+      if (!silent) toast('Momence profile synced')
       refreshData(); reload()
     } catch (e) {
       if (e.status === 300 && e.data?.candidates) {
         setCandidates(e.data.candidates)
       } else {
-        setSyncError(humanMomenceError(e.message)); toast(humanMomenceError(e.message), 'error')
+        if (!silent) {
+          setSyncError(humanMomenceError(e.message))
+          toast(humanMomenceError(e.message), 'error')
+        }
       }
     }
     finally { setSyncing(false) }
@@ -187,7 +205,22 @@ export default function LeadDrawer() {
     finally { setSyncing(false) }
   }
 
+  const createMomenceMember = async (e) => {
+    e.preventDefault()
+    setCreatingMember(true); setSyncError('')
+    try {
+      const result = await api.post(`/api/momence/create/${lead.id}`, memberDraft)
+      toast(result.warning || `Momence member #${result.memberId} created and linked`)
+      setCreateMemberOpen(false)
+      refreshData(); reload()
+    } catch (e) {
+      const msg = humanMomenceError(e.message)
+      setSyncError(msg); toast(msg, 'error')
+    } finally { setCreatingMember(false) }
+  }
+
   const m = lead.momence
+  const deepDiveSentiment = lead.gpt?.sentiment && lead.gpt.sentiment !== 'unknown' ? lead.gpt.sentiment : lead.ai.sentiment
   const classesAttended = m?.classHistory?.filter(c => c.checkedIn).length || 0
   const classesCancelled = m?.classHistory?.filter(c => !c.checkedIn && /cancel/i.test(c.status || '')).length || 0
   const classesOther = Math.max(0, (m?.classHistory?.length || 0) - classesAttended - classesCancelled)
@@ -310,8 +343,9 @@ export default function LeadDrawer() {
               </div>
             </div>
             <div className="rounded-xl bg-white/[0.04] border border-white/10 p-3">
-              <div className="text-[11px] font-semibold lead-accent mb-1 flex items-center gap-1.5"><Lightbulb size={12} /> Suggested action</div>
-              <p className="text-[12.5px] text-slate-200 leading-relaxed">{lead.ai.nextAction.text}</p>
+              <div className="text-[11px] font-semibold lead-accent mb-1 flex items-center gap-1.5"><Lightbulb size={12} /> Brief overview</div>
+              <p className="text-[12.5px] text-slate-200 leading-relaxed">{lead.ai.summary}</p>
+              <p className="text-[12px] text-slate-400 leading-relaxed mt-2"><b className="text-slate-200">Recommended next step:</b> {lead.ai.nextAction.text}</p>
             </div>
             <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-1.5">
               {(lead.ai?.insights || []).map((ins, i) => (
@@ -320,19 +354,14 @@ export default function LeadDrawer() {
             </div>
           </section>
 
-          {/* summary */}
-          <section className="lead-section">
-            <h3 className="font-display font-semibold text-white text-[13px] mb-2">AI summary</h3>
-            <p className="text-[12.5px] text-slate-300 leading-relaxed">{lead.ai.summary}</p>
-          </section>
-
           {/* GPT enrichment */}
-          <section className="lead-section gpt-panel">
-            <div className="flex items-center gap-2 mb-3">
+          <details className="lead-section gpt-panel drawer-collapsible">
+            <summary className="drawer-section-summary">
               <Bot size={14} className="lead-accent-icon" />
-              <h3 className="font-display font-semibold text-white text-[13px]">GPT deep-dive</h3>
+              <span><b>GPT deep-dive</b><small>Analysis and suggested messaging</small></span>
               {lead.gpt?.generatedAt && <span className="chip ml-auto bg-white/5 border border-white/10 text-slate-400">{timeAgo(lead.gpt.generatedAt)}</span>}
-            </div>
+              <ChevronDown size={15} className="drawer-section-chevron" />
+            </summary>
 
             {lead.gpt ? (
               <div className="space-y-2.5">
@@ -341,8 +370,8 @@ export default function LeadDrawer() {
                   <p className="text-[12.5px] text-slate-200 leading-relaxed">{lead.gpt.summary}</p>
                 </div>
                 <div className="flex flex-wrap gap-1.5">
-                  <span className={`chip capitalize ${lead.gpt.sentiment === 'positive' ? 'bg-emerald-500/10 text-emerald-300 border border-emerald-400/20' : lead.gpt.sentiment === 'negative' ? 'bg-rose-500/10 text-rose-300 border border-rose-400/20' : 'bg-white/5 border border-white/10 text-slate-300'}`}>
-                    <TrendingUp size={10} /> sentiment: {lead.gpt.sentiment}
+                  <span className={`chip capitalize ${deepDiveSentiment === 'positive' ? 'bg-emerald-500/10 text-emerald-300 border border-emerald-400/20' : deepDiveSentiment === 'negative' ? 'bg-rose-500/10 text-rose-300 border border-rose-400/20' : 'bg-white/5 border border-white/10 text-slate-300'}`}>
+                    <TrendingUp size={10} /> sentiment: {deepDiveSentiment}
                   </span>
                   <span className="chip bg-white/5 border border-white/10 text-slate-300"><Clock size={10} /> best time: {lead.gpt.bestContactTime || '—'}</span>
                   {lead.gpt.nextAction && <span className="chip lead-accent-chip"><Send size={10} /> {lead.gpt.nextAction.label}</span>}
@@ -356,8 +385,8 @@ export default function LeadDrawer() {
                   </div>
                 )}
                 {(lead.gpt.followupSuggestions || []).length > 0 && (
-                  <div>
-                    <div className="text-[10.5px] uppercase tracking-wider lead-accent font-semibold mb-1.5 flex items-center gap-1"><Sparkles size={10} /> GPT suggested messages</div>
+                  <details className="drawer-suggestion-fold">
+                    <summary><Sparkles size={11} /> GPT suggested messages <span>{lead.gpt.followupSuggestions.length}</span></summary>
                     <div className="space-y-1.5">
                       {lead.gpt.followupSuggestions.map((s, i) => (
                         <button key={i} className="w-full text-left modern-card !rounded-xl px-3 py-2.5 hover:scale-[1.01] transition-transform" onClick={() => { setComposeOpen(true) }}>
@@ -366,7 +395,7 @@ export default function LeadDrawer() {
                         </button>
                       ))}
                     </div>
-                  </div>
+                  </details>
                 )}
               </div>
             ) : (
@@ -382,15 +411,16 @@ export default function LeadDrawer() {
                 </button>
               </div>
             )}
-          </section>
+          </details>
 
           {/* Respond.io conversations */}
-          <section className="lead-section">
-            <div className="flex items-center gap-2 mb-3">
+          {!!conv?.conversations?.length && <details className="lead-section drawer-collapsible">
+            <summary className="drawer-section-summary">
               <MessageCircle size={14} className={boot?.integrations?.respondio ? 'text-emerald-400' : 'text-slate-500'} />
-              <h3 className="font-display font-semibold text-white text-[13px]">Respond.io conversation</h3>
+              <span><b>Respond.io conversations</b><small>Member message history</small></span>
               {boot?.integrations?.respondio && <span className="chip ml-auto bg-white/5 border border-white/10 text-slate-400">{conv?.conversations?.length || 0} threads</span>}
-            </div>
+              <ChevronDown size={15} className="drawer-section-chevron" />
+            </summary>
 
             {!boot?.integrations?.respondio ? (
               <div className="text-[12.5px] text-slate-400 flex items-center gap-2"><span>Connect Respond.io in Settings → Integrations to view and send messages.</span></div>
@@ -433,10 +463,10 @@ export default function LeadDrawer() {
                 ))}
               </div>
             )}
-          </section>
+          </details>}
 
           {/* Momence */}
-          <section className={`lead-section momence-workspace ${momenceOpen ? 'is-open' : ''}`}>
+          {boot?.integrations?.momence && <section className={`lead-section momence-workspace ${momenceOpen ? 'is-open' : ''}`}>
             <button className="momence-section-header" onClick={() => setMomenceOpen(v => !v)} aria-expanded={momenceOpen}>
               <span className="momence-header-icon"><Link2 size={16} /></span>
               <span className="min-w-0 text-left">
@@ -463,8 +493,31 @@ export default function LeadDrawer() {
                       <button className="btn btn-soft !py-2 flex-1" onClick={doSync} disabled={syncing}>
                         {syncing ? <Spinner size={14} /> : <RefreshCw size={14} />} Find &amp; sync from Momence
                       </button>
+                      <button className="btn btn-primary !py-2" onClick={() => setCreateMemberOpen(v => !v)} disabled={syncing || creatingMember}>
+                        <UserPlus size={14} /> Create member
+                      </button>
                     </div>
                     <p className="text-[11px] text-slate-500">Looks up this member on Momence by {lead.email ? 'email' : ''}{lead.email && lead.phone ? ' or ' : ''}{lead.phone ? 'phone' : ''} — no member ID needed.</p>
+                    {createMemberOpen && (
+                      <form className="momence-create-member" onSubmit={createMomenceMember}>
+                        <div className="momence-create-heading">
+                          <span><span className="momence-subsection-kicker">New Momence profile</span>Confirm member details</span>
+                          <button type="button" className="modal-close" aria-label="Cancel member creation" onClick={() => setCreateMemberOpen(false)}><X size={14} /></button>
+                        </div>
+                        <div className="momence-create-grid">
+                          <label><span>First name</span><input className="input" value={memberDraft.firstName} maxLength={100} onChange={e => setMemberDraft(d => ({ ...d, firstName: e.target.value }))} required /></label>
+                          <label><span>Last name</span><input className="input" value={memberDraft.lastName} maxLength={100} onChange={e => setMemberDraft(d => ({ ...d, lastName: e.target.value }))} required /></label>
+                          <label className="is-wide"><span>Email</span><input className="input" type="email" value={memberDraft.email} maxLength={100} onChange={e => setMemberDraft(d => ({ ...d, email: e.target.value }))} required /></label>
+                          <label className="is-wide"><span>Phone <em>optional</em></span><input className="input" type="tel" value={memberDraft.phoneNumber} onChange={e => setMemberDraft(d => ({ ...d, phoneNumber: e.target.value }))} /></label>
+                        </div>
+                        <div className="momence-create-actions">
+                          <p>This creates a real customer record in Momence and links it to this lead.</p>
+                          <button className="btn btn-primary !py-2" type="submit" disabled={creatingMember || !memberDraft.firstName.trim() || !memberDraft.lastName.trim() || !memberDraft.email.trim()}>
+                            {creatingMember ? <Spinner size={14} /> : <UserPlus size={14} />} {creatingMember ? 'Creating…' : 'Create & link profile'}
+                          </button>
+                        </div>
+                      </form>
+                    )}
                     {lead.memberId && <p className="text-[11.5px] text-slate-500 mt-1">Already linked to member #{lead.memberId}.</p>}
                     {syncError && <p className="text-[11.5px] text-rose-400 mt-1">{syncError}</p>}
                     <button className="text-[11px] text-slate-500 hover:text-slate-300 underline mt-2" onClick={() => setManualLink(v => !v)}>
@@ -535,14 +588,14 @@ export default function LeadDrawer() {
                   </div>
                 )}
 
-                <div className="momence-data-panel">
+                {!!(m.salesHistory?.length || m.classHistory?.length || m.memberships?.length || m.appointments?.length || m.notes?.length) && <div className="momence-data-panel">
                 <Tabbed
                   tabs={[
-                    { key: 'sales', label: `Sales (${m.salesHistory?.length || 0})`, icon: Receipt },
-                    { key: 'classes', label: `Classes (${m.classHistory?.length || 0})`, icon: Award },
-                    { key: 'plans', label: `Plans (${m.memberships?.length || 0})`, icon: CalendarPlus },
-                    { key: 'appointments', label: `Appointments (${m.appointments?.length || 0})`, icon: Clock },
-                    { key: 'notes', label: `Notes (${m.notes?.length || 0})`, icon: MessageSquare }
+                    ...(m.salesHistory?.length ? [{ key: 'sales', label: `Sales (${m.salesHistory.length})`, icon: Receipt }] : []),
+                    ...(m.classHistory?.length ? [{ key: 'classes', label: `Classes (${m.classHistory.length})`, icon: Award }] : []),
+                    ...(m.memberships?.length ? [{ key: 'plans', label: `Plans (${m.memberships.length})`, icon: CalendarPlus }] : []),
+                    ...(m.appointments?.length ? [{ key: 'appointments', label: `Appointments (${m.appointments.length})`, icon: Clock }] : []),
+                    ...(m.notes?.length ? [{ key: 'notes', label: `Notes (${m.notes.length})`, icon: MessageSquare }] : [])
                   ]}>
                   <div key="sales">
                     {(m?.salesHistory || []).slice(0, 8).map((s, i) => (
@@ -575,27 +628,28 @@ export default function LeadDrawer() {
                     {!m.notes?.length && <EmptyNote text="No notes recorded on this member's Momence profile." />}
                   </div>
                 </Tabbed>
-                </div>
+                </div>}
                 <p className="text-[10.5px] text-slate-600 mt-2 flex items-center gap-1"><RefreshCw size={10} /> Synced {timeAgo(lead.momenceSyncedAt)}</p>
               </div>
             )}
             </div>}
-          </section>
+          </section>}
 
           {/* remarks */}
-          <section className="lead-section">
-            <h3 className="font-display font-semibold text-white text-[13px] mb-2">Remarks</h3>
+          <details className="lead-section drawer-collapsible">
+            <summary className="drawer-section-summary"><MessageSquare size={14} /><span><b>Remarks</b><small>{lead.remarks ? 'Saved lead notes' : 'Add a lead note'}</small></span><ChevronDown size={15} className="drawer-section-chevron" /></summary>
             <textarea className="input resize-none" rows={3} value={remarkDraft} onChange={e => setRemarkDraft(e.target.value)} placeholder="Notes from conversations…" />
             <button className="btn btn-ghost !py-1.5 !text-[12px] mt-2" onClick={() => remarkDraft !== lead.remarks && patch({ remarks: remarkDraft }, 'Remarks updated')}>Save remarks</button>
-          </section>
+          </details>
 
           {/* follow-ups */}
-          <section className="lead-section lead-section-last">
-            <div className="flex items-center gap-2 mb-3">
+          <details className="lead-section lead-section-last drawer-collapsible">
+            <summary className="drawer-section-summary">
               <MessageSquare size={14} className="text-amber-400" />
-              <h3 className="font-display font-semibold text-white text-[13px]">Follow-up timeline</h3>
+              <span><b>Follow-up timeline</b><small>Activity and next touchpoint</small></span>
               <span className="chip ml-auto bg-white/5 border border-white/10 text-slate-400">{realFollowUps.length}</span>
-            </div>
+              <ChevronDown size={15} className="drawer-section-chevron" />
+            </summary>
             <div className="space-y-0 mb-4">
               {realFollowUps.slice().reverse().map((f, i) => (
                 <div key={f.id || i} className="relative pl-5 pb-4 border-l border-white/10 last:border-0 last:pb-0">
@@ -618,8 +672,8 @@ export default function LeadDrawer() {
               <button className="btn btn-primary !py-1.5 !text-[12px] w-full" type="submit"><CalendarPlus size={14} /> Log follow-up</button>
             </form>
             {lead.ai?.followupSuggestions?.length > 0 && (
-              <div className="mt-3">
-                <div className="text-[10.5px] uppercase tracking-wider lead-accent font-semibold mb-1.5 flex items-center gap-1"><Sparkles size={10} /> AI suggested messages — tap to use</div>
+              <details className="drawer-suggestion-fold mt-3">
+                <summary><Sparkles size={11} /> AI suggested messages <span>{lead.ai.followupSuggestions.length}</span></summary>
                 <div className="space-y-1.5">
                   {lead.ai.followupSuggestions.map((s, i) => (
                     <button key={i} className="w-full text-left card !rounded-xl px-2.5 py-2 hover:bg-white/5 transition-colors" onClick={() => fillSuggestion(s)}>
@@ -628,9 +682,9 @@ export default function LeadDrawer() {
                     </button>
                   ))}
                 </div>
-              </div>
+              </details>
             )}
-          </section>
+          </details>
         </div>
         </div>
       </aside>
