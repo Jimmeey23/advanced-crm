@@ -18,6 +18,10 @@ import RespondioTemplateModal from '../components/RespondioTemplateModal.jsx'
 import ColumnManager, { DEFAULT_COLUMNS } from '../components/ColumnManager.jsx'
 
 const COLUMNS_KEY = 'p57_leads_columns_v1'
+const followUpText = value => {
+  const text = String(value ?? '').trim()
+  return text === '-' || text === '\u2014' ? '' : text
+}
 function loadColumns() {
   try {
     const raw = localStorage.getItem(COLUMNS_KEY)
@@ -624,7 +628,7 @@ function TableView({ items, boot, lookup, openLead, changeStage, changeAssociate
 
 function TableGrid({ items, boot, lookup, openLead, changeStage, changeAssociate, changeLeadField, toggleManualFlag, onMessage, onTemplateMessage, selected, toggleSelect, toggleSelectAll, columns, density, rowHeight = 58, tableZoom = 100, colWidths = {}, setColWidths, manualFlagOverrides = {}, headerPinned = true, focusLeadIds = [], clearFocus, sortBy, sortDir, setSortBy, setSortDir }) {
   const cadenceDays = boot?.settings?.cadence?.outreachDays || 7
-  const activeChannels = boot?.settings?.followUpChannels || Object.keys(CHANNELS)
+  const activeChannels = ['fu1', 'fu2', 'fu3', 'fu4']
   const allChecked = items.length > 0 && items.every(l => selected?.has(l.id))
   const visibleCols = (columns || []).filter(c => !c.hidden && c.field !== 'created')
   const py = density === 'compact' ? 'py-1.5' : ''
@@ -636,7 +640,7 @@ function TableGrid({ items, boot, lookup, openLead, changeStage, changeAssociate
   const autoFitColumns = () => {
     const next = { select: 76, lead: 260, stage: 190, createdAt: 140, remarksField: 350, message: 112 }
     for (const c of visibleCols) next[c.id] = c.field === 'owner' ? 180 : c.field === 'score' ? 104 : 145
-    for (const ch of activeChannels) next[`fu_${ch}`] = 54
+    for (const ch of activeChannels) next[ch] = 54
     setColWidths?.(next)
   }
   const startResize = (id, fallback) => (e) => {
@@ -656,7 +660,7 @@ function TableGrid({ items, boot, lookup, openLead, changeStage, changeAssociate
     window.addEventListener('mouseup', onUp)
   }
   return (
-    <div className="lead-table-scroll scrollbar-thin" style={{ '--lead-row-height': `${rowHeight}px`, '--lead-table-zoom': tableZoom / 100 }}>
+    <div className="lead-table-scroll scrollbar-thin" style={{ '--lead-row-height': `${rowHeight}px`, zoom: tableZoom / 100 }}>
       {focusLeadIds.length > 0 && (
         <div className="px-4 pt-4 pb-3 flex items-center gap-2">
           <span className="chip bg-rose-500/15 border border-rose-400/25 text-rose-300">{focusLeadIds.length} highlighted lead{focusLeadIds.length === 1 ? '' : 's'}</span>
@@ -681,11 +685,10 @@ function TableGrid({ items, boot, lookup, openLead, changeStage, changeAssociate
               <span className="col-resize-handle" onDoubleClick={autoFitColumns} onMouseDown={startResize('remarksField', widthOf('remarksField', 350))} title="Drag to resize column. Double-click to auto-fit all columns." />
             </th>
             {activeChannels.map((ch, i) => {
-              const c = channelMeta(ch)
               return (
-              <th key={ch} className="resizable-th px-2 py-3 font-semibold text-center" style={{ width: widthOf(`fu_${ch}`, 56), minWidth: widthOf(`fu_${ch}`, 56) }} title={`${c.label} follow-up status`}>
+              <th key={ch} className="resizable-th px-2 py-3 font-semibold text-center" style={{ width: widthOf(ch, 56), minWidth: widthOf(ch, 56) }}>
                 <span>FU{i + 1}</span>
-                <span className="col-resize-handle" onDoubleClick={autoFitColumns} onMouseDown={startResize(`fu_${ch}`, widthOf(`fu_${ch}`, 56))} title="Drag to resize column. Double-click to auto-fit all columns." />
+                <span className="col-resize-handle" onDoubleClick={autoFitColumns} onMouseDown={startResize(ch, widthOf(ch, 56))} title="Drag to resize column. Double-click to auto-fit all columns." />
               </th>
               )
             })}
@@ -791,9 +794,9 @@ function TableGrid({ items, boot, lookup, openLead, changeStage, changeAssociate
                 <td className={`px-4 ${py}`}>
                   <InlineRemark lead={l} onSave={remarks => changeLeadField(l, { remarks })} />
                 </td>
-                {activeChannels.map(ch => (
+                {activeChannels.map((ch, fuIndex) => (
                   <td key={ch} className="px-1 text-center" onClick={e => e.stopPropagation()}>
-                    <FuCell lead={l} ch={ch} forceMissed={cadenceMissedOpen} />
+                    <FuCell lead={l} fuIndex={fuIndex} forceMissed={cadenceMissedOpen} />
                   </td>
                 ))}
                 <td className="px-4 text-left" onClick={e => e.stopPropagation()}>
@@ -911,20 +914,21 @@ function ScoreDetailsPopover({ tip, onClose }) {
   )
 }
 
-function FuCell({ lead, ch, forceMissed = false }) {
-  const o = lead.fu?.outreach?.[ch]
-  const filled = !!o?.filled
-  const missed = filled && o?.pending
+function FuCell({ lead, fuIndex, forceMissed = false }) {
+  const followUpItem = lead.followUps && lead.followUps[fuIndex];
+  const comments = followUpText(followUpItem?.comments)
+  const filled = Boolean(comments)
+  const scheduledDate = followUpText(followUpItem?.date) || null
+  const isDone = filled && followUpItem?.done !== false
+
   const today = new Date().toISOString().slice(0, 10)
-  const isMissed = missed && missed < today
-  // channelOutreach() (server/ai.js) only tracks entries that already have a
-  // comment logged, so a follow-up scheduled on this channel but never
-  // actioned (no comment yet) is invisible to `o` — check the lead's raw
-  // follow-ups directly so an overdue-but-never-logged one still shows red
-  // instead of silently looking identical to "never scheduled."
-  const hasOverduePending = forceMissed || (!filled && (lead.followUps || []).some(f => f.channel === ch && f.done === false && f.date && f.date !== '-' && f.date < today))
-  const meta = channelMeta(ch)
-  const Icon = meta.icon
+  const isMissed = !filled && scheduledDate && scheduledDate !== '-' && scheduledDate < today && !isDone;
+
+  const hasOverduePending = forceMissed || isMissed
+
+  const channel = followUpItem && followUpItem.channel ? followUpItem.channel : 'other';
+  const meta = channelMeta(channel)
+  const Icon = meta.icon || FileText
   const anchorRef = useRef(null)
   const [popOpen, setPopOpen] = useState(false)
   const [pos, setPos] = useState(null)
@@ -937,33 +941,34 @@ function FuCell({ lead, ch, forceMissed = false }) {
   }
 
   const boxClass = filled
-    ? (isMissed ? 'border-rose-400/50 bg-rose-400/15' : 'border-emerald-400/50 bg-emerald-400/15')
+    ? 'border-emerald-400/50 bg-emerald-400/15'
     : hasOverduePending
       ? 'border-rose-400/50 bg-rose-400/15'
-      : 'border-white/8 bg-white/[0.03]'
-  const iconColor = filled ? (isMissed ? 'var(--fu-rose)' : 'var(--fu-emerald)') : hasOverduePending ? 'var(--fu-rose)' : 'var(--fu-slate)'
+      : (scheduledDate && scheduledDate !== '-' ? 'border-sky-400/50 bg-sky-400/15' : 'border-white/8 bg-white/[0.03]')
+
+  const iconColor = filled ? 'var(--fu-emerald)' : hasOverduePending ? 'var(--fu-rose)' : (scheduledDate && scheduledDate !== '-' ? 'var(--fu-sky, #38bdf8)' : 'var(--fu-slate)')
   const title = filled
-    ? `Last ${meta.label}: ${o.date} — click to log another`
+    ? `Completed: ${comments}`
     : hasOverduePending
-      ? `${meta.label} follow-up overdue — click to log`
-      : `No ${meta.label} logged — click to log`
+      ? `Follow-up overdue for ${scheduledDate}`
+      : (scheduledDate && scheduledDate !== '-' ? `Scheduled for ${scheduledDate}` : 'No follow-up')
 
   return (
     <>
-      <Tip content={<FuTip lead={lead} ch={ch} o={o} isMissed={isMissed || hasOverduePending} />}>
+      <Tip content={<FuTip lead={lead} followUpItem={followUpItem} isMissed={isMissed || hasOverduePending} />}>
         <span
           ref={anchorRef}
           onClick={openPopover}
           className={`fu-cell-box inline-flex w-7 h-7 rounded-lg items-center justify-center border transition-all cursor-pointer hover:brightness-125 hover:-translate-y-px hover:shadow-md ${boxClass}`}
           title={title}
         >
-          {!filled && !hasOverduePending
-            ? <XCircle size={12} style={{ color: iconColor }} />
-            : <Icon size={12} style={{ color: iconColor }} />}
+          {filled || (scheduledDate && scheduledDate !== '-')
+            ? <Icon size={12} style={{ color: iconColor }} />
+            : <XCircle size={12} style={{ color: iconColor }} />}
         </span>
       </Tip>
       {popOpen && pos && createPortal(
-        <QuickFollowUpPopover lead={lead} ch={ch} pos={pos} onClose={() => setPopOpen(false)} />,
+        <QuickFollowUpPopover lead={lead} fuIndex={fuIndex} followUpItem={followUpItem} pos={pos} onClose={() => setPopOpen(false)} />,
         document.body
       )}
     </>
@@ -973,9 +978,10 @@ function FuCell({ lead, ch, forceMissed = false }) {
 // Lightweight click-triggered popover for logging a single follow-up without
 // opening the full LeadDrawer. Posts to the same endpoint/payload shape as
 // LeadDrawer's addFollowUp (see src/components/LeadDrawer.jsx ~line 87).
-function QuickFollowUpPopover({ lead, ch, pos, onClose }) {
+function QuickFollowUpPopover({ lead, fuIndex, followUpItem, pos, onClose }) {
   const { toast, refreshData } = useApp()
-  const [channel, setChannel] = useState(ch)
+  const channelAssigned = followUpItem && followUpItem.channel ? followUpItem.channel : 'call'
+  const [channel, setChannel] = useState(channelAssigned)
   const [comments, setComments] = useState('')
   const [saving, setSaving] = useState(false)
   const boxRef = useRef(null)
@@ -999,7 +1005,8 @@ function QuickFollowUpPopover({ lead, ch, pos, onClose }) {
       await api.post(`/api/leads/${lead.id}/followups`, {
         date: new Date().toISOString().slice(0, 10),
         comments: comments.trim(),
-        channel
+        channel,
+        replaceId: followUpItem ? followUpItem.id : undefined // Custom arg so the backend can replace the pending item directly
       })
       toast('Follow-up logged')
       refreshData()
@@ -1061,8 +1068,11 @@ function QuickFollowUpPopover({ lead, ch, pos, onClose }) {
   )
 }
 
-function FuTip({ lead, ch, o, isMissed }) {
-  const meta = channelMeta(ch)
+function FuTip({ lead, followUpItem, isMissed }) {
+  const channel = followUpItem && followUpItem.channel ? followUpItem.channel : 'other';
+  const comments = followUpText(followUpItem?.comments)
+  const date = followUpText(followUpItem?.date)
+  const meta = channelMeta(channel)
   return (
     <div className="space-y-1.5 min-w-[220px]">
       <div className="flex items-center gap-2">
@@ -1071,10 +1081,10 @@ function FuTip({ lead, ch, o, isMissed }) {
         </span>
         <span className="text-[12px] font-bold text-white">{meta.label}</span>
         {isMissed && <span className="chip !px-1.5 !py-0.5 text-[9px] bg-rose-500/20 text-rose-300">missed</span>}
-        {o?.filled && !isMissed && <span className="chip !px-1.5 !py-0.5 text-[9px] bg-emerald-500/15 text-emerald-300">done</span>}
-        {o?.date && <span className="ml-auto text-[11px] text-slate-500 mono">{fmtDate(o.date)}</span>}
+        {comments && !isMissed && <span className="chip !px-1.5 !py-0.5 text-[9px] bg-emerald-500/15 text-emerald-300">done</span>}
+        {date && <span className="ml-auto text-[11px] text-slate-500 mono">{fmtDate(date)}</span>}
       </div>
-      <div className="text-[11.5px] text-slate-400 leading-relaxed">{o?.comments || `No ${meta.label} follow-up logged yet.`}</div>
+      <div className="text-[11.5px] text-slate-400 leading-relaxed">{comments || `No ${meta.label} follow-up logged yet.`}</div>
     </div>
   )
 }

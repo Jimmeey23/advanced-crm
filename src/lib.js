@@ -45,6 +45,27 @@ export const initials = (name) =>
 
 const normalizedStage = (stage) => String(stage || 'Unspecified').trim().toLocaleLowerCase('en-IN').replace(/\s+/g, ' ')
 
+const STAGE_BADGE_PALETTE = [
+  { solid: '#3b82f6', badge: '#2563eb', hover: '#1d4ed8' }, // cobalt
+  { solid: '#8b5cf6', badge: '#7c3aed', hover: '#6d28d9' }, // violet
+  { solid: '#ec4899', badge: '#be185d', hover: '#9d174d' }, // magenta
+  { solid: '#14b8a6', badge: '#0f766e', hover: '#115e59' }, // teal
+  { solid: '#f97316', badge: '#c2410c', hover: '#9a3412' }, // orange
+  { solid: '#06b6d4', badge: '#0e7490', hover: '#155e75' }  // cyan
+]
+
+const semanticStageColor = (key) => {
+  if (/won|enrolled|membership purchased|converted/.test(key)) return { solid: '#10b981', badge: '#047857', hover: '#065f46' }
+  if (/lost|not interested|disqual|declined/.test(key)) return { solid: '#f43f5e', badge: '#be123c', hover: '#9f1239' }
+  if (/trial completed|positive trial/.test(key)) return { solid: '#14b8a6', badge: '#0f766e', hover: '#115e59' }
+  if (/trial scheduled|trial booked|trial rescheduled/.test(key)) return { solid: '#06b6d4', badge: '#0e7490', hover: '#155e75' }
+  if (/unresponsive|no response|not answering|did not answer/.test(key)) return { solid: '#f97316', badge: '#c2410c', hover: '#9a3412' }
+  if (/follow.?up|will get back|later date/.test(key)) return { solid: '#a855f7', badge: '#7e22ce', hover: '#6b21a8' }
+  if (/proposal|pricing|package|payment|exclusive deal/.test(key)) return { solid: '#ec4899', badge: '#be185d', hover: '#9d174d' }
+  if (/new enquiry|initial contact|introductory/.test(key)) return { solid: '#3b82f6', badge: '#2563eb', hover: '#1d4ed8' }
+  return null
+}
+
 export const stageColor = (stage) => {
   const key = normalizedStage(stage)
   let hash = 2166136261
@@ -53,15 +74,16 @@ export const stageColor = (stage) => {
     hash = Math.imul(hash, 16777619)
   }
   const unsigned = hash >>> 0
-  const hue = ((unsigned / 0xffffffff) * 360).toFixed(2)
-  const saturation = 68 + (unsigned % 13)
+  const color = semanticStageColor(key) || STAGE_BADGE_PALETTE[unsigned % STAGE_BADGE_PALETTE.length]
   return {
-    solid: `hsl(${hue} ${saturation}% 52%)`,
-    background: `hsl(${hue} ${saturation}% 52% / .16)`,
-    border: `hsl(${hue} ${saturation}% 62% / .46)`,
-    ink: `hsl(${hue} 88% 82%)`,
-    lightInk: `hsl(${hue} 76% 31%)`,
-    lightBackground: `hsl(${hue} ${saturation}% 48% / .13)`
+    solid: color.solid,
+    badge: color.badge,
+    badgeHover: color.hover,
+    background: `color-mix(in srgb, ${color.solid} 16%, transparent)`,
+    border: `color-mix(in srgb, ${color.solid} 46%, transparent)`,
+    ink: `color-mix(in srgb, ${color.solid} 35%, white)`,
+    lightInk: color.badge,
+    lightBackground: `color-mix(in srgb, ${color.solid} 13%, transparent)`
   }
 }
 
@@ -69,6 +91,8 @@ export const stageBadgeStyle = (stage) => {
   const color = stageColor(stage)
   return {
     '--stage-solid': color.solid,
+    '--stage-badge-bg': color.badge,
+    '--stage-badge-hover': color.badgeHover,
     '--stage-bg': color.background,
     '--stage-border': color.border,
     '--stage-ink': color.ink,

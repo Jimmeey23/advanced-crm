@@ -21,6 +21,7 @@ import { resolveLeadFields, buildLeadPayloadFromResolved, suggestMappingFromKeys
 import * as googleSheets from './googleSheets.js'
 import * as zohoPeople from './zohoPeople.js'
 import { findDuplicateAmong, clusterDuplicates } from './duplicateMatch.js'
+import { normalizeFollowUpFields } from './followUps.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -583,14 +584,38 @@ app.patch('/api/leads/:id', (req, res) => {
 app.post('/api/leads/:id/followups', (req, res) => {
   const lead = leadById(req.params.id)
   if (!lead) return res.status(404).json({ error: 'Lead not found' })
-  const fu = {
-    id: uid('fu'),
-    date: req.body.date || new Date().toISOString().slice(0, 10),
-    comments: req.body.comments || '',
-    channel: (db.settings.followUpChannels || ['call', 'whatsapp', 'email', 'sms', 'in_person']).includes(req.body.channel) ? req.body.channel : null,
-    done: Boolean(req.body.done)
+  lead.followUps = lead.followUps || []
+  const normalized = normalizeFollowUpFields(req.body.date, req.body.comments)
+  if (!req.body.replaceId && !normalized.date && !normalized.comments) {
+    return res.status(400).json({ error: 'Follow-up date or comments are required' })
   }
-  lead.followUps.push(fu)
+
+  if (req.body.replaceId) {
+    const existingIndex = lead.followUps.findIndex(f => f.id === req.body.replaceId)
+    if (existingIndex !== -1) {
+      lead.followUps[existingIndex] = {
+        ...lead.followUps[existingIndex],
+        date: normalized.date || lead.followUps[existingIndex].date,
+        comments: normalized.comments,
+        channel: req.body.channel || lead.followUps[existingIndex].channel,
+        done: Boolean(normalized.comments) && (req.body.done !== undefined ? Boolean(req.body.done) : true)
+      }
+    } else {
+      req.body.replaceId = undefined
+    }
+  }
+
+  if (!req.body.replaceId) {
+    const fu = {
+      id: uid('fu'),
+      date: normalized.date || new Date().toISOString().slice(0, 10),
+      comments: normalized.comments,
+      channel: (db.settings.followUpChannels || ['call', 'whatsapp', 'email', 'sms', 'in_person']).includes(req.body.channel) ? req.body.channel : 'other',
+      done: Boolean(normalized.comments) && (req.body.done !== undefined ? Boolean(req.body.done) : true)
+    }
+    lead.followUps.push(fu)
+  }
+
   lead.lastActivityAt = nowIso()
   markDirty(lead.id)
   save()
@@ -1092,13 +1117,14 @@ app.post('/api/leads/import/apply', (req, res) => {
       const followUps = (mapping.followUps || [])
         .filter(p => p.date || p.comments)
         .map((p, idx) => {
-          const date = p.date ? parseFlexibleDate(row[p.date]) : null
+          const raw = normalizeFollowUpFields(p.date ? row[p.date] : '', p.comments ? row[p.comments] : '')
+          const date = raw.date ? parseFlexibleDate(raw.date) : null
           return {
             id: uid('fu'),
             date,
-            comments: p.comments && row[p.comments] && row[p.comments] !== '-' ? String(row[p.comments]) : '',
+            comments: raw.comments,
             channel: fuChannels[idx % fuChannels.length],
-            done: date ? date <= todayKey : true
+            done: Boolean(raw.comments) && (date ? date <= todayKey : true)
           }
         })
         .filter(p => p.date || p.comments)
@@ -3355,9 +3381,13 @@ function backfillFollowUps(db) {
     let changed = false
     lead.followUps = (lead.followUps || []).map((f, idx) => {
       const patch = {}
+      const normalized = normalizeFollowUpFields(f.date, f.comments)
+      if (normalized.date !== f.date) patch.date = normalized.date
+      if (normalized.comments !== f.comments) patch.comments = normalized.comments
       if (!f.id) patch.id = uid('fu')
       if (!f.channel) patch.channel = fuChannels[idx % fuChannels.length]
-      if (f.done === undefined) patch.done = f.date && f.date !== '-' ? f.date <= todayKey : true
+      const shouldBeDone = Boolean(normalized.comments) && (normalized.date ? normalized.date <= todayKey : true)
+      if (f.done === undefined || f.done !== shouldBeDone) patch.done = shouldBeDone
       if (Object.keys(patch).length) { changed = true; return { ...f, ...patch } }
       return f
     })

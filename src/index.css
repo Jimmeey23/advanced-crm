@@ -240,18 +240,20 @@ select.input option { background: #141829; color: #e6e8f0; }
 
 /* stage colors */
 .stage-badge {
-  color: var(--stage-ink) !important;
-  background: var(--stage-bg) !important;
-  border: 1px solid var(--stage-border) !important;
-  box-shadow: inset 0 1px 0 rgb(255 255 255 / .06);
-  font-weight: 800;
+  color: #fff !important;
+  background: var(--stage-badge-bg) !important;
+  border: 1px solid rgb(255 255 255 / .16) !important;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / .16), 0 2px 5px rgb(2 6 23 / .18);
+  font-weight: 650;
+  letter-spacing: -.01em;
+  border-radius: 6px !important;
 }
 .pipeline-stage-badge {
   display: block;
   max-width: 220px;
   overflow: hidden;
   padding: 4px 8px;
-  border-radius: 7px;
+  border-radius: 6px;
   font-family: var(--font-display, inherit);
   font-size: 11.5px;
   line-height: 1.25;
@@ -259,9 +261,9 @@ select.input option { background: #141829; color: #e6e8f0; }
   white-space: nowrap;
 }
 html[data-theme="light"] .stage-badge {
-  color: var(--stage-light-ink) !important;
-  background: var(--stage-light-bg) !important;
-  border-color: var(--stage-border) !important;
+  color: #fff !important;
+  background: var(--stage-badge-bg) !important;
+  border-color: rgb(15 23 42 / .08) !important;
 }
 .stage-new { background: rgba(59,130,246,0.14); color: #93c5fd; border: 1px solid rgba(59,130,246,0.3); }
 .stage-contacted { background: rgba(99,102,241,0.14); color: #a5b4fc; border: 1px solid rgba(99,102,241,0.3); }
@@ -1420,7 +1422,7 @@ html[data-theme="light"] .modal-panel .text-slate-500 {
 }
 .leads-data-table {
   table-layout: fixed;
-  font-size: calc(13px * var(--lead-table-zoom, 1));
+  font-size: 13px;
 }
 .leads-data-table th,
 .leads-data-table td {
@@ -4378,90 +4380,81 @@ html[data-theme="light"] .momence-bar-row strong { color: #1e293b; }
 
 /* Exact-stage select colors. Keep after historical light-mode input filters. */
 .stage-select.stage-badge {
-  color: var(--stage-ink) !important;
-  background: var(--stage-bg) !important;
-  border-color: var(--stage-border) !important;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .08), 0 2px 5px rgba(2, 6, 23, .12) !important;
+  color: #fff !important;
+  background: var(--stage-badge-bg) !important;
+  border-color: rgb(255 255 255 / .16) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .16), 0 2px 5px rgba(2, 6, 23, .18) !important;
   filter: none !important;
+  border-radius: 8px !important;
 }
 .stage-select.stage-badge:hover,
 .stage-select.stage-badge:focus {
-  color: var(--stage-ink) !important;
-  background: color-mix(in srgb, var(--stage-solid) 22%, #0f172a) !important;
-  border-color: var(--stage-solid) !important;
+  color: #fff !important;
+  background: var(--stage-badge-hover) !important;
+  border-color: rgb(255 255 255 / .18) !important;
   filter: none !important;
 }
-.stage-select-icon { color: var(--stage-ink); }
+.stage-select-icon { color: rgba(255, 255, 255, .82); }
 .stage-select option {
   color: #e2e8f0;
   background: #111827;
   font-weight: 650;
 }
 html[data-theme="light"] .stage-select.stage-badge {
-  color: var(--stage-light-ink) !important;
-  background: var(--stage-light-bg) !important;
-  border-color: var(--stage-border) !important;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .8), 0 2px 5px rgba(15, 23, 42, .08) !important;
+  color: var(--stage-badge-bg) !important;
+  background: #fff !important;
+  border-color: color-mix(in srgb, var(--stage-solid) 72%, #fff) !important;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, .06) !important;
   filter: none !important;
 }
 html[data-theme="light"] .stage-select.stage-badge:hover,
 html[data-theme="light"] .stage-select.stage-badge:focus {
-  color: var(--stage-light-ink) !important;
-  background: color-mix(in srgb, var(--stage-solid) 17%, #fff) !important;
+  color: var(--stage-badge-hover) !important;
+  background: color-mix(in srgb, var(--stage-solid) 5%, #fff) !important;
   border-color: var(--stage-solid) !important;
   filter: none !important;
 }
-html[data-theme="light"] .stage-select-icon { color: var(--stage-light-ink); }
+html[data-theme="light"] .stage-select-icon { color: var(--stage-badge-bg); }
 html[data-theme="light"] .stage-select option { color: #0f172a; background: #fff; }
 
-/* Light stage badges: outlined white capsules with a deterministic status mark. */
+/* Light mode: white badges with the stage color carried by type, border and icons. */
 html[data-theme="light"] .stage-badge,
 html[data-theme="light"] .stage-select.stage-badge {
-  color: #0b1220 !important;
+  color: var(--stage-badge-bg) !important;
   background: #fff !important;
-  border-color: #d8dee8 !important;
-  box-shadow: 0 1px 2px rgba(15, 23, 42, .04) !important;
-  font-weight: 720;
+  border-color: color-mix(in srgb, var(--stage-solid) 72%, #fff) !important;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, .06) !important;
+  font-weight: 650;
   filter: none !important;
 }
 html[data-theme="light"] .stage-badge:not(select) {
   display: inline-flex;
   align-items: center;
-  gap: 7px;
-}
-html[data-theme="light"] .stage-badge:not(select)::before {
-  content: "";
-  width: 12px;
-  height: 12px;
-  flex: 0 0 12px;
-  border-radius: 999px;
-  background: radial-gradient(circle at center, #fff 0 2px, transparent 2.3px), color-mix(in srgb, var(--stage-solid) 68%, #0f172a);
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--stage-solid) 52%, #0f172a);
 }
 html[data-theme="light"] .stage-select.stage-badge {
   min-height: 32px;
   padding-top: 0 !important;
   padding-bottom: 0 !important;
-  border-radius: 999px !important;
+  border-radius: 8px !important;
 }
 html[data-theme="light"] .stage-select.stage-badge:hover {
-  color: #0f172a !important;
-  background: #f8fafc !important;
-  border-color: #aeb8c7 !important;
+  color: var(--stage-badge-hover) !important;
+  background: color-mix(in srgb, var(--stage-solid) 5%, #fff) !important;
+  border-color: var(--stage-solid) !important;
 }
 html[data-theme="light"] .stage-select.stage-badge:focus {
-  color: #0f172a !important;
+  color: var(--stage-badge-bg) !important;
   background: #fff !important;
   border-color: var(--stage-solid) !important;
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--stage-solid) 13%, transparent) !important;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--stage-solid) 16%, transparent) !important;
 }
 html[data-theme="light"] .stage-select-icon {
-  color: color-mix(in srgb, var(--stage-solid) 62%, #0f172a);
+  color: var(--stage-badge-bg);
   stroke-width: 2.4;
 }
 html[data-theme="light"] .pipeline-stage-badge {
-  padding: 5px 10px;
-  border-radius: 999px;
+  padding: 4px 8px;
+  border-radius: 6px;
   font-size: 11px;
   line-height: 1.2;
 }

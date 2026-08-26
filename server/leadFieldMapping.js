@@ -3,6 +3,7 @@
 // go through this. Keeping it in one module means both features get the
 // same alias dictionary and manual-mapping/defaults precedence for free.
 import { parseFlexibleDate } from './csv.js'
+import { normalizeFollowUpFields } from './followUps.js'
 
 // Every Lead field an external source is allowed to populate, and the
 // common third-party key spellings that map to it automatically. This
@@ -160,7 +161,8 @@ export function extractFollowUps(record) {
   return Object.keys(byIndex)
     .sort((a, b) => Number(a) - Number(b))
     .map(i => byIndex[i])
-    .filter(f => String(f.date || '').trim() || String(f.comments || '').trim())
+    .map(f => normalizeFollowUpFields(f.date, f.comments))
+    .filter(f => f.date || f.comments)
     .map((f, i) => {
       // A date in the past means this follow-up already happened; a future
       // date means it's still pending — hardcoding "done" regardless of the
@@ -171,10 +173,10 @@ export function extractFollowUps(record) {
       const todayKey = new Date().toISOString().slice(0, 10)
       return {
         id: `fu_import_${Date.now().toString(36)}_${i}`,
-        date: normalizedDate || (f.date ? String(f.date).trim() : ''),
-        comments: f.comments ? String(f.comments).trim() : '',
+        date: normalizedDate || f.date,
+        comments: f.comments,
         channel: null,
-        done: normalizedDate ? normalizedDate <= todayKey : true
+        done: Boolean(f.comments) && (normalizedDate ? normalizedDate <= todayKey : true)
       }
     })
 }

@@ -15,6 +15,10 @@ import RespondioTemplateModal from './RespondioTemplateModal.jsx'
 
 const R_CHANNELS = { whatsapp: '#34d399', sms: '#fbbf24', email: '#a78bfa', call: '#38bdf8' }
 const MIN_DRAWER_WIDTH = 560
+const followUpText = value => {
+  const text = String(value ?? '').trim()
+  return text === '-' || text === '\u2014' ? '' : text
+}
 
 export default function LeadDrawer() {
   const { boot, lookup, drawerLeadId, closeLead, refreshData, toast, dataVersion } = useApp()
@@ -231,7 +235,7 @@ export default function LeadDrawer() {
   // placeholder row (common in imported data with a fixed number of
   // follow-up columns, most left empty) — nothing happened on it, so it
   // shouldn't render as a timeline entry at all, let alone as "done".
-  const realFollowUps = (lead.followUps || []).filter(f => (f.date && f.date !== '-') || (f.comments && f.comments !== '-'))
+  const realFollowUps = (lead.followUps || []).filter(f => followUpText(f.date) || followUpText(f.comments))
 
   const cadence = boot?.settings?.cadence || {}
   const outreachDays = cadence.outreachDays || 7
@@ -653,13 +657,13 @@ export default function LeadDrawer() {
             <div className="space-y-0 mb-4">
               {realFollowUps.slice().reverse().map((f, i) => (
                 <div key={f.id || i} className="relative pl-5 pb-4 border-l border-white/10 last:border-0 last:pb-0">
-                  <span className={`absolute left-[-5px] top-1 w-2.5 h-2.5 rounded-full ${f.done ? 'bg-emerald-400' : 'bg-amber-400'}`} />
+                  <span className={`absolute left-[-5px] top-1 w-2.5 h-2.5 rounded-full ${f.done && followUpText(f.comments) ? 'bg-emerald-400' : 'bg-amber-400'}`} />
                   <div className="text-[11px] text-slate-500 flex items-center gap-2">
                     <span className="mono">{fmtDate(f.date)}</span>
-                    {f.done && <span className="flex items-center gap-0.5 text-emerald-400"><CheckCircle2 size={11} /> done</span>}
+                    {f.done && followUpText(f.comments) && <span className="flex items-center gap-0.5 text-emerald-400"><CheckCircle2 size={11} /> done</span>}
                     {!f.done && f.date && f.date < todayStr && <span className="chip !px-1.5 !py-0.5 text-[9px] bg-rose-500/20 text-rose-300">overdue</span>}
                   </div>
-                  {f.comments && f.comments !== '-' && <p className="text-[12.5px] text-slate-300 mt-0.5 leading-relaxed">{f.comments}</p>}
+                  {followUpText(f.comments) && <p className="text-[12.5px] text-slate-300 mt-0.5 leading-relaxed">{followUpText(f.comments)}</p>}
                 </div>
               ))}
               {!realFollowUps.length && <p className="text-[12px] text-slate-500 mb-3">No follow-ups logged yet.</p>}
