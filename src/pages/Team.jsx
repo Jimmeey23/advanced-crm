@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import { Plus, MapPin, Users, Target, TrendingUp, Crown, Swords, Pencil, UserMinus, RotateCcw } from 'lucide-react'
+import { Plus, MapPin, Users, Target, TrendingUp, Crown, Swords, Pencil, UserMinus, RotateCcw, UserCog } from 'lucide-react'
 import { useApp } from '../store.jsx'
 import { useFetch } from '../hooks.js'
 import { api } from '../api.js'
@@ -13,6 +13,7 @@ export default function Team() {
   const [asnModal, setAsnModal] = useState({ open: false, locationId: '' })
   const [faceoffOpen, setFaceoffOpen] = useState(false)
   const [editAsn, setEditAsn] = useState(null)
+  const [manageTeamLocation, setManageTeamLocation] = useState(null)
   const { data: team } = useFetch(() => api.get('/api/analytics/team'), [dataVersion])
   const { data: leadsResp } = useFetch(() => api.get('/api/leads?pageSize=1000'), [dataVersion])
 
@@ -90,9 +91,10 @@ export default function Team() {
                 {!locTeam.length && <p className="text-[11.5px] text-slate-600">No associates yet.</p>}
               </div>
 
-              <button className="btn btn-ghost w-full !py-1.5 !text-[12px] mt-3" onClick={() => setAsnModal({ open: true, locationId: loc.id })}>
-                <Plus size={13} /> Add associate
-              </button>
+              <div className="grid grid-cols-2 gap-2 mt-3">
+                <button className="btn btn-ghost !py-1.5 !text-[12px]" onClick={() => setManageTeamLocation(loc)}><UserCog size={13} /> Manage team</button>
+                <button className="btn btn-ghost !py-1.5 !text-[12px]" onClick={() => setAsnModal({ open: true, locationId: loc.id })}><Plus size={13} /> New associate</button>
+              </div>
             </div>
           )
         })}
@@ -101,9 +103,49 @@ export default function Team() {
       <LocationModal modal={locModal} onClose={() => setLocModal({ open: false, location: null })} onSaved={(edited) => { refreshData(); toast(edited ? 'Studio updated' : 'Studio added') }} />
       <AssociateModal modal={asnModal} onClose={() => setAsnModal(m => ({ ...m, open: false }))} onSaved={() => { refreshData(); toast('Associate added') }} />
       <EditAssociateModal associate={editAsn} onClose={() => setEditAsn(null)} onSaved={() => { refreshData(); toast('Associate updated') }} />
+      <LocationTeamModal location={manageTeamLocation} associates={boot?.associates || []} onClose={() => setManageTeamLocation(null)} onSaved={() => { refreshData(); toast('Studio team assignments updated') }} />
       <AssociateCompareModal open={faceoffOpen} onClose={() => setFaceoffOpen(false)} />
     </div>
   )
+}
+
+function LocationTeamModal({ location, associates, onClose, onSaved }) {
+  const [selected, setSelected] = useState(new Set())
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+  React.useEffect(() => {
+    if (!location) return
+    setSelected(new Set(associates.filter(a => (a.locationIds || [a.locationId]).includes(location.id)).map(a => a.id)))
+    setError('')
+  }, [location?.id, associates])
+  if (!location) return null
+  const toggle = (id) => setSelected(current => { const next = new Set(current); next.has(id) ? next.delete(id) : next.add(id); return next })
+  const saveAssignments = async () => {
+    setSaving(true); setError('')
+    try {
+      await Promise.all(associates.map(associate => {
+        const current = associate.locationIds || [associate.locationId].filter(Boolean)
+        const shouldInclude = selected.has(associate.id)
+        const locationIds = shouldInclude ? [...new Set([...current, location.id])] : current.filter(id => id !== location.id)
+        if (locationIds.join('|') === current.join('|')) return Promise.resolve()
+        return api.patch(`/api/associates/${associate.id}`, { locationIds, locationId: locationIds.includes(associate.locationId) ? associate.locationId : locationIds[0] || null })
+      }))
+      onSaved(); onClose()
+    } catch (e) { setError(e.message) }
+    finally { setSaving(false) }
+  }
+  return <Modal open={!!location} onClose={onClose} width={560}>
+    <ModalHeader title={`Manage ${location.name} team`} subtitle="Add existing associates, move coverage, or remove people from this studio" onClose={onClose} />
+    <div className="location-team-list">
+      {associates.map(associate => <button type="button" key={associate.id} className={`location-team-option ${selected.has(associate.id) ? 'is-selected' : ''}`} onClick={() => toggle(associate.id)}>
+        <Avatar name={associate.name} color={associate.color} photoUrl={associate.photoUrl} photoZoom={associate.photoZoom} photoPosX={associate.photoPosX} photoPosY={associate.photoPosY} size={34} />
+        <span><b>{associate.name}</b><small>{associate.role} · {(associate.locationIds || [associate.locationId]).length} studio assignment(s)</small></span>
+        <span className="location-team-check">{selected.has(associate.id) ? 'Assigned' : 'Add'}</span>
+      </button>)}
+    </div>
+    {error && <p className="text-[12px] text-rose-400 mt-3">{error}</p>}
+    <div className="flex justify-end gap-2 pt-4"><button className="btn btn-ghost" onClick={onClose}>Cancel</button><button className="btn btn-primary" disabled={saving} onClick={saveAssignments}>{saving ? 'Saving…' : 'Save assignments'}</button></div>
+  </Modal>
 }
 
 function MiniStat({ icon, label, value, color }) {

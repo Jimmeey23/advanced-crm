@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url'
 import { seed } from './seed.js'
 import * as supabase from './supabaseStore.js'
 import { findDuplicateAmong } from './duplicateMatch.js'
+import { DEFAULT_LEAD_SOURCES, DEFAULT_MARKETING_CHANNELS, DEFAULT_CLASS_TYPES, DEFAULT_FOLLOW_UP_CHANNELS, defaultChannelForSource, uniqueClean } from '../src/leadConfig.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const DATA_DIR = path.join(__dirname, '..', 'data')
@@ -17,6 +18,15 @@ let remoteChangeCb = null
 
 function ensureSettingsShape(target) {
   if (!target.settings) target.settings = {}
+  if ((target.settings.taxonomyVersion || 0) < 2) {
+    target.sources = uniqueClean([...DEFAULT_LEAD_SOURCES, ...(target.sources || [])])
+    target.channels = uniqueClean([...DEFAULT_MARKETING_CHANNELS, ...(target.channels || [])])
+    target.classTypes = uniqueClean([...DEFAULT_CLASS_TYPES, ...(target.classTypes || [])])
+    target.settings.followUpChannels = uniqueClean([...DEFAULT_FOLLOW_UP_CHANNELS, ...(target.settings.followUpChannels || [])])
+    target.settings.business = target.settings.business || {}
+    target.settings.business.sourceChannelMap = Object.fromEntries(target.sources.map(source => [source, target.settings.business.sourceChannelMap?.[source] || defaultChannelForSource(source)]))
+    target.settings.taxonomyVersion = 2
+  }
   if (!target.settings.zohoPeople) {
     target.settings.zohoPeople = {
       clientId: '', clientSecret: '', refreshToken: '', accessToken: '', tokenExpiresAt: '',
@@ -71,7 +81,10 @@ export function load() {
   }
   // An existing db.json predates a settings key added later — fill it in
   // rather than requiring a manual migration or crashing on the missing key.
-  return ensureSettingsShape(state)
+  const taxonomyVersion = state.settings?.taxonomyVersion || 0
+  ensureSettingsShape(state)
+  if (taxonomyVersion !== state.settings.taxonomyVersion) writeFile()
+  return state
 }
 
 let saveTimer = null

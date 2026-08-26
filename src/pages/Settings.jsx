@@ -16,6 +16,8 @@ import { useApp } from '../store.jsx'
 import { api } from '../api.js'
 import { Spinner, Modal, ModalHeader } from '../ui.jsx'
 import FieldMappingEditor from '../components/FieldMappingEditor.jsx'
+import { DEFAULT_COLUMNS } from '../components/ColumnManager.jsx'
+import { DEFAULT_LEAD_SOURCES, DEFAULT_MARKETING_CHANNELS, DEFAULT_CLASS_TYPES, DEFAULT_FOLLOW_UP_CHANNELS, defaultChannelForSource, uniqueClean } from '../leadConfig.js'
 
 const ACCENTS = [
   { id: 'crimson', label: 'Crimson', from: '#be123c', to: '#f43f5e' },
@@ -61,7 +63,9 @@ export default function SettingsPage() {
   const [sources, setSources] = useState(boot?.sources || [])
   const [channels, setChannels] = useState(boot?.channels || [])
   const [classTypes, setClassTypes] = useState(boot?.classTypes || [])
-  const [fuChannels, setFuChannels] = useState(settings.followUpChannels || ['call', 'whatsapp', 'email', 'sms'])
+  const [fuChannels, setFuChannels] = useState(settings.followUpChannels || DEFAULT_FOLLOW_UP_CHANNELS)
+  const [sourceChannelMap, setSourceChannelMap] = useState(settings.business?.sourceChannelMap || {})
+  const [leadColumns, setLeadColumns] = useState(settings.leadColumns || DEFAULT_COLUMNS)
 
   const [locations, setLocations] = useState(boot?.locations || [])
   const [associates, setAssociates] = useState(boot?.associates || [])
@@ -175,7 +179,9 @@ export default function SettingsPage() {
       setUi(boot.settings.ui || {})
       setRr(boot.settings.roundRobin || {})
       setRem(boot.settings.reminders || {})
-      setFuChannels(boot.settings.followUpChannels || ['call', 'whatsapp', 'email', 'sms'])
+      setFuChannels(boot.settings.followUpChannels || DEFAULT_FOLLOW_UP_CHANNELS)
+      setSourceChannelMap(boot.settings.business?.sourceChannelMap || {})
+      setLeadColumns(boot.settings.leadColumns || DEFAULT_COLUMNS)
       setWabaTemplates(boot.settings.respondio?.wabaTemplates || [
         { id: 'welcome', label: 'Welcome / First Reply', name: 'welcome_message', language: 'en', category: 'marketing', namespace: '', parameters: ['First name', 'Studio name'] },
         { id: 'trial', label: 'Trial Booking Follow-up', name: 'trial_booking_followup', language: 'en', category: 'utility', namespace: '', parameters: ['First name', 'Trial date', 'Studio name'] }
@@ -224,7 +230,7 @@ export default function SettingsPage() {
     try {
       await api.put('/api/settings', {
         org, business, cadence, notifications: notif, ai: aiSet, ui, roundRobin: rr, reminders: rem,
-        followUpChannels: fuChannels,
+        followUpChannels: fuChannels, leadColumns,
         ...extra
       })
       refreshData()
@@ -235,7 +241,10 @@ export default function SettingsPage() {
 
   const saveLists = async () => {
     try {
+      const normalizedSourceChannelMap = Object.fromEntries(sources.map(source => [source, sourceChannelMap[source] || defaultChannelForSource(source)]))
       await api.put('/api/lists', { stages, sources, channels, classTypes })
+      await api.put('/api/settings', { business: { ...business, sourceChannelMap: normalizedSourceChannelMap }, followUpChannels: fuChannels, leadColumns })
+      setSourceChannelMap(normalizedSourceChannelMap)
       refreshData()
       toast('Lead options updated')
     } catch (e) { toast(e.message, 'error') }
@@ -672,23 +681,20 @@ export default function SettingsPage() {
               <TagEditor items={stages} onChange={setStages} placeholder="Stage name" />
             </Section>
             <Section icon={<ListChecks size={15} className="text-violet-400" />} title="Lead sources" desc="Where leads come from.">
-              <TagEditor items={sources} onChange={setSources} placeholder="Source name" />
+              <TagEditor items={sources} onChange={setSources} placeholder="Source name" allowBulk defaults={DEFAULT_LEAD_SOURCES} />
             </Section>
             <Section icon={<ListChecks size={15} className="text-emerald-400" />} title="Marketing channels" desc="Channel grouping used in reports.">
-              <TagEditor items={channels} onChange={setChannels} placeholder="Channel name" />
+              <TagEditor items={channels} onChange={setChannels} placeholder="Channel name" allowBulk defaults={DEFAULT_MARKETING_CHANNELS} />
+              <SourceChannelMapper sources={sources} channels={channels} value={sourceChannelMap} onChange={setSourceChannelMap} />
             </Section>
             <Section icon={<ListChecks size={15} className="text-amber-400" />} title="Class types" desc="Fitness formats offered at the studios.">
-              <TagEditor items={classTypes} onChange={setClassTypes} placeholder="Class name" />
+              <TagEditor items={classTypes} onChange={setClassTypes} placeholder="Class name" allowBulk defaults={DEFAULT_CLASS_TYPES} />
             </Section>
-            <Section icon={<ListChecks size={15} className="text-rose-400" />} title="Follow-up channels" desc="The 4 outreach indicators shown in the leads table.">
-              <div className="flex flex-wrap gap-2">
-                {['call', 'whatsapp', 'email', 'sms'].map(ch => (
-                  <button key={ch} onClick={() => setFuChannels(c => c.includes(ch) ? c.filter(x => x !== ch) : [...c, ch])}
-                    className={`btn !py-1.5 !px-3 text-[12px] capitalize ${fuChannels.includes(ch) ? 'btn-soft' : 'btn-ghost'}`}>
-                    <Check size={13} /> {ch}
-                  </button>
-                ))}
-              </div>
+            <Section icon={<ListChecks size={15} className="text-rose-400" />} title="Follow-up channels" desc="Channels available for follow-up cadence and lead activity.">
+              <TagEditor items={fuChannels} onChange={setFuChannels} placeholder="New follow-up channel" defaults={DEFAULT_FOLLOW_UP_CHANNELS} />
+            </Section>
+            <Section icon={<Filter size={15} className="text-fuchsia-400" />} title="Lead table column definitions" desc="Define each column's data type and create formula, conditional, or dependent columns. Saved definitions become the default table schema.">
+              <LeadColumnSchemaEditor columns={leadColumns} onChange={setLeadColumns} />
             </Section>
             <button className="btn btn-primary" onClick={saveLists}><Save size={14} /> Save lead options</button>
           </>
@@ -756,7 +762,7 @@ export default function SettingsPage() {
               </div>
             </Section>
             <Section icon={<Bell size={15} className="text-amber-400" />} title="Follow-up cadence" desc="Set the interval (and channel) for each of the 4 follow-up steps. A lead idle past its step's day count is flagged as cadence-overdue.">
-              <CadenceSteps steps={cadence.steps || []} onChange={steps => setCadence({ ...cadence, steps })} />
+              <CadenceSteps steps={cadence.steps || []} onChange={steps => setCadence({ ...cadence, steps })} channels={fuChannels} />
             </Section>
             <Section icon={<Zap size={15} className="text-rose-400" />} title="Custom flag rules" desc="Define conditions that, when met, highlight the lead and raise an alert.">
               <CadenceRules rules={cadence.rules || []} onChange={rules => setCadence({ ...cadence, rules })} stages={stages} />
@@ -1514,8 +1520,10 @@ function Field({ label, children }) {
   )
 }
 
-function TagEditor({ items, onChange, placeholder }) {
+function TagEditor({ items, onChange, placeholder, allowBulk = false, defaults = [] }) {
   const [draft, setDraft] = useState('')
+  const [bulkOpen, setBulkOpen] = useState(false)
+  const [bulkDraft, setBulkDraft] = useState('')
   const [editIdx, setEditIdx] = useState(-1)
   const [editVal, setEditVal] = useState('')
 
@@ -1532,6 +1540,11 @@ function TagEditor({ items, onChange, placeholder }) {
     setEditIdx(-1)
   }
   const remove = (v) => onChange(items.filter(x => x !== v))
+  const addBulk = () => {
+    const incoming = bulkDraft.split(/[\n\t,]+/).map(value => value.trim()).filter(Boolean)
+    onChange(uniqueClean([...items, ...incoming]))
+    setBulkDraft(''); setBulkOpen(false)
+  }
 
   return (
     <div>
@@ -1553,14 +1566,57 @@ function TagEditor({ items, onChange, placeholder }) {
       <div className="flex gap-2">
         <input className="input !py-1.5 flex-1" placeholder={placeholder} value={draft} onChange={e => setDraft(e.target.value)} onKeyDown={e => e.key === 'Enter' && add()} />
         <button className="btn btn-ghost !py-1.5" onClick={add}><Plus size={14} /> Add</button>
+        {allowBulk && <button className="btn btn-ghost !py-1.5" onClick={() => setBulkOpen(v => !v)}><ListChecks size={14} /> Bulk add</button>}
+        {!!defaults.length && <button className="btn btn-soft !py-1.5" onClick={() => onChange(uniqueClean([...items, ...defaults]))}><Sparkles size={14} /> Add defaults</button>}
       </div>
+      {bulkOpen && <div className="taxonomy-bulk-panel"><label>Paste one value per line, or separate values with commas or tabs.</label><textarea className="input" rows={7} value={bulkDraft} onChange={e => setBulkDraft(e.target.value)} placeholder={`Paste ${placeholder?.toLowerCase() || 'values'} here…`} /><div><span>{uniqueClean(bulkDraft.split(/[\n\t,]+/)).length} unique values ready</span><button className="btn btn-primary !py-1.5" disabled={!bulkDraft.trim()} onClick={addBulk}><Plus size={13} /> Add all</button></div></div>}
     </div>
   )
 }
 
-const CADENCE_CHANNELS = ['call', 'whatsapp', 'email', 'sms']
+function SourceChannelMapper({ sources, channels, value, onChange }) {
+  const [open, setOpen] = useState(false)
+  const mapped = sources.filter(source => value[source]).length
+  return <div className="source-channel-mapper">
+    <button className="source-channel-mapper-head" onClick={() => setOpen(v => !v)}><span><b>Source → channel grouping</b><small>{mapped} of {sources.length} sources explicitly grouped</small></span><ChevronRight size={14} className={open ? 'rotate-90' : ''} /></button>
+    {open && <div className="source-channel-map-grid">{sources.map(source => <label key={source}><span>{source}</span><select className="input !py-1.5" value={value[source] || defaultChannelForSource(source)} onChange={e => onChange({ ...value, [source]: e.target.value })}>{channels.map(channel => <option key={channel}>{channel}</option>)}</select></label>)}</div>}
+  </div>
+}
 
-function CadenceSteps({ steps, onChange }) {
+const COLUMN_DATA_TYPES = ['text', 'number', 'currency', 'percent', 'date', 'datetime', 'boolean']
+const COLUMN_KINDS = ['base', 'formula', 'conditional', 'dependent']
+const LEAD_FIELD_OPTIONS = ['fullName', 'phone', 'email', 'source', 'owner', 'location', 'score', 'risk', 'valueEstimate', 'classType', 'missedCount', 'lastOutreachDays', 'created', 'remarks', 'stage', 'status', 'statusGroup']
+
+function LeadColumnSchemaEditor({ columns, onChange }) {
+  const patch = (id, changes) => onChange(columns.map(column => column.id === id ? { ...column, ...changes } : column))
+  const add = (kind = 'base') => onChange([...columns, { id: `setting_col_${Date.now()}`, kind, field: kind === 'base' ? 'phone' : '', label: 'New column', type: 'text', hidden: false, formula: '', dependsOn: 'stage', operator: 'equals', expectedValue: '', trueValue: '', falseValue: '' }])
+  return <div className="column-schema-editor">
+    <div className="column-schema-toolbar"><span>{columns.length} configured columns</span>{COLUMN_KINDS.map(kind => <button key={kind} className="btn btn-ghost !py-1.5 capitalize" onClick={() => add(kind)}><Plus size={12} /> {kind}</button>)}</div>
+    <div className="column-schema-list">{columns.map((column, index) => <div className="column-schema-row" key={column.id}>
+      <div className="column-schema-main">
+        <span className="column-schema-order">{index + 1}</span>
+        <input className="input !py-1.5" aria-label="Column label" value={column.label || ''} onChange={e => patch(column.id, { label: e.target.value })} />
+        <select className="input !py-1.5" value={column.kind || 'base'} onChange={e => patch(column.id, { kind: e.target.value })}>{COLUMN_KINDS.map(kind => <option key={kind}>{kind}</option>)}</select>
+        <select className="input !py-1.5" value={column.type || 'text'} onChange={e => patch(column.id, { type: e.target.value })}>{COLUMN_DATA_TYPES.map(type => <option key={type}>{type}</option>)}</select>
+        <button className="btn btn-ghost !p-2 text-rose-300" onClick={() => onChange(columns.filter(item => item.id !== column.id))}><Trash2 size={13} /></button>
+      </div>
+      <div className="column-schema-detail">
+        {column.kind === 'base' && <label><span>Lead field</span><select className="input !py-1.5" value={column.field || 'phone'} onChange={e => patch(column.id, { field: e.target.value })}>{LEAD_FIELD_OPTIONS.map(field => <option key={field}>{field}</option>)}</select></label>}
+        {column.kind === 'formula' && <label className="is-wide"><span>Formula expression</span><input className="input !py-1.5 mono" value={column.formula || ''} onChange={e => patch(column.id, { formula: e.target.value })} placeholder="e.g. valueEstimate * 0.1" /></label>}
+        {(column.kind === 'conditional' || column.kind === 'dependent') && <>
+          <label><span>Depends on</span><select className="input !py-1.5" value={column.dependsOn || 'stage'} onChange={e => patch(column.id, { dependsOn: e.target.value })}>{LEAD_FIELD_OPTIONS.map(field => <option key={field}>{field}</option>)}</select></label>
+          <label><span>Condition</span><select className="input !py-1.5" value={column.operator || 'equals'} onChange={e => patch(column.id, { operator: e.target.value })}><option value="equals">equals</option><option value="not_equals">does not equal</option><option value="contains">contains</option><option value="greater_than">greater than</option><option value="less_than">less than</option><option value="is_empty">is empty</option><option value="is_not_empty">is not empty</option></select></label>
+          {!['is_empty', 'is_not_empty'].includes(column.operator) && <label><span>Compare with</span><input className="input !py-1.5" value={column.expectedValue || ''} onChange={e => patch(column.id, { expectedValue: e.target.value })} /></label>}
+          <label><span>{column.kind === 'dependent' ? 'Field/value when true' : 'Value when true'}</span><input className="input !py-1.5" value={column.trueValue || ''} onChange={e => patch(column.id, { trueValue: e.target.value })} placeholder={column.kind === 'dependent' ? 'e.g. remarks' : 'Displayed value'} /></label>
+          {column.kind === 'conditional' && <label><span>Value when false</span><input className="input !py-1.5" value={column.falseValue || ''} onChange={e => patch(column.id, { falseValue: e.target.value })} /></label>}
+        </>}
+      </div>
+    </div>)}</div>
+    <p className="column-schema-help">Formula fields use lead field names directly. Dependent columns can return another lead field when their condition matches; conditional columns return configured true/false values.</p>
+  </div>
+}
+
+function CadenceSteps({ steps, onChange, channels = DEFAULT_FOLLOW_UP_CHANNELS }) {
   const rows = [0, 1, 2, 3].map(i => steps[i] || { days: 3, channel: 'call', label: `Follow-up ${i + 1}` })
   const update = (i, patch) => {
     const next = rows.map((r, idx) => idx === i ? { ...r, ...patch } : r)
@@ -1574,7 +1630,7 @@ function CadenceSteps({ steps, onChange }) {
           <input className="input !w-16 !py-1.5" type="number" min={1} value={r.days} onChange={e => update(i, { days: Number(e.target.value) || 1 })} />
           <span className="text-[11.5px] text-slate-500 shrink-0">days after previous contact</span>
           <select className="input !w-auto !py-1.5 ml-auto" value={r.channel} onChange={e => update(i, { channel: e.target.value })}>
-            {CADENCE_CHANNELS.map(c => <option key={c} value={c}>{c}</option>)}
+            {channels.map(c => <option key={c} value={c}>{c.replace(/_/g, ' ')}</option>)}
           </select>
           <input className="input !w-40 !py-1.5" value={r.label} onChange={e => update(i, { label: e.target.value })} placeholder="Label" />
         </div>

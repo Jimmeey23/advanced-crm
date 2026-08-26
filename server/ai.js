@@ -145,13 +145,14 @@ function bestContactTime(lead) {
   return 'Midday (12\u20132pm) — try a WhatsApp message first'
 }
 
-const CHANNELS = ['call', 'whatsapp', 'email', 'sms']
+const CHANNELS = ['call', 'whatsapp', 'email', 'sms', 'in_person']
 const CHANNEL_LABEL = { call: 'Call', whatsapp: 'WhatsApp', email: 'Email', sms: 'SMS' }
 
 // Build per-channel outreach summary for the lead.
 function channelOutreach(lead) {
   const out = {}
-  for (const ch of CHANNELS) {
+  const channels = [...new Set([...CHANNELS, ...(lead.followUps || []).map(followUp => followUp.channel).filter(Boolean)])]
+  for (const ch of channels) {
     out[ch] = { filled: false, date: null, comments: null, pending: null }
   }
   const fups = (lead.followUps || []).filter(f => f.comments && f.comments !== '-')

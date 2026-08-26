@@ -1,4 +1,5 @@
 import { uid, nowIso } from './db.js'
+import { DEFAULT_LEAD_SOURCES, DEFAULT_MARKETING_CHANNELS, DEFAULT_CLASS_TYPES, DEFAULT_FOLLOW_UP_CHANNELS } from '../src/leadConfig.js'
 
 function mulberry32(a) {
   return function () {
@@ -71,15 +72,9 @@ export function seed() {
     conversionTargetPct: rand(15, 30)
   }))
 
-  const sources = [
-    'Client Referral', 'Instagram', 'Google Ads', 'Walk-in', 'Website Form',
-    'Facebook', 'Marketing Event', 'WhatsApp Campaign'
-  ]
-  const channels = [
-    'Referrals & Word-of-Mouth', 'Social Media', 'Paid Ads',
-    'In-Studio', 'Organic Search', 'Email Campaign'
-  ]
-  const classTypes = ['Barre 57', 'Cardio 57', 'Sculpt 57', 'Body Blast', 'Total Body 57', 'Reform 57', 'Stretch 57']
+  const sources = [...DEFAULT_LEAD_SOURCES]
+  const channels = [...DEFAULT_MARKETING_CHANNELS]
+  const classTypes = [...DEFAULT_CLASS_TYPES]
 
   const stages = [
     'Membership Sold', 'Trial Completed', 'Shared Pricing & Schedule Details',
@@ -106,7 +101,7 @@ export function seed() {
     'Positive Trial Feedback - Interested in Membership'
   ]
   const openStages = stages.filter(s => !/^Membership Sold$|^Not Interested|^Lead Dropped or Lost$/.test(s))
-  const fuChannels = ['call', 'whatsapp', 'email', 'sms']
+  const fuChannels = [...DEFAULT_FOLLOW_UP_CHANNELS]
 
   const sourceChannel = {
     'Client Referral': 'Referrals & Word-of-Mouth',

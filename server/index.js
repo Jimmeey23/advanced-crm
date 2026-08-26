@@ -104,6 +104,9 @@ function safePatch(lead, body) {
   for (const key of allowed) {
     if (key in body) lead[key] = body[key]
   }
+  if ('sourceName' in body && !('channel' in body)) {
+    lead.channel = db.settings.business?.sourceChannelMap?.[lead.sourceName] || lead.channel || 'Other'
+  }
   if ('stage' in body && body.stage) {
     lead.status = normalizeStatus(body.stage, body.status)
     if (lead.status === 'won' && !lead.convertedAt) lead.convertedAt = new Date().toISOString().slice(0, 10)
@@ -426,13 +429,14 @@ function resolveCreatedAt(raw) {
 }
 
 function createLeadFrom(payload) {
+  const sourceName = payload.sourceName || 'Website Form'
   const lead = {
     id: uid('lead'),
     fullName: (payload.fullName || payload.name || 'Unnamed Lead').trim(),
     phone: payload.phone || '',
     email: payload.email || '-',
     sourceId: payload.sourceId || null,
-    sourceName: payload.sourceName || 'Website Form',
+    sourceName,
     memberId: payload.memberId || null,
     convertedAt: payload.convertedAt || null,
     stage: normalizeStage(payload.stage, db.stages) || db.stages[0],
@@ -443,7 +447,7 @@ function createLeadFrom(payload) {
     classType: payload.classType || null,
     hostId: payload.hostId || null,
     remarks: payload.remarks || '',
-    channel: payload.channel || 'In-Studio',
+    channel: payload.channel || db.settings.business?.sourceChannelMap?.[sourceName] || 'Other',
     period: payload.period || 'All Time',
     valueEstimate: payload.valueEstimate ? Number(payload.valueEstimate) : null,
     purchasesMade: payload.purchasesMade ? Number(payload.purchasesMade) : null,
@@ -583,7 +587,7 @@ app.post('/api/leads/:id/followups', (req, res) => {
     id: uid('fu'),
     date: req.body.date || new Date().toISOString().slice(0, 10),
     comments: req.body.comments || '',
-    channel: ['call', 'whatsapp', 'email', 'sms'].includes(req.body.channel) ? req.body.channel : null,
+    channel: (db.settings.followUpChannels || ['call', 'whatsapp', 'email', 'sms', 'in_person']).includes(req.body.channel) ? req.body.channel : null,
     done: Boolean(req.body.done)
   }
   lead.followUps.push(fu)
@@ -1519,6 +1523,7 @@ app.put('/api/settings', async (req, res) => {
     })
   }
   if (Array.isArray(body.followUpChannels)) db.settings.followUpChannels = body.followUpChannels.filter(Boolean)
+  if (Array.isArray(body.leadColumns)) db.settings.leadColumns = body.leadColumns.filter(column => column && column.id && column.label)
   try {
     await saveMetaNow()
   } catch (e) {

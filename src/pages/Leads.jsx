@@ -5,7 +5,7 @@ import {
   Table as TableIcon, LayoutGrid, Rows3, PieChart, KanbanSquare, CalendarDays,
   Phone, MessageCircle, Mail, MessageSquareText, Sparkles, Trash2, CheckSquare, Square,
   Users, TrendingUp, XCircle, Wallet, Clock, AlertTriangle, Flag,
-  Trophy, PhoneOff, FlaskConical, CircleDot, PanelTop
+  Trophy, PhoneOff, FlaskConical, CircleDot, PanelTop, Check, Pencil
 } from 'lucide-react'
 import { useApp } from '../store.jsx'
 import { useFetch } from '../hooks.js'
@@ -28,6 +28,19 @@ function loadColumns() {
 function getColumnValue(col, l, lookup) {
   if (col.kind === 'formula') return evalFormula(col.formula, buildFormulaContext(l, lookup))
   if (col.kind === 'lookup') return lookupColumnValue(col.relatedTable, col.relatedField, l, lookup)
+  if (col.kind === 'conditional' || col.kind === 'dependent') {
+    const actual = baseColumnValue(col.dependsOn, l, lookup)
+    const expected = col.expectedValue ?? ''
+    const matches = col.operator === 'not_equals' ? String(actual) !== String(expected)
+      : col.operator === 'contains' ? String(actual || '').toLowerCase().includes(String(expected).toLowerCase())
+        : col.operator === 'greater_than' ? Number(actual) > Number(expected)
+          : col.operator === 'less_than' ? Number(actual) < Number(expected)
+            : col.operator === 'is_empty' ? actual === null || actual === undefined || actual === ''
+              : col.operator === 'is_not_empty' ? actual !== null && actual !== undefined && actual !== ''
+                : String(actual) === String(expected)
+    if (col.kind === 'dependent') return matches ? (baseColumnValue(col.trueValue, l, lookup) || col.trueValue || '') : ''
+    return matches ? col.trueValue : col.falseValue
+  }
   return baseColumnValue(col.field, l, lookup)
 }
 
@@ -49,8 +62,10 @@ const CHANNELS = {
   call: { icon: Phone, label: 'Call', color: '#38bdf8' },
   whatsapp: { icon: MessageCircle, label: 'WhatsApp', color: '#34d399' },
   email: { icon: Mail, label: 'Email', color: '#a78bfa' },
-  sms: { icon: MessageSquareText, label: 'SMS', color: '#fbbf24' }
+  sms: { icon: MessageSquareText, label: 'SMS', color: '#fbbf24' },
+  in_person: { icon: Users, label: 'In person', color: '#fb7185' }
 }
+const channelMeta = (channel) => CHANNELS[channel] || { icon: MessageCircle, label: String(channel || 'Other').replace(/_/g, ' '), color: '#94a3b8' }
 
 // Real stage names vary a lot ("Trial Completed - Unresponsive", "Called -
 // Did Not Answer", ...) — far more than the ~10 hand-picked demo stages
@@ -101,6 +116,12 @@ export default function Leads({ initialSearch = '' }) {
   const [selectAllBusy, setSelectAllBusy] = useState(false)
   const [bulkBusy, setBulkBusy] = useState(false)
   const [columns, setColumnsRaw] = useState(loadColumns)
+  React.useEffect(() => {
+    const configured = boot?.settings?.leadColumns
+    if (!Array.isArray(configured) || !configured.length) return
+    setColumnsRaw(configured.map(column => ({ ...column })))
+    try { localStorage.setItem(COLUMNS_KEY, JSON.stringify(configured)) } catch (e) { /* ignore */ }
+  }, [boot?.settings?.leadColumns])
   const [headerPinned, setHeaderPinned] = useState(() => localStorage.getItem('p57_leads_header_pinned') !== 'false')
   const [pageSize, setPageSize] = useState(() => Number(localStorage.getItem('p57_leads_page_size')) || 25)
   const [density, setDensity] = useState(() => localStorage.getItem('p57_leads_density') || 'comfortable')
@@ -150,6 +171,11 @@ export default function Leads({ initialSearch = '' }) {
 
   const changeAssociate = async (lead, associateId) => {
     try { await api.patch(`/api/leads/${lead.id}`, { associateId: associateId || null }); refreshData() }
+    catch (e) { toast(e.message, 'error') }
+  }
+
+  const changeLeadField = async (lead, patch) => {
+    try { await api.patch(`/api/leads/${lead.id}`, patch); refreshData() }
     catch (e) { toast(e.message, 'error') }
   }
 
@@ -464,7 +490,7 @@ export default function Leads({ initialSearch = '' }) {
           {view === 'table' && (
             <TableView
               items={items} boot={boot} lookup={lookup} openLead={openLead}
-              changeStage={changeStage} changeAssociate={changeAssociate} grouped={grouped} collapsed={collapsed} toggleGroup={toggleGroup}
+              changeStage={changeStage} changeAssociate={changeAssociate} changeLeadField={changeLeadField} grouped={grouped} collapsed={collapsed} toggleGroup={toggleGroup}
               toggleManualFlag={toggleManualFlag}
                   onMessage={setComposeLead}
                   onTemplateMessage={setTemplateLead}
@@ -563,7 +589,7 @@ function GroupSummary({ list }) {
   )
 }
 
-function TableView({ items, boot, lookup, openLead, changeStage, changeAssociate, toggleManualFlag, grouped, collapsed, toggleGroup, onMessage, onTemplateMessage, selected, toggleSelect, toggleSelectAll, columns, density, rowHeight, tableZoom, colWidths, setColWidths, manualFlagOverrides, headerPinned = true, focusLeadIds = [], clearFocus, sortBy, sortDir, setSortBy, setSortDir }) {
+function TableView({ items, boot, lookup, openLead, changeStage, changeAssociate, changeLeadField, toggleManualFlag, grouped, collapsed, toggleGroup, onMessage, onTemplateMessage, selected, toggleSelect, toggleSelectAll, columns, density, rowHeight, tableZoom, colWidths, setColWidths, manualFlagOverrides, headerPinned = true, focusLeadIds = [], clearFocus, sortBy, sortDir, setSortBy, setSortDir }) {
   const focusedItems = focusLeadIds.length ? items.filter(l => focusLeadIds.includes(l.id)) : items
   if (grouped) {
     return (
@@ -584,7 +610,7 @@ function TableView({ items, boot, lookup, openLead, changeStage, changeAssociate
               </button>
               {isOpen && (
                 <div className="lead-group-table">
-                  <TableGrid items={focusLeadIds.length ? g.list.filter(l => focusLeadIds.includes(l.id)) : g.list} boot={boot} lookup={lookup} openLead={openLead} changeStage={changeStage} changeAssociate={changeAssociate} toggleManualFlag={toggleManualFlag} onMessage={onMessage} onTemplateMessage={onTemplateMessage} selected={selected} toggleSelect={toggleSelect} toggleSelectAll={toggleSelectAll} columns={columns} density={density} rowHeight={rowHeight} tableZoom={tableZoom} colWidths={colWidths} setColWidths={setColWidths} manualFlagOverrides={manualFlagOverrides} headerPinned={headerPinned} focusLeadIds={focusLeadIds} clearFocus={clearFocus} sortBy={sortBy} sortDir={sortDir} setSortBy={setSortBy} setSortDir={setSortDir} />
+                  <TableGrid items={focusLeadIds.length ? g.list.filter(l => focusLeadIds.includes(l.id)) : g.list} boot={boot} lookup={lookup} openLead={openLead} changeStage={changeStage} changeAssociate={changeAssociate} changeLeadField={changeLeadField} toggleManualFlag={toggleManualFlag} onMessage={onMessage} onTemplateMessage={onTemplateMessage} selected={selected} toggleSelect={toggleSelect} toggleSelectAll={toggleSelectAll} columns={columns} density={density} rowHeight={rowHeight} tableZoom={tableZoom} colWidths={colWidths} setColWidths={setColWidths} manualFlagOverrides={manualFlagOverrides} headerPinned={headerPinned} focusLeadIds={focusLeadIds} clearFocus={clearFocus} sortBy={sortBy} sortDir={sortDir} setSortBy={setSortBy} setSortDir={setSortDir} />
                 </div>
               )}
             </div>
@@ -593,11 +619,12 @@ function TableView({ items, boot, lookup, openLead, changeStage, changeAssociate
       </div>
     )
   }
-  return <TableGrid items={focusedItems} boot={boot} lookup={lookup} openLead={openLead} changeStage={changeStage} changeAssociate={changeAssociate} toggleManualFlag={toggleManualFlag} onMessage={onMessage} onTemplateMessage={onTemplateMessage} selected={selected} toggleSelect={toggleSelect} toggleSelectAll={toggleSelectAll} columns={columns} density={density} rowHeight={rowHeight} tableZoom={tableZoom} colWidths={colWidths} setColWidths={setColWidths} manualFlagOverrides={manualFlagOverrides} headerPinned={headerPinned} focusLeadIds={focusLeadIds} clearFocus={clearFocus} sortBy={sortBy} sortDir={sortDir} setSortBy={setSortBy} setSortDir={setSortDir} />
+  return <TableGrid items={focusedItems} boot={boot} lookup={lookup} openLead={openLead} changeStage={changeStage} changeAssociate={changeAssociate} changeLeadField={changeLeadField} toggleManualFlag={toggleManualFlag} onMessage={onMessage} onTemplateMessage={onTemplateMessage} selected={selected} toggleSelect={toggleSelect} toggleSelectAll={toggleSelectAll} columns={columns} density={density} rowHeight={rowHeight} tableZoom={tableZoom} colWidths={colWidths} setColWidths={setColWidths} manualFlagOverrides={manualFlagOverrides} headerPinned={headerPinned} focusLeadIds={focusLeadIds} clearFocus={clearFocus} sortBy={sortBy} sortDir={sortDir} setSortBy={setSortBy} setSortDir={setSortDir} />
 }
 
-function TableGrid({ items, boot, lookup, openLead, changeStage, changeAssociate, toggleManualFlag, onMessage, onTemplateMessage, selected, toggleSelect, toggleSelectAll, columns, density, rowHeight = 58, tableZoom = 100, colWidths = {}, setColWidths, manualFlagOverrides = {}, headerPinned = true, focusLeadIds = [], clearFocus, sortBy, sortDir, setSortBy, setSortDir }) {
+function TableGrid({ items, boot, lookup, openLead, changeStage, changeAssociate, changeLeadField, toggleManualFlag, onMessage, onTemplateMessage, selected, toggleSelect, toggleSelectAll, columns, density, rowHeight = 58, tableZoom = 100, colWidths = {}, setColWidths, manualFlagOverrides = {}, headerPinned = true, focusLeadIds = [], clearFocus, sortBy, sortDir, setSortBy, setSortDir }) {
   const cadenceDays = boot?.settings?.cadence?.outreachDays || 7
+  const activeChannels = boot?.settings?.followUpChannels || Object.keys(CHANNELS)
   const allChecked = items.length > 0 && items.every(l => selected?.has(l.id))
   const visibleCols = (columns || []).filter(c => !c.hidden && c.field !== 'created')
   const py = density === 'compact' ? 'py-1.5' : ''
@@ -609,7 +636,7 @@ function TableGrid({ items, boot, lookup, openLead, changeStage, changeAssociate
   const autoFitColumns = () => {
     const next = { select: 76, lead: 260, stage: 190, createdAt: 140, remarksField: 350, message: 112 }
     for (const c of visibleCols) next[c.id] = c.field === 'owner' ? 180 : c.field === 'score' ? 104 : 145
-    for (const ch of Object.keys(CHANNELS)) next[`fu_${ch}`] = 54
+    for (const ch of activeChannels) next[`fu_${ch}`] = 54
     setColWidths?.(next)
   }
   const startResize = (id, fallback) => (e) => {
@@ -653,12 +680,15 @@ function TableGrid({ items, boot, lookup, openLead, changeStage, changeAssociate
               <span>Remarks</span>
               <span className="col-resize-handle" onDoubleClick={autoFitColumns} onMouseDown={startResize('remarksField', widthOf('remarksField', 350))} title="Drag to resize column. Double-click to auto-fit all columns." />
             </th>
-            {Object.entries(CHANNELS).map(([ch, c], i) => (
+            {activeChannels.map((ch, i) => {
+              const c = channelMeta(ch)
+              return (
               <th key={ch} className="resizable-th px-2 py-3 font-semibold text-center" style={{ width: widthOf(`fu_${ch}`, 56), minWidth: widthOf(`fu_${ch}`, 56) }} title={`${c.label} follow-up status`}>
                 <span>FU{i + 1}</span>
                 <span className="col-resize-handle" onDoubleClick={autoFitColumns} onMouseDown={startResize(`fu_${ch}`, widthOf(`fu_${ch}`, 56))} title="Drag to resize column. Double-click to auto-fit all columns." />
               </th>
-            ))}
+              )
+            })}
             <th className="resizable-th px-4 py-3 font-semibold" style={{ width: widthOf('message', 118), minWidth: widthOf('message', 118) }}>
               <span>Message</span>
               <span className="col-resize-handle" onDoubleClick={autoFitColumns} onMouseDown={startResize('message', widthOf('message', 118))} title="Drag to resize column. Double-click to auto-fit all columns." />
@@ -686,7 +716,7 @@ function TableGrid({ items, boot, lookup, openLead, changeStage, changeAssociate
                   </div>
                 </td>
                 <td className={`px-4 ${py}`} style={{ width: leadW, minWidth: leadW }}>
-                  <div className="min-w-0" data-cell-value onClick={e => e.stopPropagation()}>
+                  <div className="min-w-0">
                     <div className="text-[13px] font-semibold text-white truncate flex items-center gap-1.5">
                       {l.fullName}
                       {[...rowManualFlags, ...(l.flags || [])].map(f => (
@@ -714,39 +744,33 @@ function TableGrid({ items, boot, lookup, openLead, changeStage, changeAssociate
                     )
                   })()}
                 </td>
-                <td className={`px-4 ${py} text-[12px] text-slate-400 mono`} style={{ width: widthOf('createdAt', 150), minWidth: widthOf('createdAt', 150) }}><span data-cell-value onClick={e => e.stopPropagation()}>{fmtDate(l.createdAt)}</span></td>
+                <td className={`px-4 ${py} text-[12px] text-slate-400 mono`} style={{ width: widthOf('createdAt', 150), minWidth: widthOf('createdAt', 150) }}>{fmtDate(l.createdAt)}</td>
                 {visibleCols.map(c => {
                   if (c.field === 'source') {
                     return (
                       <td key={c.id} className={`px-4 ${py} text-[12.5px] text-slate-400 truncate`}>
-                        <span data-cell-value onClick={e => e.stopPropagation()}>{l.sourceName || '—'}</span>
+                        <select className="table-inline-select" value={l.sourceName || ''} onClick={e => e.stopPropagation()} onChange={e => changeLeadField(l, { sourceName: e.target.value })}>
+                          <option value="">No source</option>
+                          {(boot?.sources || []).map(source => { const name = typeof source === 'string' ? source : source.name; return <option key={typeof source === 'string' ? source : source.id || name} value={name}>{name}</option> })}
+                        </select>
                       </td>
                     )
                   }
                   if (c.field === 'owner') {
                     return (
-                      <td key={c.id} className={`px-4 ${py}`} onClick={e => {
-                        e.stopPropagation()
-                        if (e.target.tagName !== 'SELECT') {
-                          const select = e.currentTarget.querySelector('select')
-                          select?.focus()
-                          select?.showPicker?.()
-                        }
-                      }}>
-                        <div className="relative flex items-center gap-2 min-w-0 max-w-[180px]">
-                          <Avatar name={owner?.name || '?'} color={owner?.color} photoUrl={owner?.photoUrl} photoZoom={owner?.photoZoom} photoPosX={owner?.photoPosX} photoPosY={owner?.photoPosY} size={28} />
-                          <select
-                            className="input associate-cell-select !py-1 !px-2 !text-[12px] min-w-0"
-                            aria-label={`Assign ${l.fullName} to an associate`}
-                            value={l.associateId || ''}
-                            onChange={e => changeAssociate(l, e.target.value)}
-                          >
-                            <option value="">Unassigned</option>
-                            {(boot?.associates || []).filter(a => a.active !== false && (a.locationIds || [a.locationId]).includes(l.locationId)).map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
-                          </select>
-                        </div>
+                      <td key={c.id} className={`px-4 ${py}`} onClick={e => e.stopPropagation()}>
+                        <AssociateCell lead={l} owner={owner} associates={boot?.associates || []} onChange={associateId => changeAssociate(l, associateId)} />
                       </td>
                     )
+                  }
+                  if (c.field === 'location') {
+                    return <td key={c.id} className={`px-4 ${py}`} onClick={e => e.stopPropagation()}><select className="table-inline-select" value={l.locationId || ''} onChange={e => changeLeadField(l, { locationId: e.target.value })}>{(boot?.locations || []).filter(location => location.active !== false).map(location => <option key={location.id} value={location.id}>{location.name}</option>)}</select></td>
+                  }
+                  if (c.field === 'status') {
+                    return <td key={c.id} className={`px-4 ${py}`} onClick={e => e.stopPropagation()}><select className="table-inline-select capitalize" value={l.status || 'open'} onChange={e => changeLeadField(l, { status: e.target.value })}><option value="open">Open</option><option value="won">Won</option><option value="lost">Lost</option></select></td>
+                  }
+                  if (c.field === 'statusGroup') {
+                    return <td key={c.id} className={`px-4 ${py}`} onClick={e => e.stopPropagation()}><select className="table-inline-select" value={l.stage} onChange={e => changeStage(l, e.target.value)}>{(boot?.stages || []).map(stage => <option key={stage} value={stage}>{stage}</option>)}</select></td>
                   }
                   if (c.field === 'score') {
                     return (
@@ -760,16 +784,14 @@ function TableGrid({ items, boot, lookup, openLead, changeStage, changeAssociate
                   const val = getColumnValue(c, l, lookup)
                   return (
                     <td key={c.id} className={`px-4 ${py} text-[12.5px] ${c.type === 'number' || c.type === 'currency' || c.type === 'percent' ? 'mono text-slate-300' : 'text-slate-400'}`}>
-                      <span className="table-cell-fit" data-cell-value onClick={e => e.stopPropagation()} title={String(formatColumnValue(val, c) ?? '')}>{formatColumnValue(val, c)}</span>
+                      <span className="table-cell-fit" title={String(formatColumnValue(val, c) ?? '')}>{formatColumnValue(val, c)}</span>
                     </td>
                   )
                 })}
                 <td className={`px-4 ${py}`}>
-                  <span className="table-remarks-wrap" data-cell-value onClick={e => e.stopPropagation()}>
-                    <span className="table-remarks" title={l.remarks || ''}>{l.remarks || '—'}</span>
-                  </span>
+                  <InlineRemark lead={l} onSave={remarks => changeLeadField(l, { remarks })} />
                 </td>
-                {['call', 'whatsapp', 'email', 'sms'].map(ch => (
+                {activeChannels.map(ch => (
                   <td key={ch} className="px-1 text-center" onClick={e => e.stopPropagation()}>
                     <FuCell lead={l} ch={ch} forceMissed={cadenceMissedOpen} />
                   </td>
@@ -790,6 +812,51 @@ function TableGrid({ items, boot, lookup, openLead, changeStage, changeAssociate
       {scoreTip && <ScoreDetailsPopover tip={scoreTip} onClose={() => setScoreTip(null)} />}
     </div>
   )
+}
+
+function AssociateCell({ lead, owner, associates, onChange }) {
+  const [open, setOpen] = useState(false)
+  const [position, setPosition] = useState({ left: 0, top: 0, width: 250 })
+  const buttonRef = useRef(null)
+  const choices = associates.filter(a => a.active !== false && (a.locationIds || [a.locationId]).includes(lead.locationId))
+  const show = () => {
+    const rect = buttonRef.current?.getBoundingClientRect()
+    if (rect) setPosition({ left: Math.min(rect.left, window.innerWidth - 270), top: Math.min(rect.bottom + 6, window.innerHeight - 330), width: Math.max(250, rect.width) })
+    setOpen(true)
+  }
+  return (
+    <>
+      <button ref={buttonRef} type="button" className="associate-cell-trigger" onClick={show} aria-haspopup="listbox" aria-expanded={open}>
+        <Avatar name={owner?.name || '?'} color={owner?.color} photoUrl={owner?.photoUrl} photoZoom={owner?.photoZoom} photoPosX={owner?.photoPosX} photoPosY={owner?.photoPosY} size={27} />
+        <span>{owner?.name || 'Unassigned'}</span><ChevronDown size={12} />
+      </button>
+      {open && createPortal(<>
+        <button className="fixed inset-0 z-[108] cursor-default" aria-label="Close associate options" onClick={() => setOpen(false)} />
+        <div className="associate-cell-menu" role="listbox" style={position}>
+          <div className="associate-cell-menu-head">Assign associate <span>{choices.length} available</span></div>
+          <button className="associate-cell-option" onClick={() => { onChange(''); setOpen(false) }}><Avatar name="?" color="#64748b" size={28} /><span><b>Unassigned</b><small>Clear current owner</small></span>{!lead.associateId && <Check size={14} />}</button>
+          {choices.map(associate => <button key={associate.id} className="associate-cell-option" onClick={() => { onChange(associate.id); setOpen(false) }}>
+            <Avatar name={associate.name} color={associate.color} photoUrl={associate.photoUrl} photoZoom={associate.photoZoom} photoPosX={associate.photoPosX} photoPosY={associate.photoPosY} size={28} />
+            <span><b>{associate.name}</b><small>{associate.role || 'Associate'}</small></span>
+            {lead.associateId === associate.id && <Check size={14} />}
+          </button>)}
+        </div>
+      </>, document.body)}
+    </>
+  )
+}
+
+function InlineRemark({ lead, onSave }) {
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState(lead.remarks || '')
+  React.useEffect(() => { if (!editing) setDraft(lead.remarks || '') }, [lead.remarks, editing])
+  const save = async () => {
+    const next = draft.trim()
+    setEditing(false)
+    if (next !== (lead.remarks || '')) await onSave(next)
+  }
+  if (editing) return <textarea autoFocus className="inline-remark-editor" value={draft} onClick={e => e.stopPropagation()} onChange={e => setDraft(e.target.value)} onBlur={save} onKeyDown={e => { if (e.key === 'Escape') { setDraft(lead.remarks || ''); setEditing(false) }; if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') save() }} />
+  return <button type="button" className="inline-remark-trigger" title={lead.remarks || 'Add remark'} onClick={e => { e.stopPropagation(); setEditing(true) }}><span>{lead.remarks || 'Add remark…'}</span><Pencil size={11} /></button>
 }
 
 function SortHead({ label, field, resizeId, width, style, onResize, onAutoFit, className = '', sortBy, sortDir, setSortBy, setSortDir }) {
@@ -856,7 +923,8 @@ function FuCell({ lead, ch, forceMissed = false }) {
   // follow-ups directly so an overdue-but-never-logged one still shows red
   // instead of silently looking identical to "never scheduled."
   const hasOverduePending = forceMissed || (!filled && (lead.followUps || []).some(f => f.channel === ch && f.done === false && f.date && f.date !== '-' && f.date < today))
-  const Icon = CHANNELS[ch].icon
+  const meta = channelMeta(ch)
+  const Icon = meta.icon
   const anchorRef = useRef(null)
   const [popOpen, setPopOpen] = useState(false)
   const [pos, setPos] = useState(null)
@@ -875,10 +943,10 @@ function FuCell({ lead, ch, forceMissed = false }) {
       : 'border-white/8 bg-white/[0.03]'
   const iconColor = filled ? (isMissed ? 'var(--fu-rose)' : 'var(--fu-emerald)') : hasOverduePending ? 'var(--fu-rose)' : 'var(--fu-slate)'
   const title = filled
-    ? `Last ${CHANNELS[ch].label}: ${o.date} — click to log another`
+    ? `Last ${meta.label}: ${o.date} — click to log another`
     : hasOverduePending
-      ? `${CHANNELS[ch].label} follow-up overdue — click to log`
-      : `No ${CHANNELS[ch].label} logged — click to log`
+      ? `${meta.label} follow-up overdue — click to log`
+      : `No ${meta.label} logged — click to log`
 
   return (
     <>
@@ -994,7 +1062,7 @@ function QuickFollowUpPopover({ lead, ch, pos, onClose }) {
 }
 
 function FuTip({ lead, ch, o, isMissed }) {
-  const meta = CHANNELS[ch]
+  const meta = channelMeta(ch)
   return (
     <div className="space-y-1.5 min-w-[220px]">
       <div className="flex items-center gap-2">
@@ -1038,7 +1106,7 @@ function CardsView({ items, lookup, openLead, grouped, collapsed, toggleGroup, b
             <div className="text-[11.5px] text-slate-400 truncate mb-2.5">{l.ai?.nextAction?.text}</div>
             <div className="flex items-center gap-2 border-t border-white/6 pt-2">
               <span className="text-[11px] text-slate-500 truncate flex-1">{owner ? owner.name : 'Unassigned'}</span>
-              {['call', 'whatsapp', 'email', 'sms'].map(ch => {
+              {Object.keys(CHANNELS).map(ch => {
                 const filled = !!l.fu?.outreach?.[ch]?.filled
                 const Icon = CHANNELS[ch].icon
                 return (
@@ -1100,7 +1168,7 @@ function CompactView({ items, lookup, openLead, boot, onMessage, onTemplateMessa
             <span className="text-[12px] text-slate-400 w-[130px] truncate hidden md:block">{l.stage}</span>
             <span className="text-[12px] text-slate-400 w-[120px] truncate hidden lg:block">{owner?.name || 'Unassigned'}</span>
             <div className="flex items-center gap-1.5 ml-auto">
-              {['call', 'whatsapp', 'email', 'sms'].map(ch => {
+              {Object.keys(CHANNELS).map(ch => {
                 const filled = !!l.fu?.outreach?.[ch]?.filled
                 const Icon = CHANNELS[ch].icon
                 return (
@@ -1254,7 +1322,7 @@ function KanbanView({ items, boot, lookup, openLead, changeStage }) {
                     <ScorePill score={l.ai.score} />
                   </div>
                   <div className="flex items-center gap-1.5">
-                    {['call', 'whatsapp', 'email', 'sms'].map(ch => {
+                    {Object.keys(CHANNELS).map(ch => {
                       const filled = !!l.fu?.outreach?.[ch]?.filled
                       const Icon = CHANNELS[ch].icon
                       return (
