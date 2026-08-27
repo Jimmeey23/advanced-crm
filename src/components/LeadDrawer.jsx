@@ -15,6 +15,9 @@ import RespondioTemplateModal from './RespondioTemplateModal.jsx'
 
 const R_CHANNELS = { whatsapp: '#34d399', sms: '#fbbf24', email: '#a78bfa', call: '#38bdf8' }
 const MIN_DRAWER_WIDTH = 560
+const keepDetailOpen = event => {
+  if (!event.currentTarget.open) event.currentTarget.open = true
+}
 const followUpText = value => {
   const text = String(value ?? '').trim()
   return text === '-' || text === '\u2014' ? '' : text
@@ -35,7 +38,6 @@ export default function LeadDrawer() {
   const [replyError, setReplyError] = useState({})
   const [enriching, setEnriching] = useState(false)
   const [autoSyncLeadId, setAutoSyncLeadId] = useState('')
-  const [momenceOpen, setMomenceOpen] = useState(false)
   const [momenceProfileOpen, setMomenceProfileOpen] = useState(false)
   const [createMemberOpen, setCreateMemberOpen] = useState(false)
   const [creatingMember, setCreatingMember] = useState(false)
@@ -292,7 +294,7 @@ export default function LeadDrawer() {
 
           <div className="lead-context-strip flex items-center gap-3 mt-3 text-[11.5px] text-slate-500">
             <span className="flex items-center gap-1"><MapPin size={11} />{loc?.name || lead.center || '—'}</span>
-            {owner && <span className="flex items-center gap-1"><Avatar name={owner.name} color={owner.color} photoUrl={owner.photoUrl} photoZoom={owner.photoZoom} photoPosX={owner.photoPosX} photoPosY={owner.photoPosY} size={14} /> {owner.name}</span>}
+            {owner && <span className="flex items-center gap-1"><Avatar name={owner.name} color={owner.color} photoUrl={owner.photoUrl} photoZoom={owner.photoZoom} photoPosX={owner.photoPosX} photoPosY={owner.photoPosY} size={14} fallback="👤" /> {owner.name}</span>}
             <span className="ml-auto">{lead.memberId ? `Momence #${lead.memberId}` : 'No member link'}</span>
           </div>
 
@@ -359,7 +361,7 @@ export default function LeadDrawer() {
           </section>
 
           {/* GPT enrichment */}
-          <details className="lead-section gpt-panel drawer-collapsible">
+          <details open onToggle={keepDetailOpen} className="lead-section gpt-panel drawer-collapsible drawer-always-open">
             <summary className="drawer-section-summary">
               <Bot size={14} className="lead-accent-icon" />
               <span><b>GPT deep-dive</b><small>Analysis and suggested messaging</small></span>
@@ -418,7 +420,7 @@ export default function LeadDrawer() {
           </details>
 
           {/* Respond.io conversations */}
-          {!!conv?.conversations?.length && <details className="lead-section drawer-collapsible">
+          {!!conv?.conversations?.length && <details open onToggle={keepDetailOpen} className="lead-section drawer-collapsible drawer-always-open">
             <summary className="drawer-section-summary">
               <MessageCircle size={14} className={boot?.integrations?.respondio ? 'text-emerald-400' : 'text-slate-500'} />
               <span><b>Respond.io conversations</b><small>Member message history</small></span>
@@ -470,18 +472,17 @@ export default function LeadDrawer() {
           </details>}
 
           {/* Momence */}
-          {boot?.integrations?.momence && <section className={`lead-section momence-workspace ${momenceOpen ? 'is-open' : ''}`}>
-            <button className="momence-section-header" onClick={() => setMomenceOpen(v => !v)} aria-expanded={momenceOpen}>
+          {boot?.integrations?.momence && <section className="lead-section momence-workspace is-open">
+            <div className="momence-section-header momence-section-static">
               <span className="momence-header-icon"><Link2 size={16} /></span>
               <span className="min-w-0 text-left">
                 <span className="momence-header-eyebrow">Connected member intelligence</span>
                 <span className="momence-header-title">Momence profile &amp; activity</span>
               </span>
               {m && <span className="momence-sync-state"><span /> Synced</span>}
-              <ChevronDown size={17} className={`momence-chevron ${momenceOpen ? 'is-open' : ''}`} />
-            </button>
+            </div>
 
-            {momenceOpen && <div className="momence-section-content">
+            <div className="momence-section-content">
             {!boot?.integrations?.momence ? (
               <div className="text-[12.5px] text-slate-400 flex items-center gap-2"><span>Connect Momence in Settings to pull sales and class history automatically.</span></div>
             ) : !m ? (
@@ -636,18 +637,18 @@ export default function LeadDrawer() {
                 <p className="text-[10.5px] text-slate-600 mt-2 flex items-center gap-1"><RefreshCw size={10} /> Synced {timeAgo(lead.momenceSyncedAt)}</p>
               </div>
             )}
-            </div>}
+            </div>
           </section>}
 
           {/* remarks */}
-          <details className="lead-section drawer-collapsible">
+          <details open onToggle={keepDetailOpen} className="lead-section drawer-collapsible drawer-always-open">
             <summary className="drawer-section-summary"><MessageSquare size={14} /><span><b>Remarks</b><small>{lead.remarks ? 'Saved lead notes' : 'Add a lead note'}</small></span><ChevronDown size={15} className="drawer-section-chevron" /></summary>
             <textarea className="input resize-none" rows={3} value={remarkDraft} onChange={e => setRemarkDraft(e.target.value)} placeholder="Notes from conversations…" />
             <button className="btn btn-ghost !py-1.5 !text-[12px] mt-2" onClick={() => remarkDraft !== lead.remarks && patch({ remarks: remarkDraft }, 'Remarks updated')}>Save remarks</button>
           </details>
 
           {/* follow-ups */}
-          <details className="lead-section lead-section-last drawer-collapsible">
+          <details open onToggle={keepDetailOpen} className="lead-section lead-section-last drawer-collapsible drawer-always-open">
             <summary className="drawer-section-summary">
               <MessageSquare size={14} className="text-amber-400" />
               <span><b>Follow-up timeline</b><small>Activity and next touchpoint</small></span>

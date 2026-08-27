@@ -629,14 +629,30 @@ function TableView({ items, boot, lookup, openLead, changeStage, changeAssociate
 function TableGrid({ items, boot, lookup, openLead, changeStage, changeAssociate, changeLeadField, toggleManualFlag, onMessage, onTemplateMessage, selected, toggleSelect, toggleSelectAll, columns, density, rowHeight = 58, tableZoom = 100, colWidths = {}, setColWidths, manualFlagOverrides = {}, headerPinned = true, focusLeadIds = [], clearFocus, sortBy, sortDir, setSortBy, setSortDir }) {
   const cadenceDays = boot?.settings?.cadence?.outreachDays || 7
   const activeChannels = ['fu1', 'fu2', 'fu3', 'fu4']
-  const allChecked = items.length > 0 && items.every(l => selected?.has(l.id))
-  const visibleCols = (columns || []).filter(c => !c.hidden && c.field !== 'created')
+  const [columnSearch, setColumnSearch] = useState({})
+  const visibleCols = (columns || []).filter(c => !c.hidden && c.field !== 'created' && !(density === 'compact' && c.field === 'phone'))
+  const searchValue = (lead, field) => {
+    if (field === 'fullName') return lead.fullName
+    if (field === 'stage') return lead.stage
+    if (field === 'createdAt') return fmtDate(lead.createdAt)
+    if (field === 'source') return lead.sourceName
+    if (field === 'owner') return lookup.asnById[lead.associateId]?.name
+    if (field === 'location') return lookup.locById[lead.locationId]?.name
+    if (field === 'score') return lead.ai?.score
+    if (field === 'statusGroup') return lead.stage
+    if (field === 'status') return lead.status
+    return getColumnValue(visibleCols.find(c => (c.field || c.id) === field) || { field }, lead, lookup)
+  }
+  const displayedItems = items.filter(lead => Object.entries(columnSearch).every(([field, query]) => !query || String(searchValue(lead, field) ?? '').toLowerCase().includes(query.toLowerCase())))
+  const allChecked = displayedItems.length > 0 && displayedItems.every(l => selected?.has(l.id))
   const py = density === 'compact' ? 'py-1.5' : ''
   const [scoreTip, setScoreTip] = useState(null)
-  const widthOf = (id, fallback) => colWidths[id] || fallback
+  const requiredMinWidths = { stage: 220, source: 240, owner: 260, location: 280, status: 180, statusGroup: 200, score: 92 }
+  const widthOf = (id, fallback) => Math.max(requiredMinWidths[id] || 0, Number(colWidths[id]) || fallback)
   const selectW = widthOf('select', 76)
-  const leadW = widthOf('lead', 260)
-  const stageW = widthOf('stage', 190)
+  const leadW = Math.round((Number(colWidths.lead) || 260) * .9)
+  const stageW = widthOf('stage', 220)
+  const setColSearch = field => value => setColumnSearch(current => ({ ...current, [field]: value }))
   const autoFitColumns = () => {
     const next = { select: 76, lead: 260, stage: 190, createdAt: 140, remarksField: 350, message: 112 }
     for (const c of visibleCols) next[c.id] = c.field === 'owner' ? 180 : c.field === 'score' ? 104 : 145
@@ -676,10 +692,10 @@ function TableGrid({ items, boot, lookup, openLead, changeStage, changeAssociate
               </button>
               <span className="col-resize-handle" onDoubleClick={autoFitColumns} onMouseDown={startResize('select', widthOf('select', 76))} title="Drag to resize column. Double-click to auto-fit all columns." />
             </th>
-            <SortHead label="Lead" field="fullName" width={leadW} onResize={startResize} onAutoFit={autoFitColumns} className={`px-4 py-3 font-semibold`} sortBy={sortBy} sortDir={sortDir} setSortBy={setSortBy} setSortDir={setSortDir} />
-            <SortHead label="Stage" field="stage" width={stageW} onResize={startResize} onAutoFit={autoFitColumns} className={`px-4 py-3 font-semibold`} sortBy={sortBy} sortDir={sortDir} setSortBy={setSortBy} setSortDir={setSortDir} />
-            <SortHead label="Created" field="createdAt" width={widthOf('createdAt', 150)} onResize={startResize} onAutoFit={autoFitColumns} className="px-4 py-3 font-semibold" sortBy={sortBy} sortDir={sortDir} setSortBy={setSortBy} setSortDir={setSortDir} />
-            {visibleCols.map(c => <SortHead key={c.id} label={c.label} field={c.field || c.id} resizeId={c.id} width={widthOf(c.id, c.field === 'owner' ? 190 : c.field === 'score' ? 112 : 150)} onResize={startResize} onAutoFit={autoFitColumns} className="px-4 py-3 font-semibold" sortBy={sortBy} sortDir={sortDir} setSortBy={setSortBy} setSortDir={setSortDir} />)}
+            <SortHead label="Lead" field="fullName" width={leadW} onResize={startResize} onAutoFit={autoFitColumns} className={`px-4 py-3 font-semibold`} sortBy={sortBy} sortDir={sortDir} setSortBy={setSortBy} setSortDir={setSortDir} searchValue={columnSearch.fullName || ''} onSearch={setColSearch('fullName')} />
+            <SortHead label="Stage" field="stage" width={stageW} onResize={startResize} onAutoFit={autoFitColumns} className={`px-4 py-3 font-semibold`} sortBy={sortBy} sortDir={sortDir} setSortBy={setSortBy} setSortDir={setSortDir} searchValue={columnSearch.stage || ''} onSearch={setColSearch('stage')} />
+            <SortHead label="Created" field="createdAt" width={widthOf('createdAt', 150)} onResize={startResize} onAutoFit={autoFitColumns} className="px-4 py-3 font-semibold" sortBy={sortBy} sortDir={sortDir} setSortBy={setSortBy} setSortDir={setSortDir} searchValue={columnSearch.createdAt || ''} onSearch={setColSearch('createdAt')} />
+            {visibleCols.map(c => { const field = c.field || c.id; return <SortHead key={c.id} label={c.label} field={field} resizeId={c.id} width={widthOf(c.id, c.field === 'owner' ? 260 : c.field === 'source' ? 240 : c.field === 'location' ? 280 : c.field === 'statusGroup' ? 200 : c.field === 'score' ? 92 : 150)} onResize={startResize} onAutoFit={autoFitColumns} className="px-4 py-3 font-semibold" sortBy={sortBy} sortDir={sortDir} setSortBy={setSortBy} setSortDir={setSortDir} searchValue={columnSearch[field] || ''} onSearch={setColSearch(field)} /> })}
             <th className="resizable-th px-4 py-3 font-semibold" style={{ width: widthOf('remarksField', 350), minWidth: widthOf('remarksField', 350) }}>
               <span>Remarks</span>
               <span className="col-resize-handle" onDoubleClick={autoFitColumns} onMouseDown={startResize('remarksField', widthOf('remarksField', 350))} title="Drag to resize column. Double-click to auto-fit all columns." />
@@ -699,7 +715,7 @@ function TableGrid({ items, boot, lookup, openLead, changeStage, changeAssociate
           </tr>
         </thead>
         <tbody>
-          {items.map(l => {
+          {displayedItems.map(l => {
             const owner = lookup.asnById[l.associateId]
             const nextFu = l.followUps?.find(f => f.date && f.done === false && f.date !== '-')
             const dueIn = nextFu ? daysFromNow(nextFu.date) : null
@@ -726,7 +742,9 @@ function TableGrid({ items, boot, lookup, openLead, changeStage, changeAssociate
                         <span key={f.id} title={f.name} className="chip !px-1.5 !py-0 text-[9px]" style={{ background: `${f.color}22`, color: f.color, border: `1px solid ${f.color}44` }}>{f.label}</span>
                       ))}
                     </div>
-                    {density !== 'compact' && <div className="text-[11px] text-slate-500 truncate">{l.email}</div>}
+                    {density === 'compact'
+                      ? <div className="lead-compact-meta"><span title={l.sourceName || 'No source'}>{l.sourceName || 'No source'}</span><span title={owner?.name || 'Unassigned'}>{owner?.name || 'Unassigned'}</span></div>
+                      : <div className="text-[11px] text-slate-500 truncate">{l.email}</div>}
                   </div>
                 </td>
                 <td className={`px-4 ${py}`} style={{ width: stageW, minWidth: stageW }} onClick={e => e.stopPropagation()}>
@@ -830,7 +848,7 @@ function AssociateCell({ lead, owner, associates, onChange }) {
   return (
     <>
       <button ref={buttonRef} type="button" className="associate-cell-trigger" onClick={show} aria-haspopup="listbox" aria-expanded={open}>
-        <Avatar name={owner?.name || '?'} color={owner?.color} photoUrl={owner?.photoUrl} photoZoom={owner?.photoZoom} photoPosX={owner?.photoPosX} photoPosY={owner?.photoPosY} size={27} />
+        <Avatar name={owner?.name || '?'} color={owner?.color} photoUrl={owner?.photoUrl} photoZoom={owner?.photoZoom} photoPosX={owner?.photoPosX} photoPosY={owner?.photoPosY} size={27} fallback="👤" />
         <span>{owner?.name || 'Unassigned'}</span><ChevronDown size={12} />
       </button>
       {open && createPortal(<>
@@ -839,7 +857,7 @@ function AssociateCell({ lead, owner, associates, onChange }) {
           <div className="associate-cell-menu-head">Assign associate <span>{choices.length} available</span></div>
           <button className="associate-cell-option" onClick={() => { onChange(''); setOpen(false) }}><Avatar name="?" color="#64748b" size={28} /><span><b>Unassigned</b><small>Clear current owner</small></span>{!lead.associateId && <Check size={14} />}</button>
           {choices.map(associate => <button key={associate.id} className="associate-cell-option" onClick={() => { onChange(associate.id); setOpen(false) }}>
-            <Avatar name={associate.name} color={associate.color} photoUrl={associate.photoUrl} photoZoom={associate.photoZoom} photoPosX={associate.photoPosX} photoPosY={associate.photoPosY} size={28} />
+            <Avatar name={associate.name} color={associate.color} photoUrl={associate.photoUrl} photoZoom={associate.photoZoom} photoPosX={associate.photoPosX} photoPosY={associate.photoPosY} size={28} fallback="👤" />
             <span><b>{associate.name}</b><small>{associate.role || 'Associate'}</small></span>
             {lead.associateId === associate.id && <Check size={14} />}
           </button>)}
@@ -862,7 +880,7 @@ function InlineRemark({ lead, onSave }) {
   return <button type="button" className="inline-remark-trigger" title={lead.remarks || 'Add remark'} onClick={e => { e.stopPropagation(); setEditing(true) }}><span>{lead.remarks || 'Add remark…'}</span><Pencil size={11} /></button>
 }
 
-function SortHead({ label, field, resizeId, width, style, onResize, onAutoFit, className = '', sortBy, sortDir, setSortBy, setSortDir }) {
+function SortHead({ label, field, resizeId, width, style, onResize, onAutoFit, className = '', sortBy, sortDir, setSortBy, setSortDir, searchValue = '', onSearch }) {
   const active = sortBy === field
   const nextDir = active && sortDir === 'asc' ? 'desc' : 'asc'
   const thStyle = style || { width, minWidth: width }
@@ -872,6 +890,7 @@ function SortHead({ label, field, resizeId, width, style, onResize, onAutoFit, c
         {label}
         <ChevronDown size={11} className={`transition-transform ${active && sortDir === 'asc' ? 'rotate-180' : ''} ${active ? 'text-rose-400' : 'text-slate-500'}`} />
       </span>
+      {onSearch && <input className="column-header-search" value={searchValue} onClick={e => e.stopPropagation()} onChange={e => onSearch(e.target.value)} placeholder={`Search ${label.toLowerCase()}`} aria-label={`Search ${label} column`} />}
       <span className="col-resize-handle" onDoubleClick={(e) => { e.preventDefault(); e.stopPropagation(); onAutoFit?.() }} onMouseDown={onResize(resizeId || field, width)} title="Drag to resize column. Double-click a header edge to auto-fit all columns." />
     </th>
   )

@@ -12,6 +12,19 @@ const personName = p => [p?.firstName, p?.lastName].filter(Boolean).join(' ') ||
 const time = value => new Intl.DateTimeFormat('en-IN', { hour: 'numeric', minute: '2-digit' }).format(new Date(value))
 const fullDate = value => new Intl.DateTimeFormat('en-IN', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' }).format(new Date(value))
 
+const formatTone = name => {
+  const value = String(name || '').toLowerCase()
+  if (value.includes('powercycle') || value.includes('cycle')) return 'cyan'
+  if (value.includes('cardio')) return 'rose'
+  if (value.includes('barre')) return 'indigo'
+  if (value.includes('mat') || value.includes('pilates')) return 'violet'
+  if (value.includes('strength') || value.includes('amped')) return 'amber'
+  if (value.includes('fit')) return 'emerald'
+  if (value.includes('restore') || value.includes('stretch') || value.includes('mobility')) return 'teal'
+  if (value.includes('dance')) return 'fuchsia'
+  return 'slate'
+}
+
 function rangeFor(view, anchor) {
   const d = startOfDay(anchor)
   if (view === 'day') return { start: d, end: new Date(d.getTime() + DAY) }
@@ -23,7 +36,7 @@ function rangeFor(view, anchor) {
 
 function SessionCard({ session, onClick, compact = false }) {
   const remaining = session.capacity == null ? null : Math.max(0, session.capacity - session.bookingCount)
-  return <button className={`mom-session-card ${session.isCancelled ? 'is-cancelled' : ''} ${compact ? 'is-compact' : ''}`} onClick={() => onClick(session)}>
+  return <button className={`mom-session-card tone-${formatTone(session.name)} ${session.isCancelled ? 'is-cancelled' : ''} ${compact ? 'is-compact' : ''}`} onClick={() => onClick(session)}>
     <span className="mom-session-time">{time(session.startsAt)}</span>
     <strong>{session.name}</strong>
     {!compact && <span>{personName(session.teacher)} · {session.inPersonLocation?.name || 'Online'}</span>}

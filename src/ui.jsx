@@ -28,7 +28,7 @@ export function Avatar({ name, color, size = 30, className = '', photoUrl, photo
   }
   return (
     <span
-      className={`inline-flex items-center justify-center rounded-full font-bold shrink-0 ${className}`}
+      className={`inline-flex items-center justify-center rounded-full font-bold shrink-0 ${fallback ? 'avatar-person-fallback' : ''} ${className}`}
       style={fallback
         ? { width: size, height: size, background: '#111827', color: '#fff', fontSize: size * 0.52, border: '1px solid rgba(255,255,255,.34)' }
         : { width: size, height: size, background: `${c}22`, color: c, fontSize: size * 0.4, border: `1px solid ${c}55` }}
@@ -53,20 +53,19 @@ export function normalizePhotoUrl(photoUrl) {
 }
 
 export function ScorePill({ score, size = 'md' }) {
-  const pct = score
-  const color = pct >= 70 ? '#34d399' : pct >= 45 ? '#fbbf24' : '#94a3b8'
-  const r = size === 'lg' ? 20 : 14
+  const pct = Math.max(0, Math.min(100, Math.round(Number(score) || 0)))
+  const r = size === 'lg' ? 20 : 16
   const circ = 2 * Math.PI * r
   const d = r * 2 + 6
   return (
-    <div className="relative inline-flex items-center justify-center" style={{ width: d, height: d }}>
+    <div className={`score-ring ${size === 'lg' ? 'is-large' : ''} relative inline-flex items-center justify-center`} style={{ width: d, height: d }} title={`Lead score: ${pct} out of 100`}>
       <svg width={d} height={d} viewBox={`0 0 ${d} ${d}`}>
-        <circle cx={r + 3} cy={r + 3} r={r} fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth={3.5} />
-        <circle cx={r + 3} cy={r + 3} r={r} fill="none" stroke={color} strokeWidth={3.5}
+        <circle className="score-ring-track" cx={r + 3} cy={r + 3} r={r} fill="none" strokeWidth={3.5} />
+        <circle className="score-ring-progress" cx={r + 3} cy={r + 3} r={r} fill="none" strokeWidth={3.5}
           strokeLinecap="round" strokeDasharray={circ} strokeDashoffset={circ * (1 - pct / 100)}
           transform={`rotate(-90 ${r + 3} ${r + 3})`} style={{ transition: 'stroke-dashoffset .6s ease' }} />
       </svg>
-      <span className="absolute mono text-[12px] font-semibold" style={{ color }}>{pct}</span>
+      <span className="score-ring-value absolute mono">{pct}</span>
     </div>
   )
 }

@@ -171,7 +171,7 @@ function FaceoffCard({ r, accent, score, vs }) {
   return (
     <div className="rounded-2xl border border-slate-200 bg-white p-3.5 shadow-[0_10px_28px_rgba(15,23,42,0.06)]">
       <div className="flex items-center gap-2.5 mb-3">
-        <Avatar name={r.name} color={r.color} size={34} />
+        <Avatar name={r.name} color={r.color} size={34} fallback="👤" />
         <div className="flex-1 min-w-0">
           <div className="text-[13px] font-bold text-slate-900 truncate">{r.name}</div>
           <div className="text-[10.5px] text-slate-500">{r.conversion}% conversion · score {r.avgScore}</div>

@@ -76,7 +76,7 @@ export default function Team() {
                   const stats = team?.find(t => t.associateId === a.id)
                   return (
                     <button key={a.id} type="button" className={`w-full text-left flex items-center gap-2.5 rounded-xl bg-white/[0.03] border border-white/6 px-3 py-2 hover:bg-white/[0.06] transition-colors ${a.active === false ? 'opacity-55' : ''}`} onClick={() => setEditAsn(a)}>
-                      <Avatar name={a.name} color={a.color} photoUrl={a.photoUrl} photoZoom={a.photoZoom} photoPosX={a.photoPosX} photoPosY={a.photoPosY} size={26} />
+                      <Avatar name={a.name} color={a.color} photoUrl={a.photoUrl} photoZoom={a.photoZoom} photoPosX={a.photoPosX} photoPosY={a.photoPosY} size={26} fallback="👤" />
                       <div className="flex-1 min-w-0">
                         <div className="text-[12.5px] font-semibold text-slate-200 truncate">{a.name}</div>
                         <div className="text-[10.5px] text-slate-500">{a.role}{a.active === false ? ' · inactive' : ''}</div>
@@ -138,7 +138,7 @@ function LocationTeamModal({ location, associates, onClose, onSaved }) {
     <ModalHeader title={`Manage ${location.name} team`} subtitle="Add existing associates, move coverage, or remove people from this studio" onClose={onClose} />
     <div className="location-team-list">
       {associates.map(associate => <button type="button" key={associate.id} className={`location-team-option ${selected.has(associate.id) ? 'is-selected' : ''}`} onClick={() => toggle(associate.id)}>
-        <Avatar name={associate.name} color={associate.color} photoUrl={associate.photoUrl} photoZoom={associate.photoZoom} photoPosX={associate.photoPosX} photoPosY={associate.photoPosY} size={34} />
+        <Avatar name={associate.name} color={associate.color} photoUrl={associate.photoUrl} photoZoom={associate.photoZoom} photoPosX={associate.photoPosX} photoPosY={associate.photoPosY} size={34} fallback="👤" />
         <span><b>{associate.name}</b><small>{associate.role} · {(associate.locationIds || [associate.locationId]).length} studio assignment(s)</small></span>
         <span className="location-team-check">{selected.has(associate.id) ? 'Assigned' : 'Add'}</span>
       </button>)}
@@ -295,7 +295,7 @@ function EditAssociateModal({ associate, onClose, onSaved }) {
           <div><label className="label">Status</label><select className="input" value={form.active === false ? 'inactive' : 'active'} onChange={e => setForm({ ...form, active: e.target.value === 'active' })}><option value="active">Active</option><option value="inactive">Removed / inactive</option></select></div>
         </div>
         <div className="flex items-center gap-3">
-          <Avatar name={form.name || associate.name} color={form.color || associate.color} photoUrl={form.photoUrl} photoZoom={form.photoZoom} photoPosX={form.photoPosX} photoPosY={form.photoPosY} size={64} />
+          <Avatar name={form.name || associate.name} color={form.color || associate.color} photoUrl={form.photoUrl} photoZoom={form.photoZoom} photoPosX={form.photoPosX} photoPosY={form.photoPosY} size={64} fallback="👤" />
           <div className="flex-1">
             <label className="label">Photo URL</label>
             <input className="input" value={form.photoUrl || ''} onChange={e => setForm({ ...form, photoUrl: e.target.value })} placeholder="/avatars/name.jpg or https://…" />
