@@ -307,7 +307,7 @@ export default function Leads({ initialSearch = '' }) {
   }
 
   return (
-    <div className="p-6 space-y-4">
+    <div className="leads-workspace p-6 space-y-4">
       {/* AI intelligence banner */}
       {(missedLeads.length > 0 || outreachLeads.length > 0) && (
         <div className={`ai-alert-compact ${aiAlertOpen ? 'is-open' : ''}`}>

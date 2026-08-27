@@ -102,11 +102,63 @@ async function request(db, path, { method = 'GET', query, body } = {}) {
     const token2 = await getAccessToken(db)
     headers.Authorization = `Bearer ${token2}`
     const retry = await fetch(url, { method, headers, body: body ? JSON.stringify(body) : undefined })
-    if (!retry.ok) throw new Error(`Momence API ${res.status}: ${await retry.text()}`)
-    return retry.json()
+    if (!retry.ok) throw new Error(`Momence API ${retry.status}: ${await retry.text()}`)
+    const retryText = await retry.text()
+    return retryText ? JSON.parse(retryText) : { ok: true }
   }
   if (!res.ok) throw new Error(`Momence API ${res.status} for ${path}: ${await res.text()}`)
-  return res.json()
+  const text = await res.text()
+  return text ? JSON.parse(text) : { ok: true }
+}
+
+export async function getSessions(db, filters = {}) {
+  return paginate(db, '/api/v2/host/sessions', {
+    pageSize: 200,
+    extra: {
+      sortBy: 'startsAt', sortOrder: 'ASC', includeCancelled: true,
+      startAfter: filters.startAfter, startBefore: filters.startBefore,
+      locationId: filters.locationId
+    }
+  })
+}
+
+export async function getSessionWorkspace(db, sessionId) {
+  const [session, bookings] = await Promise.all([
+    request(db, `/api/v2/host/sessions/${sessionId}`),
+    paginate(db, `/api/v2/host/sessions/${sessionId}/bookings`, {
+      pageSize: 100, extra: { sortBy: 'firstName', sortOrder: 'ASC', includeCancelled: true }
+    })
+  ])
+  return { session, bookings }
+}
+
+export function addMemberToSession(db, sessionId, memberId, createRecurringBooking = false) {
+  return request(db, `/api/v2/host/sessions/${sessionId}/bookings/free`, {
+    method: 'POST', body: { memberId: Number(memberId), createRecurringBooking: Boolean(createRecurringBooking) }
+  })
+}
+
+export function addMemberToWaitlist(db, sessionId, memberId) {
+  return request(db, `/api/v2/host/sessions/${sessionId}/waitlist/bookings`, {
+    method: 'POST', body: { memberId: Number(memberId) }
+  })
+}
+
+export function setBookingCheckIn(db, bookingId, checkedIn) {
+  return request(db, `/api/v2/host/session-bookings/${bookingId}/check-in`, {
+    method: checkedIn ? 'POST' : 'DELETE'
+  })
+}
+
+export function cancelSessionBooking(db, bookingId, options = {}) {
+  return request(db, `/api/v2/host/session-bookings/${bookingId}`, {
+    method: 'DELETE',
+    body: {
+      refund: options.refund !== false,
+      disableNotifications: Boolean(options.disableNotifications),
+      isLateCancellation: Boolean(options.isLateCancellation)
+    }
+  })
 }
 
 export async function createMember(db, input = {}) {

@@ -2,7 +2,7 @@ import React, { useState } from 'react'
 import {
   LayoutDashboard, KanbanSquare, Users, UploadCloud, Settings, Search,
   Plus, Zap, Link2, ShieldCheck, Sun, Moon, BarChart3, ChevronsLeft, ChevronsRight,
-  CalendarDays, CalendarRange, Activity, Inbox as InboxIcon
+  CalendarDays, CalendarRange, Activity, Inbox as InboxIcon, CalendarClock
 } from 'lucide-react'
 import { AppProvider, Toasts, useApp } from './store.jsx'
 import { useFetch } from './hooks.js'
@@ -18,6 +18,7 @@ import StudioWeekly from './pages/StudioWeekly.jsx'
 import StudioMonthly from './pages/StudioMonthly.jsx'
 import Inbox from './pages/Inbox.jsx'
 import SettingsPage from './pages/Settings.jsx'
+import MomenceSchedule from './pages/MomenceSchedule.jsx'
 import LeadDrawer from './components/LeadDrawer.jsx'
 import AddLeadModal from './components/AddLeadModal.jsx'
 import AlertsDropdown from './components/AlertsDropdown.jsx'
@@ -31,6 +32,7 @@ const NAV = [
   { id: 'pipeline', label: 'Pipeline', title: 'Sales Pipeline', icon: KanbanSquare },
   { id: 'leads', label: 'Leads', title: 'Lead Directory', icon: Users },
   { id: 'inbox', label: 'Inbox', title: 'Unified Inbox', icon: InboxIcon },
+  { id: 'momence-schedule', label: 'Class schedule', title: 'Momence Class Schedule', icon: CalendarClock },
   { id: 'import', label: 'Import CSV', title: 'Lead Import Centre', icon: UploadCloud },
   { id: 'team', label: 'Team & Studios', title: 'Studios & Sales Team', icon: Users },
   { id: 'settings', label: 'Settings', title: 'Workspace Settings', icon: Settings }
@@ -289,6 +291,7 @@ function Shell() {
     case 'pipeline': return <Pipeline />
     case 'leads': return <Leads initialSearch={viewParams.search} />
     case 'inbox': return <Inbox />
+    case 'momence-schedule': return <MomenceSchedule />
     case 'import': return <Import />
     case 'team': return <Team />
     case 'settings': return <SettingsPage />

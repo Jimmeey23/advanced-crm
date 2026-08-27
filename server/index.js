@@ -1380,6 +1380,47 @@ app.post('/api/momence/test', async (req, res) => {
   }
 })
 
+app.get('/api/momence/sessions', async (req, res) => {
+  if (!momence.isConfigured(db)) return res.status(400).json({ error: 'Momence is not configured. Complete the connection in Settings.' })
+  try {
+    const sessions = await momence.getSessions(db, req.query)
+    res.json({ sessions })
+  } catch (e) { res.status(502).json({ error: e.message }) }
+})
+
+app.get('/api/momence/sessions/:sessionId', async (req, res) => {
+  if (!momence.isConfigured(db)) return res.status(400).json({ error: 'Momence is not configured.' })
+  try { res.json(await momence.getSessionWorkspace(db, req.params.sessionId)) }
+  catch (e) { res.status(502).json({ error: e.message }) }
+})
+
+app.get('/api/momence/members', async (req, res) => {
+  if (!momence.isConfigured(db)) return res.status(400).json({ error: 'Momence is not configured.' })
+  const query = String(req.query.query || '').trim()
+  if (query.length < 2) return res.json({ members: [] })
+  try { res.json({ members: (await momence.searchMembers(db, query)).slice(0, 20) }) }
+  catch (e) { res.status(502).json({ error: e.message }) }
+})
+
+app.post('/api/momence/sessions/:sessionId/bookings', async (req, res) => {
+  try {
+    const result = req.body.waitlist
+      ? await momence.addMemberToWaitlist(db, req.params.sessionId, req.body.memberId)
+      : await momence.addMemberToSession(db, req.params.sessionId, req.body.memberId, req.body.createRecurringBooking)
+    res.json({ ok: true, result })
+  } catch (e) { res.status(502).json({ error: e.message }) }
+})
+
+app.put('/api/momence/bookings/:bookingId/check-in', async (req, res) => {
+  try { await momence.setBookingCheckIn(db, req.params.bookingId, req.body.checkedIn !== false); res.json({ ok: true }) }
+  catch (e) { res.status(502).json({ error: e.message }) }
+})
+
+app.delete('/api/momence/bookings/:bookingId', async (req, res) => {
+  try { await momence.cancelSessionBooking(db, req.params.bookingId, req.body); res.json({ ok: true }) }
+  catch (e) { res.status(502).json({ error: e.message }) }
+})
+
 // Resolves the Momence member for a lead by matching email/phone against the
 // Momence member directory — no manual member ID entry required. Returns the
 // candidate list unsynced when the match is ambiguous, so the UI can offer a
