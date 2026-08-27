@@ -82,6 +82,8 @@ app.use((err, req, res, next) => {
 })
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 200 * 1024 * 1024 } })
+const STRIPE_SECRET_KEY = String(process.env.STRIPE_SECRET_KEY || '').trim()
+const STRIPE_BASE = 'https://api.stripe.com/v1'
 
 let db = null
 
@@ -97,6 +99,47 @@ const openStatuses = ['open', 'won', 'lost']
 
 function leadById(id) {
   return db.leads.find(l => l.id === id)
+}
+
+function ensurePaymentsShape() {
+  if (!Array.isArray(db.payments)) db.payments = []
+}
+
+async function stripeRequest(path, { method = 'GET', body } = {}) {
+  if (!STRIPE_SECRET_KEY) throw new Error('Stripe is not configured. Add STRIPE_SECRET_KEY to the environment.')
+  const res = await fetch(`${STRIPE_BASE}${path}`, {
+    method,
+    headers: {
+      Authorization: `Bearer ${STRIPE_SECRET_KEY}`,
+      'Content-Type': 'application/x-www-form-urlencoded'
+    },
+    body: body ? new URLSearchParams(body).toString() : undefined
+  })
+  const text = await res.text()
+  const data = text ? JSON.parse(text) : {}
+  if (!res.ok) throw new Error(data.error?.message || data.message || `Stripe API ${res.status}`)
+  return data
+}
+
+function paymentRecordFromLead(lead, payload, status = 'open') {
+  ensurePaymentsShape()
+  const now = nowIso()
+  return {
+    id: uid('pay'),
+    leadId: lead.id,
+    leadName: lead.fullName,
+    locationId: lead.locationId,
+    classType: lead.classType || '',
+    amount: payload.amount || null,
+    currency: payload.currency || 'inr',
+    provider: 'stripe',
+    status,
+    checkoutSessionId: payload.checkoutSessionId || null,
+    checkoutUrl: payload.checkoutUrl || null,
+    createdAt: now,
+    updatedAt: now,
+    metadata: payload.metadata || {}
+  }
 }
 
 function safePatch(lead, body) {
@@ -327,8 +370,8 @@ function applyFilters(list, q) {
   if (q.locationId) out = out.filter(l => l.locationId === q.locationId)
   if (q.associateId) out = out.filter(l => l.associateId === q.associateId)
   if (q.stage) out = out.filter(l => l.stage === q.stage)
-  if (q.status) out = out.filter(l => l.status === q.status)
-  if (q.statusGroup) out = out.filter(l => statusGroupOf(l.stage) === q.statusGroup)
+  if (q.status) out = out.filter(l => enrichLead(l, db).status === q.status)
+  if (q.statusGroup) out = out.filter(l => enrichLead(l, db).statusGroup === q.statusGroup)
   if (q.sourceName) out = out.filter(l => l.sourceName === q.sourceName)
   if (q.channel) out = out.filter(l => l.channel === q.channel)
   if (q.classType) out = out.filter(l => l.classType === q.classType)
@@ -1405,7 +1448,7 @@ app.get('/api/momence/members', async (req, res) => {
 
 app.get('/api/momence/members/:memberId/session-memberships', async (req, res) => {
   try {
-    const memberships = await momence.getAvailableBookingMemberships(db, req.params.memberId, req.query.sessionId, req.query.locationId)
+    const memberships = await momence.getAvailableBookingMemberships(db, req.params.memberId, req.query.sessionId, req.query.locationId, req.query.recurringBooking === 'true')
     res.json({ memberships })
   } catch (e) { res.status(502).json({ error: e.message }) }
 })
@@ -1413,6 +1456,140 @@ app.get('/api/momence/members/:memberId/session-memberships', async (req, res) =
 app.get('/api/momence/host-memberships', async (req, res) => {
   try { res.json({ memberships: await momence.getHostMemberships(db, req.query.locationId) }) }
   catch (e) { res.status(502).json({ error: e.message }) }
+})
+
+app.get('/api/momence/payment-methods', (req, res) => {
+  const market = momence.marketForLocation(req.query.locationId, db)
+  res.json({ market, hostId: momence.effectiveConfig(db, market).hostId, paymentMethods: momence.paymentMethodsForLocation(req.query.locationId, db) })
+})
+
+app.post('/api/momence/members/:memberId/memberships', async (req, res) => {
+  try {
+    const result = await momence.purchaseMembership(db, req.params.memberId, req.body)
+    res.json({ ok: true, ...result })
+  } catch (e) { res.status(502).json({ ok: false, error: e.message }) }
+})
+
+function resolveLeadBillingMembership(lead, hostMemberships = [], classType = '') {
+  const locationName = String(db.locations.find(l => String(l.id) === String(lead.locationId))?.name || '').toLowerCase()
+  const cls = String(classType || lead.classType || '').toLowerCase()
+  const match = (needle) => hostMemberships.find(item => String(item.name || '').toLowerCase().includes(needle))
+  if (locationName.includes('kwality')) {
+    if (cls.includes('barre')) return match('open barre')
+    if (cls.includes('strength') || cls.includes('powercycle') || cls.includes('power cycle')) return match('newcomers 2 for 1')
+  }
+  if (locationName.includes('kenkere')) return match('new client intro pack')
+  if (locationName.includes('copper')) return match('copper & cloves') || match('copper and cloves')
+  if (locationName.includes('plash')) return match('studio single class')
+  return null
+}
+
+app.post('/api/momence/lead-booking-preview', async (req, res) => {
+  const lead = leadById(req.body?.leadId || req.query?.leadId)
+  if (!lead) return res.status(404).json({ error: 'Lead not found' })
+  try {
+    const hostMemberships = await momence.getHostMemberships(db, lead.locationId)
+    const membership = resolveLeadBillingMembership(lead, hostMemberships, req.body?.classType)
+    if (!membership) return res.status(409).json({ error: 'Could not resolve a billing package for this lead/location/class.' })
+    res.json({ ok: true, membershipId: membership.id, membershipName: membership.name, price: membership.price || null })
+  } catch (e) { res.status(502).json({ error: e.message }) }
+})
+
+app.post('/api/momence/lead-book-with-payment', async (req, res) => {
+  const lead = leadById(req.body?.leadId)
+  if (!lead) return res.status(404).json({ error: 'Lead not found' })
+  try {
+    const hostMemberships = await momence.getHostMemberships(db, lead.locationId)
+    const membership = resolveLeadBillingMembership(lead, hostMemberships, req.body?.classType)
+    if (!membership) return res.status(409).json({ error: 'Could not resolve a billing package for this lead/location/class.' })
+    const memberId = req.body?.memberId || lead.memberId
+    if (!memberId) return res.status(400).json({ error: 'Lead must be linked to a Momence member first.' })
+    await momence.purchaseMembership(db, memberId, {
+      locationId: lead.locationId,
+      membershipId: membership.id,
+      paymentMethodId: momence.paymentMethodsForLocation(lead.locationId, db)[0]?.id,
+      priceInCurrency: membership.price
+    })
+    const booking = await momence.autoBookMember(db, req.body?.sessionId || 0, memberId, { locationId: lead.locationId, membershipId: membership.id })
+    res.json({ ok: true, membershipId: membership.id, membershipName: membership.name, booking })
+  } catch (e) { res.status(502).json({ error: e.message }) }
+})
+
+app.post('/api/stripe/payment-links', async (req, res) => {
+  const lead = leadById(req.body?.leadId)
+  if (!lead) return res.status(404).json({ error: 'Lead not found' })
+  try {
+    const amount = Number(req.body?.amount || 0)
+    if (!Number.isFinite(amount) || amount <= 0) return res.status(400).json({ error: 'Enter a valid amount.' })
+    const metadata = {
+      leadId: String(lead.id),
+      locationId: String(lead.locationId || ''),
+      classType: String(lead.classType || ''),
+      leadName: String(lead.fullName || '')
+    }
+    const session = await stripeRequest('/checkout/sessions', {
+      method: 'POST',
+      body: {
+        mode: 'payment',
+        'line_items[0][quantity]': '1',
+        'line_items[0][price_data][currency]': 'inr',
+        'line_items[0][price_data][unit_amount]': String(Math.round(amount * 100)),
+        'line_items[0][price_data][product_data][name]': req.body?.name || `Payment for ${lead.fullName}`,
+        'line_items[0][price_data][product_data][description]': req.body?.description || 'Lead payment link created in Physique 57 CRM',
+        success_url: req.body?.successUrl || `${req.headers.origin || ''}/?stripe_session_id={CHECKOUT_SESSION_ID}`,
+        cancel_url: req.body?.cancelUrl || `${req.headers.origin || ''}/`,
+        'payment_intent_data[metadata][leadId]': metadata.leadId,
+        'payment_intent_data[metadata][locationId]': metadata.locationId,
+        'payment_intent_data[metadata][classType]': metadata.classType,
+        'payment_intent_data[metadata][leadName]': metadata.leadName,
+        'metadata[leadId]': metadata.leadId,
+        'metadata[locationId]': metadata.locationId,
+        'metadata[classType]': metadata.classType,
+        'metadata[leadName]': metadata.leadName
+      }
+    })
+    const record = paymentRecordFromLead(lead, { amount, checkoutSessionId: session.id, checkoutUrl: session.url, metadata }, session.payment_status || 'open')
+    db.payments.unshift(record)
+    lead.payments = [...(lead.payments || []), record.id]
+    markDirty(lead.id)
+    save()
+    res.json({ ok: true, payment: record })
+  } catch (e) { res.status(502).json({ error: e.message }) }
+})
+
+app.get('/api/stripe/payment-links/:paymentId', async (req, res) => {
+  ensurePaymentsShape()
+  const payment = db.payments.find(p => p.id === req.params.paymentId)
+  if (!payment) return res.status(404).json({ error: 'Payment link not found' })
+  try {
+    if (payment.checkoutSessionId) {
+      const session = await stripeRequest(`/checkout/sessions/${payment.checkoutSessionId}`)
+      payment.status = session.payment_status || session.status || payment.status
+      payment.updatedAt = nowIso()
+      save()
+      return res.json({ ok: true, payment: { ...payment, stripe: session } })
+    }
+    res.json({ ok: true, payment })
+  } catch (e) { res.status(502).json({ error: e.message }) }
+})
+
+let momenceEvidenceSyncPromise = null
+async function syncMomenceLifecycleEvidence() {
+  if (momenceEvidenceSyncPromise) return momenceEvidenceSyncPromise
+  momenceEvidenceSyncPromise = momence.syncLifecycleEvidence(db, db.leads)
+    .then(result => {
+      for (const leadId of result.updatedLeadIds) markDirty(leadId)
+      save()
+      if (result.updatedLeadIds.length) log('sync', `Refreshed Momence evidence for ${result.updatedLeadIds.length} lead(s)`)
+      return result.summary
+    })
+    .finally(() => { momenceEvidenceSyncPromise = null })
+  return momenceEvidenceSyncPromise
+}
+
+app.post('/api/momence/sync-lifecycle-evidence', async (req, res) => {
+  try { res.json({ ok: true, summary: await syncMomenceLifecycleEvidence() }) }
+  catch (e) { res.status(502).json({ ok: false, error: e.message }) }
 })
 
 app.post('/api/momence/sessions/:sessionId/bookings', async (req, res) => {
@@ -3472,6 +3649,8 @@ async function start() {
   console.log(`[physique57-leads] respondio: ${respondio.isConfigured(db) ? 'configured' : 'not configured'}`)
   console.log(`[physique57-leads] mailtrap: ${mailer.isConfigured(db) ? 'configured' : 'not configured'}`)
   console.log(`[physique57-leads] momence configured: ${momence.isConfigured(db)}`)
+  setTimeout(() => syncMomenceLifecycleEvidence().catch(error => console.warn(`[physique57-leads] Momence evidence sync skipped: ${error.message}`)), 15000)
+  setInterval(() => syncMomenceLifecycleEvidence().catch(error => console.warn(`[physique57-leads] Momence evidence sync failed: ${error.message}`)), 6 * 60 * 60 * 1000)
 }
 
 function listenOnAvailablePort(startPort) {

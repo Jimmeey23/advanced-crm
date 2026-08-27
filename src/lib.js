@@ -134,6 +134,8 @@ export function baseColumnValue(id, l, lookup) {
     case 'stage': return l.stage || ''
     case 'status': return l.status || ''
     case 'statusGroup': return l.statusGroup || ''
+    case 'trialDate': return l.trialDate || ''
+    case 'firstPurchaseDate': return l.firstPurchaseDate || ''
     case 'fullName': return l.fullName || ''
     case 'email': return l.email || ''
     default: return ''
@@ -142,7 +144,7 @@ export function baseColumnValue(id, l, lookup) {
 
 const FORMULA_CONTEXT_FIELDS = [
   'fullName', 'phone', 'email', 'source', 'owner', 'location', 'score', 'risk',
-  'valueEstimate', 'classType', 'missedCount', 'lastOutreachDays', 'created', 'remarks', 'stage', 'status'
+  'valueEstimate', 'classType', 'missedCount', 'lastOutreachDays', 'created', 'remarks', 'stage', 'status', 'trialDate', 'firstPurchaseDate'
 ]
 
 export function buildFormulaContext(l, lookup) {

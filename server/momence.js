@@ -46,6 +46,28 @@ export const HOME_LOCATION_IDS = Object.freeze({
   plash: 287883
 })
 
+export const PAYMENT_METHODS = Object.freeze({
+  blr: [
+    { id: 5802, paymentMode: 'immediate', label: 'Bank Transfer', canBeUsedOffSession: false },
+    { id: 5886, paymentMode: 'immediate', label: 'Cheque', canBeUsedOffSession: false },
+    { id: 5831, paymentMode: 'immediate', label: 'POS', canBeUsedOffSession: false },
+    { id: 57340, paymentMode: 'immediate', label: 'Razorpay', canBeUsedOffSession: false },
+    { id: 5801, paymentMode: 'immediate', label: 'Stripe Link', canBeUsedOffSession: false },
+    { id: 5800, paymentMode: 'immediate', label: 'UPI', canBeUsedOffSession: false }
+  ],
+  mumbai: [
+    { id: 4470, paymentMode: 'immediate', label: 'Bank Transfer', canBeUsedOffSession: false },
+    { id: 4469, paymentMode: 'immediate', label: 'POS Machine', canBeUsedOffSession: false },
+    { id: 20860, paymentMode: 'immediate', label: 'Razorpay', canBeUsedOffSession: false },
+    { id: 4578, paymentMode: 'immediate', label: 'Stripe Link', canBeUsedOffSession: false },
+    { id: 4352, paymentMode: 'immediate', label: 'UPI', canBeUsedOffSession: false }
+  ]
+})
+
+export function paymentMethodsForLocation(locationId, db) {
+  return PAYMENT_METHODS[marketForLocation(locationId, db)]
+}
+
 export function resolveHomeLocationId(value, db) {
   const numeric = Number(value)
   if (Number.isInteger(numeric) && numeric > 0) return numeric
@@ -229,20 +251,197 @@ async function dashboardRequest(db, path, { market = 'mumbai', method = 'GET', b
   return data
 }
 
-const membershipRows = data => data?.payload || data?.items || data?.memberships || (Array.isArray(data) ? data : [])
+const wait = ms => new Promise(resolve => setTimeout(resolve, ms))
+const firstValue = (value, keys) => {
+  for (const key of keys) if (value?.[key] !== undefined && value?.[key] !== null && value?.[key] !== '') return value[key]
+  if (value && typeof value === 'object') {
+    const wanted = new Set(keys.map(key => String(key).toLowerCase().replace(/[^a-z0-9]/g, '')))
+    for (const [key, fieldValue] of Object.entries(value)) {
+      if (wanted.has(String(key).toLowerCase().replace(/[^a-z0-9]/g, '')) && fieldValue !== undefined && fieldValue !== null && fieldValue !== '') return fieldValue
+    }
+  }
+  return null
+}
+const reportRunId = value => firstValue(value, ['reportRunId', 'runId', 'id']) || firstValue(value?.reportRun, ['id', 'reportRunId'])
+const reportRows = value => {
+  if (Array.isArray(value)) return value
+  for (const key of ['rows', 'items', 'payload', 'data', 'results', 'result', 'report', 'reportData']) {
+    const nested = value?.[key]
+    if (Array.isArray(nested)) return nested
+    const deeper = nested && reportRows(nested)
+    if (deeper?.length) return deeper
+  }
+  return []
+}
 
-export async function getAvailableBookingMemberships(db, memberId, sessionId, locationId) {
+export async function runDashboardReport(db, report, { market = 'mumbai', startDate, endDate } = {}) {
+  const now = new Date()
+  const start = startDate || new Date(now.getTime() - 365 * 86400000).toISOString()
+  const end = endDate || now.toISOString()
+  const base = { timeZone: 'Asia/Kolkata', day: now.toISOString(), startDate: start, endDate: end, datePreset: 4 }
+  const body = report === 'total-sales'
+    ? { ...base, startDate2: start, endDate2: end, groupRecurring: false, computedSaleValue: true, includeVatInRevenue: true, useBookedEntityDateRange: false, excludeMembershipRenews: false, moneyCreditSalesFilter: 'filterOutSalesPaidByMoneyCredits', hideVoided: false, excludeInactiveMembers: false, excludeCustomersWithoutVisits: false, includeCustomersActivityLog: false, includeCustomersDetails: true, includeRefunds: true, showOnlySpotfillerRevenue: false, excludeGiftCardPaymentMethod: false, excludeTransactionFeesInSaleValue: false, splitByTeacher: false, saleTypes: ['event', 'membership', 'pack', 'subscription', 'course', 'on-demand', 'appointment'] }
+    : { ...base, membershipTagIds: [], sessionTagIds: [] }
+  const started = await dashboardRequest(db, `/reports/${report}/async`, { market, method: 'POST', body })
+  const runId = reportRunId(started)
+  if (!runId) {
+    const rows = reportRows(started)
+    if (rows.length) return rows
+    throw new Error(`Momence ${report} report did not return a report run ID.`)
+  }
+  for (let attempt = 0; attempt < 180; attempt++) {
+    const result = await dashboardRequest(db, `/reports/${report}/report-runs/${runId}`, { market })
+    const status = String(firstValue(result, ['status', 'state']) || firstValue(result?.reportRun, ['status', 'state']) || '').toLowerCase()
+    if (attempt === 0) console.log(`[momence] ${market} ${report} report run ${runId}: status=${status || 'unknown'} keys=${Object.keys(result || {}).join(',')}`)
+    if (['failed', 'error', 'cancelled'].includes(status)) throw new Error(`Momence ${report} report run ${runId} ${status}.`)
+    const rows = reportRows(result)
+    if (rows.length || ['complete', 'completed', 'finished', 'success', 'succeeded'].includes(status)) return rows
+    await wait(1000)
+  }
+  throw new Error(`Momence ${report} report timed out.`)
+}
+
+const cleanPhone = value => String(value || '').replace(/\D/g, '').slice(-10)
+const cleanEmail = value => String(value || '').trim().toLowerCase()
+const asBool = value => value === true || value === 1 || ['true', 'yes', 'y', '1'].includes(String(value || '').trim().toLowerCase())
+const rowDate = (row, keys) => {
+  // Momence report exports put dates on different nested objects depending on
+  // the report version. Keep the report-driven lifecycle fields populated even
+  // when the matching member is present on the flattened item row.
+  const candidates = [
+    row,
+    row?.item,
+    row?.sale,
+    row?.booking,
+    row?.session,
+    row?.bookedEntity,
+    row?.member,
+    row?.customer
+  ]
+  for (const candidate of candidates) {
+    const value = firstValue(candidate, keys)
+    const date = value ? new Date(value) : null
+    if (date && !Number.isNaN(date.getTime())) return date
+  }
+  return null
+}
+const rowMemberId = row => String(firstValue(row, ['memberId', 'customerId', 'clientId', 'targetMemberId', 'payingMemberId']) || firstValue(row?.member, ['id']) || firstValue(row?.customer, ['id']) || '').trim()
+const rowEmail = row => cleanEmail(firstValue(row, ['email', 'memberEmail', 'customerEmail', 'clientEmail']) || row?.member?.email || row?.customer?.email)
+const rowPhone = row => cleanPhone(firstValue(row, ['phone', 'phoneNumber', 'memberPhone', 'customerPhone']) || row?.member?.phoneNumber || row?.customer?.phoneNumber)
+const matchesLead = (row, lead) => {
+  const idMatch = isValidMemberId(lead.memberId) && rowMemberId(row) && String(lead.memberId) === rowMemberId(row)
+  const emailMatch = Boolean(lead.email && rowEmail(row) && cleanEmail(lead.email) === rowEmail(row))
+  // Reports must be joined by the lead's linked Momence member ID or email.
+  // Phone values are too easily shared/rewritten to establish lifecycle proof.
+  return Boolean(idMatch || emailMatch)
+}
+const saleType = row => String(firstValue(row, ['saleType', 'itemType', 'type', 'productType', 'category']) || firstValue(row?.item, ['itemType', 'type']) || '').toLowerCase()
+const isQualifiedMembershipSale = row => {
+  const type = saleType(row)
+  const voided = asBool(firstValue(row, ['voided', 'isVoided', 'cancelled', 'isCancelled']))
+  const refunded = asBool(firstValue(row, ['fullyRefunded', 'isRefunded'])) || String(firstValue(row, ['status']) || '').toLowerCase().includes('refund')
+  return /membership|subscription|pack/.test(type) && !voided && !refunded
+}
+const isValidTrialBooking = row => !asBool(firstValue(row, ['cancelled', 'isCancelled'])) && !asBool(firstValue(row, ['lateCancelled', 'isLateCancelled', 'lateCancellation'])) && !asBool(firstValue(row, ['noShow', 'isNoShow', 'noshow']))
+
+export function applyLifecycleEvidence(leads, salesRows, bookingRows, market, db) {
+  const expandedSales = salesRows.flatMap(row => Array.isArray(row?.items) && row.items.length ? row.items.map(item => ({ ...row, ...item, item, member: item.targetMember || item.payingMember || row.member, customer: item.targetMember || item.payingMember || row.customer })) : [row])
+  let updated = 0
+  const updatedLeadIds = []
+  for (const lead of leads) {
+    if (marketForLocation(lead.locationId, db) !== market) continue
+    const createdAt = new Date(lead.createdAt || 0)
+    if (Number.isNaN(createdAt.getTime())) continue
+    const firstPurchase = expandedSales
+      .filter(row => matchesLead(row, lead) && isQualifiedMembershipSale(row))
+      .map(row => rowDate(row, ['saleDate', 'soldAt', 'purchaseDate', 'transactionDate', 'createdAt', 'date']))
+      .filter(date => date && date > createdAt)
+      .sort((a, b) => a - b)[0] || null
+    const firstTrial = bookingRows
+      .filter(row => matchesLead(row, lead) && isValidTrialBooking(row))
+      .map(row => rowDate(row, ['sessionDate', 'classDate', 'startsAt', 'sessionStartsAt', 'sessionStartDate', 'bookedEntityStartsAt', 'date']))
+      .filter(date => date && date > createdAt)
+      .sort((a, b) => a - b)[0] || null
+    const evidence = {
+      market,
+      trialCompleted: Boolean(firstTrial),
+      trialDate: firstTrial?.toISOString() || null,
+      membershipSold: Boolean(firstPurchase),
+      firstPurchaseDate: firstPurchase?.toISOString() || null
+    }
+    const previous = lead.momenceEvidence || {}
+    const previousEvidence = { market: previous.market, trialCompleted: Boolean(previous.trialCompleted), trialDate: previous.trialDate || null, membershipSold: Boolean(previous.membershipSold), firstPurchaseDate: previous.firstPurchaseDate || null }
+    if (JSON.stringify(previousEvidence) !== JSON.stringify(evidence)) {
+      updated++
+      updatedLeadIds.push(lead.id)
+      lead.momenceEvidence = { ...evidence, checkedAt: nowIso() }
+      if (firstPurchase) lead.convertedAt = firstPurchase.toISOString()
+    }
+  }
+  return { updated, updatedLeadIds }
+}
+
+export async function syncLifecycleEvidence(db, leads = db.leads || []) {
+  const validDates = leads.map(lead => new Date(lead.createdAt)).filter(date => !Number.isNaN(date.getTime()))
+  const startDate = (validDates.sort((a, b) => a - b)[0] || new Date(Date.now() - 365 * 86400000)).toISOString()
+  const endDate = new Date().toISOString()
+  const summary = []
+  const updatedLeadIds = []
+  for (const market of ['mumbai', 'blr']) {
+    if (!dashboardCookie(market)) { summary.push({ market, skipped: true, reason: 'dashboard-cookie-missing' }); continue }
+    const [sales, bookings] = await Promise.all([
+      runDashboardReport(db, 'total-sales', { market, startDate, endDate }),
+      runDashboardReport(db, 'session-bookings', { market, startDate, endDate })
+    ])
+    const applied = applyLifecycleEvidence(leads, sales, bookings, market, db)
+    updatedLeadIds.push(...applied.updatedLeadIds)
+    summary.push({ market, sales: sales.length, bookings: bookings.length, updated: applied.updated })
+  }
+  save()
+  return { summary, updatedLeadIds: [...new Set(updatedLeadIds)] }
+}
+
+const membershipRows = data => {
+  if (Array.isArray(data)) return data
+  for (const value of [data?.memberships, data?.items, data?.payload?.memberships, data?.payload?.items, data?.payload, data?.data?.memberships, data?.data]) {
+    if (Array.isArray(value)) return value
+  }
+  return []
+}
+const bookingMembershipId = item => item?.bookingMembershipId || item?.boughtMembershipId || item?.boughtMembership?.id || item?.id || item?.membershipId
+const activeBookingMembership = item => {
+  const now = Date.now()
+  const startValue = firstValue(item, ['startDate', 'startsAt', 'validFrom', 'activatedAt'])
+  const endValue = firstValue(item, ['endDate', 'endsAt', 'validTo', 'expiresAt', 'expirationDate'])
+  const start = startValue ? new Date(startValue).getTime() : null
+  const end = endValue ? new Date(endValue).getTime() : null
+  const state = String(item?.status || item?.membershipStatus || '').toLowerCase()
+  if (item?.deletedAt || item?.isVoided || item?.isFreezed || item?.isFrozen || item?.isActive === false || item?.active === false || ['expired', 'inactive', 'cancelled', 'canceled', 'voided', 'frozen'].includes(state)) return false
+  if (item?.membership?.disabled || item?.membership?.isDeleted) return false
+  if (Number.isFinite(start) && start > now) return false
+  if (Number.isFinite(end) && end < now) return false
+  if (item?.classesLeft !== null && item?.classesLeft !== undefined && Number(item.classesLeft) <= 0) return false
+  if (item?.combinedUsageLimit !== null && item?.combinedUsageLimit !== undefined && item?.combinedUsage !== null && item?.combinedUsage !== undefined && Number(item.combinedUsage) >= Number(item.combinedUsageLimit)) return false
+  return Boolean(bookingMembershipId(item))
+}
+
+export async function getAvailableBookingMemberships(db, memberId, sessionId, locationId, recurringBooking = false) {
   const market = marketForLocation(locationId, db)
-  return membershipRows(await dashboardRequest(db, `/auto-book/member/${Number(memberId)}/session/${Number(sessionId)}/memberships`, { market }))
+  const rows = membershipRows(await dashboardRequest(db, `/auto-book/member/${Number(memberId)}/session/${Number(sessionId)}/memberships?recurringBooking=${Boolean(recurringBooking)}`, { market }))
+  return rows.filter(activeBookingMembership).map(item => ({ ...item, bookingMembershipId: bookingMembershipId(item) }))
 }
 
 export async function autoBookMember(db, sessionId, memberId, options = {}) {
   const market = marketForLocation(options.locationId, db)
-  const memberships = await getAvailableBookingMemberships(db, memberId, sessionId, options.locationId)
+  const recurringBooking = Boolean(options.createRecurringBooking || options.recurringBooking)
+  // Always re-fetch immediately before booking. This validates that the
+  // membership selected by the UI is still active and eligible for this exact
+  // session, instead of trusting stale client state.
+  const memberships = await getAvailableBookingMemberships(db, memberId, sessionId, options.locationId, recurringBooking)
   const selected = options.membershipId
-    ? memberships.find(item => String(item.id || item.membershipId || item.boughtMembershipId) === String(options.membershipId))
+    ? memberships.find(item => String(bookingMembershipId(item)) === String(options.membershipId))
     : memberships.find(item => item.isActive !== false && item.isEligible !== false && item.canBook !== false)
-  const membershipId = selected?.id || selected?.membershipId || selected?.boughtMembershipId
+  const membershipId = bookingMembershipId(selected)
   if (!membershipId) {
     const error = new Error('No eligible active membership is available for this session. Select a host membership to create a new sale first.')
     error.code = 'NO_ELIGIBLE_MEMBERSHIP'
@@ -255,11 +454,52 @@ export async function autoBookMember(db, sessionId, memberId, options = {}) {
     body: {
       autoCheckin: Boolean(options.autoCheckin),
       membershipIds: [Number(membershipId)],
-      createRecurringBooking: Boolean(options.createRecurringBooking),
+      addToWaitlist: false,
       isCapacityOverriden: Boolean(options.overrideCapacity),
       isAgeRestrictionOverridden: Boolean(options.overrideAgeRestriction)
     }
   })
+}
+
+export async function purchaseMembership(db, memberId, options = {}) {
+  const market = marketForLocation(options.locationId, db)
+  const methods = PAYMENT_METHODS[market]
+  const paymentMethod = methods.find(method => String(method.id) === String(options.paymentMethodId))
+  if (!paymentMethod) throw new Error('Select a valid payment method for this studio.')
+  const catalog = await getHostMemberships(db, options.locationId)
+  const membership = catalog.find(item => String(item.id) === String(options.membershipId) && item.disabled !== true && item.isDeleted !== true)
+  if (!membership) throw new Error('The selected host membership is no longer available.')
+  const priceInCurrency = Number(options.priceInCurrency ?? membership.price)
+  if (!Number.isFinite(priceInCurrency) || priceInCurrency < 0) throw new Error('The selected membership has an invalid price.')
+  const guid = crypto.randomUUID()
+  const item = {
+    guid,
+    type: 'membership',
+    quantity: 1,
+    priceInCurrency,
+    isPaymentPlanUsed: false,
+    membershipId: Number(membership.id),
+    appliedPriceRuleIds: []
+  }
+  await dashboardRequest(db, '/pos/payments/recalculate-cart', {
+    market,
+    method: 'POST',
+    body: { hostId: Number(effectiveConfig(db, market).hostId), items: [item], payingMemberId: Number(memberId), targetMemberId: Number(memberId), discounts: {} }
+  })
+  const result = await dashboardRequest(db, '/pos/payments/pay-cart', {
+    market,
+    method: 'POST',
+    body: {
+      hostId: Number(effectiveConfig(db, market).hostId),
+      payingMemberId: Number(memberId),
+      targetMemberId: Number(memberId),
+      items: [item],
+      paymentMethods: [{ type: 'custom', customPaymentMethodId: Number(paymentMethod.id), weightRelative: 1, guid: crypto.randomUUID() }],
+      isEmailSent: Boolean(options.isEmailSent),
+      homeLocationId: resolveHomeLocationId(options.locationId, db)
+    }
+  })
+  return { result, membership: { id: membership.id, name: membership.name }, paymentMethod }
 }
 
 export async function createMember(db, input = {}) {
@@ -329,7 +569,16 @@ export async function getMemberMemberships(db, memberId, market = 'mumbai') {
 
 export async function getHostMemberships(db, locationId) {
   const market = marketForLocation(locationId, db)
-  return safePaginate(db, '/api/v2/host/memberships', { market, pageSize: 200, extra: { locationId, includeInactive: false } }, [])
+  return safePaginate(db, '/api/v2/host/memberships', {
+    market,
+    pageSize: 200,
+    extra: {
+      sortOrder: 'DESC',
+      sortBy: 'name',
+      includeDisabled: false,
+      onlyFeatured: true
+    }
+  }, [])
 }
 
 export async function getMemberNotes(db, memberId, market = 'mumbai') {

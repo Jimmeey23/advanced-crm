@@ -1585,7 +1585,7 @@ function SourceChannelMapper({ sources, channels, value, onChange }) {
 
 const COLUMN_DATA_TYPES = ['text', 'number', 'currency', 'percent', 'date', 'datetime', 'boolean']
 const COLUMN_KINDS = ['base', 'formula', 'conditional', 'dependent']
-const LEAD_FIELD_OPTIONS = ['fullName', 'phone', 'email', 'source', 'owner', 'location', 'score', 'risk', 'valueEstimate', 'classType', 'missedCount', 'lastOutreachDays', 'created', 'remarks', 'stage', 'status', 'statusGroup']
+const LEAD_FIELD_OPTIONS = ['fullName', 'phone', 'email', 'source', 'owner', 'location', 'score', 'risk', 'valueEstimate', 'classType', 'missedCount', 'lastOutreachDays', 'created', 'remarks', 'stage', 'status', 'statusGroup', 'trialDate', 'firstPurchaseDate']
 
 function LeadColumnSchemaEditor({ columns, onChange }) {
   const patch = (id, changes) => onChange(columns.map(column => column.id === id ? { ...column, ...changes } : column))

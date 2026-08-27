@@ -1,11 +1,12 @@
-import React, { useMemo, useRef, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import {
   Search, SlidersHorizontal, ChevronDown, ChevronRight, X, Download,
   Table as TableIcon, LayoutGrid, Rows3, PieChart, KanbanSquare, CalendarDays,
   Phone, MessageCircle, Mail, MessageSquareText, Sparkles, Trash2, CheckSquare, Square,
   Users, TrendingUp, XCircle, Wallet, Clock, AlertTriangle, Flag,
-  Trophy, PhoneOff, FlaskConical, CircleDot, PanelTop, Check, Pencil
+  Trophy, PhoneOff, FlaskConical, CircleDot, PanelTop, Check, Pencil,
+  MoreVertical, Tags, UserPlus, CalendarPlus, CreditCard, Eye
 } from 'lucide-react'
 import { useApp } from '../store.jsx'
 import { useFetch } from '../hooks.js'
@@ -16,11 +17,16 @@ import Tip from '../components/Tip.jsx'
 import ComposeModal from '../components/ComposeModal.jsx'
 import RespondioTemplateModal from '../components/RespondioTemplateModal.jsx'
 import ColumnManager, { DEFAULT_COLUMNS } from '../components/ColumnManager.jsx'
+import { Modal, ModalHeader } from '../ui.jsx'
 
 const COLUMNS_KEY = 'p57_leads_columns_v1'
 const followUpText = value => {
   const text = String(value ?? '').trim()
   return text === '-' || text === '\u2014' ? '' : text
+}
+const cleanDate = value => {
+  const text = String(value ?? '').trim()
+  return !text || text === '-' || text === '\u2014' ? '' : text
 }
 function loadColumns() {
   try {
@@ -114,6 +120,18 @@ export default function Leads({ initialSearch = '' }) {
   const [collapsed, setCollapsed] = useState({})
   const [composeLead, setComposeLead] = useState(null)
   const [templateLead, setTemplateLead] = useState(null)
+  const [chatLead, setChatLead] = useState(null)
+  const [quickActionLead, setQuickActionLead] = useState(null)
+  const [quickActionMode, setQuickActionMode] = useState('book')
+  const [quickActionClass, setQuickActionClass] = useState('')
+  const [quickActionAmount, setQuickActionAmount] = useState('')
+  const [quickActionName, setQuickActionName] = useState('')
+  const [quickActionUrl, setQuickActionUrl] = useState('')
+  const [quickActionStatus, setQuickActionStatus] = useState('')
+  const [quickActionSessionId, setQuickActionSessionId] = useState('')
+  const [quickActionMembershipId, setQuickActionMembershipId] = useState('')
+  const [quickActionPaymentMethodId, setQuickActionPaymentMethodId] = useState('')
+  const [quickActionPurchaseMembershipId, setQuickActionPurchaseMembershipId] = useState('')
   const [focusLeadIds, setFocusLeadIds] = useState([])
   const [selected, setSelected] = useState(() => new Set())
   const [selectAllMatching, setSelectAllMatching] = useState(false)
@@ -123,8 +141,10 @@ export default function Leads({ initialSearch = '' }) {
   React.useEffect(() => {
     const configured = boot?.settings?.leadColumns
     if (!Array.isArray(configured) || !configured.length) return
-    setColumnsRaw(configured.map(column => ({ ...column })))
-    try { localStorage.setItem(COLUMNS_KEY, JSON.stringify(configured)) } catch (e) { /* ignore */ }
+    const lifecycleColumns = DEFAULT_COLUMNS.filter(column => ['trialDate', 'firstPurchaseDate'].includes(column.field) && !configured.some(existing => existing.field === column.field))
+    const next = [...configured.map(column => ({ ...column })), ...lifecycleColumns]
+    setColumnsRaw(next)
+    try { localStorage.setItem(COLUMNS_KEY, JSON.stringify(next)) } catch (e) { /* ignore */ }
   }, [boot?.settings?.leadColumns])
   const [headerPinned, setHeaderPinned] = useState(() => localStorage.getItem('p57_leads_header_pinned') !== 'false')
   const [pageSize, setPageSize] = useState(() => Number(localStorage.getItem('p57_leads_page_size')) || 25)
@@ -181,6 +201,80 @@ export default function Leads({ initialSearch = '' }) {
   const changeLeadField = async (lead, patch) => {
     try { await api.patch(`/api/leads/${lead.id}`, patch); refreshData() }
     catch (e) { toast(e.message, 'error') }
+  }
+
+  const leadBillingPreset = (lead, classType = '') => {
+    const loc = String(lookup.locById[lead.locationId]?.name || '').toLowerCase()
+    const cls = String(classType || lead.classType || '').toLowerCase()
+    if (loc.includes('kwality')) {
+      if (cls.includes('barre')) return { mode: 'momence', title: 'Open Barre membership', membershipName: 'Open Barre' }
+      if (cls.includes('strength') || cls.includes('powercycle') || cls.includes('power cycle')) return { mode: 'momence', title: 'Newcomers 2 For 1 membership', membershipName: 'Newcomers 2 For 1' }
+    }
+    if (loc.includes('kenkere')) return { mode: 'momence', title: 'New Client Intro Pack', membershipName: 'New Client Intro Pack' }
+    if (loc.includes('copper')) return { mode: 'momence', title: 'Copper & Cloves single class', membershipName: 'Copper & Cloves' }
+    if (loc.includes('plash')) return { mode: 'momence', title: 'Studio Single Class', membershipName: 'Studio Single Class' }
+    return { mode: 'momence', title: 'Select a billing package', membershipName: '' }
+  }
+
+  const openQuickAction = (lead, mode = 'book') => {
+    const preset = leadBillingPreset(lead)
+    setQuickActionLead(lead)
+    setQuickActionMode(mode)
+    setQuickActionClass(lead.classType || '')
+    setQuickActionAmount('')
+    setQuickActionName(preset.title)
+    setQuickActionUrl('')
+    setQuickActionStatus('')
+    setQuickActionSessionId('')
+    setQuickActionMembershipId('')
+    setQuickActionPaymentMethodId('')
+    setQuickActionPurchaseMembershipId('')
+  }
+
+  const submitQuickAction = async () => {
+    if (!quickActionLead) return
+    try {
+      let memberId = quickActionLead.memberId || quickActionLead.momence?.memberId
+      if (!memberId) {
+        const nameParts = String(quickActionLead.fullName || '').trim().split(/\s+/).filter(Boolean)
+        const firstName = nameParts.shift() || ''
+        const lastName = nameParts.join(' ') || 'Member'
+        const created = await api.post(`/api/momence/create/${quickActionLead.id}`, {
+          firstName,
+          lastName,
+          email: quickActionLead.email,
+          phoneNumber: quickActionLead.phone,
+          homeLocationId: quickActionLead.locationId
+        })
+        memberId = created.memberId
+        setQuickActionLead(current => current ? { ...current, memberId } : current)
+        toast('Lead converted to a Momence member')
+      }
+      if (quickActionMode === 'stripe') {
+        if (!quickActionPurchaseMembershipId || !quickActionPaymentMethodId) throw new Error('Select a membership and payment method.')
+        const result = await api.post(`/api/momence/members/${memberId}/memberships`, {
+          membershipId: quickActionPurchaseMembershipId,
+          paymentMethodId: quickActionPaymentMethodId,
+          locationId: quickActionLead.locationId,
+          isEmailSent: true
+        })
+        setQuickActionStatus(result?.result?.status || 'paid')
+        toast('Momence POS purchase completed')
+        refreshData()
+        return
+      }
+      if (!quickActionSessionId) throw new Error('Select a Studio Session first.')
+      if (quickActionPurchaseMembershipId) {
+        await api.post(`/api/momence/members/${memberId}/memberships`, { membershipId: quickActionPurchaseMembershipId, paymentMethodId: quickActionPaymentMethodId, locationId: quickActionLead.locationId, isEmailSent: false })
+      }
+      const result = await api.post(`/api/momence/sessions/${quickActionSessionId}/bookings`, { memberId, membershipId: quickActionMembershipId || undefined, locationId: quickActionLead.locationId, recurringBooking: false, waitlist: false })
+      const membership = result?.result || result
+      setQuickActionStatus(membership?.status || 'booked')
+      toast('Lead booked successfully')
+      refreshData()
+    } catch (e) {
+      toast(e.message, 'error')
+    }
   }
 
   const toggleManualFlag = async (lead) => {
@@ -493,7 +587,7 @@ export default function Leads({ initialSearch = '' }) {
         <div className="card overflow-hidden" ref={tableJumpRef}>
           {view === 'table' && (
             <TableView
-              items={items} boot={boot} lookup={lookup} openLead={openLead}
+              items={items} boot={boot} lookup={lookup} openLead={openLead} openQuickAction={openQuickAction}
               changeStage={changeStage} changeAssociate={changeAssociate} changeLeadField={changeLeadField} grouped={grouped} collapsed={collapsed} toggleGroup={toggleGroup}
               toggleManualFlag={toggleManualFlag}
                   onMessage={setComposeLead}
@@ -525,8 +619,74 @@ export default function Leads({ initialSearch = '' }) {
 
       <ComposeModal open={!!composeLead} onClose={() => setComposeLead(null)} lead={composeLead} />
       <RespondioTemplateModal open={!!templateLead} onClose={() => setTemplateLead(null)} lead={templateLead} />
+      <QuickActionModal
+        lead={quickActionLead}
+        mode={quickActionMode}
+        classType={quickActionClass}
+        amount={quickActionAmount}
+        name={quickActionName}
+        sessionId={quickActionSessionId}
+        url={quickActionUrl}
+        status={quickActionStatus}
+        membershipId={quickActionMembershipId}
+        purchaseMembershipId={quickActionPurchaseMembershipId}
+        paymentMethodId={quickActionPaymentMethodId}
+        onClose={() => setQuickActionLead(null)}
+        onSubmit={submitQuickAction}
+        setClassType={setQuickActionClass}
+        setAmount={setQuickActionAmount}
+        setName={setQuickActionName}
+        setSessionId={setQuickActionSessionId}
+        setMembershipId={setQuickActionMembershipId}
+        setPurchaseMembershipId={setQuickActionPurchaseMembershipId}
+        setPaymentMethodId={setQuickActionPaymentMethodId}
+      />
     </div>
   )
+}
+
+function QuickActionModal({ lead, mode, classType, amount, name, sessionId, membershipId, purchaseMembershipId, paymentMethodId, url, status, onClose, onSubmit, setClassType, setAmount, setName, setSessionId, setMembershipId, setPurchaseMembershipId, setPaymentMethodId }) {
+  const isPay = mode === 'stripe'
+  const [sessions, setSessions] = useState([])
+  const [activeMemberships, setActiveMemberships] = useState([])
+  const [catalog, setCatalog] = useState([])
+  const [paymentMethods, setPaymentMethods] = useState([])
+  const [loadingOptions, setLoadingOptions] = useState(false)
+  const locationId = lead?.locationId
+  const memberId = lead?.memberId || lead?.momence?.memberId
+  const selectedCatalogItem = catalog.find(item => String(item.id) === String(purchaseMembershipId))
+  const selectedPrice = Number(selectedCatalogItem?.price ?? selectedCatalogItem?.priceInCurrency ?? selectedCatalogItem?.defaultPrice ?? 0)
+  useEffect(() => {
+    if (!lead) return
+    let alive = true
+    setLoadingOptions(true)
+    const requests = [
+      api.get(`/api/momence/host-memberships?${buildQuery({ locationId })}`).then(data => alive && setCatalog((data.memberships || []).filter(m => m.disabled !== true && m.isDeleted !== true))),
+      api.get(`/api/momence/payment-methods?${buildQuery({ locationId })}`).then(data => alive && setPaymentMethods(data.paymentMethods || []))
+    ]
+    if (!isPay) requests.push(api.get(`/api/momence/sessions?${buildQuery({ startAfter: new Date().toISOString(), startBefore: new Date(Date.now() + 45 * 86400000).toISOString(), locationId })}`).then(data => alive && setSessions(data.sessions || [])))
+    Promise.allSettled(requests).finally(() => alive && setLoadingOptions(false))
+    return () => { alive = false }
+  }, [lead, isPay, locationId])
+  useEffect(() => {
+    if (!memberId || !sessionId || isPay) return
+    api.get(`/api/momence/members/${memberId}/session-memberships?${buildQuery({ sessionId, locationId, recurringBooking: false })}`).then(data => setActiveMemberships(data.memberships || [])).catch(() => setActiveMemberships([]))
+  }, [memberId, sessionId, locationId, isPay])
+  return <Modal open={!!lead} onClose={onClose} width={760}>
+    <ModalHeader title={isPay ? 'Quick sale' : 'Book a Studio Session'} subtitle={lead ? `${lead.fullName} · ${lead.email || lead.phone || 'No contact details'}` : ''} onClose={onClose} />
+    <div className="quick-sale-modal space-y-3">
+      <section className="quick-sale-section"><span>Your location</span><strong>{lead?.center || 'Lead studio'}</strong></section>
+      <section className="quick-sale-section"><span>Customer</span><div className="quick-sale-customer"><strong>{lead?.fullName}</strong><small>{lead?.email || lead?.phone || 'Contact details required'}</small><em>{memberId ? `Momence #${memberId}` : 'Will be converted to a Momence member before checkout'}</em></div></section>
+      {!isPay && <>
+        <label className="block"><span className="text-[11px] text-slate-500">Studio Session</span><select className="input mt-1" value={sessionId} onChange={e => { setSessionId(e.target.value); setMembershipId('') }} disabled={loadingOptions}><option value="">{loadingOptions ? 'Loading classes…' : 'Choose a class'}</option>{sessions.map(s => <option key={s.id} value={s.id}>{new Date(s.startsAt).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })} · {s.name} · {s.inPersonLocation?.name || 'Studio'}</option>)}</select></label>
+        <label className="block"><span className="text-[11px] text-slate-500">Active membership</span><select className="input mt-1" value={membershipId} onChange={e => { setMembershipId(e.target.value); setPurchaseMembershipId('') }} disabled={!sessionId}><option value="">{sessionId ? (activeMemberships.length ? 'Choose active membership' : 'No active membership — choose POS below') : 'Select a class first'}</option>{activeMemberships.map(m => <option key={m.bookingMembershipId || m.id} value={m.bookingMembershipId || m.id}>{m.name || m.membership?.name || 'Active membership'}{m.classesLeft != null ? ` · ${m.classesLeft} classes left` : ''}</option>)}</select></label>
+      </>}
+      {(isPay || !membershipId) && <><section className="quick-sale-section quick-sale-cart"><span>Cart</span><div className="quick-sale-item"><b>Membership</b><select className="input" value={purchaseMembershipId} onChange={e => setPurchaseMembershipId(e.target.value)}><option value="">Select featured membership</option>{catalog.map(m => { const price = Number(m.price ?? m.priceInCurrency ?? m.defaultPrice ?? 0); return <option key={m.id} value={m.id}>{m.name} · ₹{price.toLocaleString('en-IN')}</option> })}</select>{selectedCatalogItem && <div><strong>{selectedCatalogItem.name}</strong><small>Featured Momence membership</small><b>₹{selectedPrice.toLocaleString('en-IN')}</b></div>}</div></section><div className="quick-sale-summary"><section className="quick-sale-section"><span>Discounts</span><small>Discount eligibility is validated by Momence during checkout.</small></section><section className="quick-sale-section"><span>Totals</span><div><small>Selected item</small><strong>₹{selectedPrice.toLocaleString('en-IN')}</strong></div><div><small>Total submitted to Momence POS</small><strong>₹{selectedPrice.toLocaleString('en-IN')}</strong></div></section></div><section className="quick-sale-section"><span>Payment</span><div className="quick-sale-payment-tabs"><button type="button" className="active">Other</button></div><select className="input" value={paymentMethodId} onChange={e => setPaymentMethodId(e.target.value)}><option value="">Select payment method</option>{paymentMethods.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}</select></section></>}
+      {url && <div className="rounded-xl border border-emerald-400/25 bg-emerald-500/10 p-3 text-[12px]"><strong className="block text-emerald-400">Payment link created</strong><a className="break-all text-slate-300 underline" href={url} target="_blank" rel="noreferrer">{url}</a></div>}
+      {status && !url && <div className="rounded-xl border border-emerald-400/25 bg-emerald-500/10 p-3 text-[12px] text-emerald-400">{isPay ? 'Checkout' : 'Booking'} status: {status}</div>}
+      <div className="flex justify-end gap-2"><button className="btn btn-ghost" onClick={onClose}>Cancel</button><button className="btn btn-primary" disabled={isPay ? (!purchaseMembershipId || !paymentMethodId) : (!sessionId || (!membershipId && (!purchaseMembershipId || !paymentMethodId)))} onClick={onSubmit}>{isPay ? 'Confirm purchase' : purchaseMembershipId ? 'Confirm purchase & book' : 'Book member'}</button></div>
+    </div>
+  </Modal>
 }
 
 function groupKey(l, by, lookup) {
@@ -593,7 +753,7 @@ function GroupSummary({ list }) {
   )
 }
 
-function TableView({ items, boot, lookup, openLead, changeStage, changeAssociate, changeLeadField, toggleManualFlag, grouped, collapsed, toggleGroup, onMessage, onTemplateMessage, selected, toggleSelect, toggleSelectAll, columns, density, rowHeight, tableZoom, colWidths, setColWidths, manualFlagOverrides, headerPinned = true, focusLeadIds = [], clearFocus, sortBy, sortDir, setSortBy, setSortDir }) {
+function TableView({ items, boot, lookup, openLead, openQuickAction, changeStage, changeAssociate, changeLeadField, toggleManualFlag, grouped, collapsed, toggleGroup, onMessage, onTemplateMessage, selected, toggleSelect, toggleSelectAll, columns, density, rowHeight, tableZoom, colWidths, setColWidths, manualFlagOverrides, headerPinned = true, focusLeadIds = [], clearFocus, sortBy, sortDir, setSortBy, setSortDir }) {
   const focusedItems = focusLeadIds.length ? items.filter(l => focusLeadIds.includes(l.id)) : items
   if (grouped) {
     return (
@@ -614,7 +774,7 @@ function TableView({ items, boot, lookup, openLead, changeStage, changeAssociate
               </button>
               {isOpen && (
                 <div className="lead-group-table">
-                  <TableGrid items={focusLeadIds.length ? g.list.filter(l => focusLeadIds.includes(l.id)) : g.list} boot={boot} lookup={lookup} openLead={openLead} changeStage={changeStage} changeAssociate={changeAssociate} changeLeadField={changeLeadField} toggleManualFlag={toggleManualFlag} onMessage={onMessage} onTemplateMessage={onTemplateMessage} selected={selected} toggleSelect={toggleSelect} toggleSelectAll={toggleSelectAll} columns={columns} density={density} rowHeight={rowHeight} tableZoom={tableZoom} colWidths={colWidths} setColWidths={setColWidths} manualFlagOverrides={manualFlagOverrides} headerPinned={headerPinned} focusLeadIds={focusLeadIds} clearFocus={clearFocus} sortBy={sortBy} sortDir={sortDir} setSortBy={setSortBy} setSortDir={setSortDir} />
+                  <TableGrid items={focusLeadIds.length ? g.list.filter(l => focusLeadIds.includes(l.id)) : g.list} boot={boot} lookup={lookup} openLead={openLead} openQuickAction={openQuickAction} changeStage={changeStage} changeAssociate={changeAssociate} changeLeadField={changeLeadField} toggleManualFlag={toggleManualFlag} onMessage={onMessage} onTemplateMessage={onTemplateMessage} selected={selected} toggleSelect={toggleSelect} toggleSelectAll={toggleSelectAll} columns={columns} density={density} rowHeight={rowHeight} tableZoom={tableZoom} colWidths={colWidths} setColWidths={setColWidths} manualFlagOverrides={manualFlagOverrides} headerPinned={headerPinned} focusLeadIds={focusLeadIds} clearFocus={clearFocus} sortBy={sortBy} sortDir={sortDir} setSortBy={setSortBy} setSortDir={setSortDir} />
                 </div>
               )}
             </div>
@@ -623,10 +783,10 @@ function TableView({ items, boot, lookup, openLead, changeStage, changeAssociate
       </div>
     )
   }
-  return <TableGrid items={focusedItems} boot={boot} lookup={lookup} openLead={openLead} changeStage={changeStage} changeAssociate={changeAssociate} changeLeadField={changeLeadField} toggleManualFlag={toggleManualFlag} onMessage={onMessage} onTemplateMessage={onTemplateMessage} selected={selected} toggleSelect={toggleSelect} toggleSelectAll={toggleSelectAll} columns={columns} density={density} rowHeight={rowHeight} tableZoom={tableZoom} colWidths={colWidths} setColWidths={setColWidths} manualFlagOverrides={manualFlagOverrides} headerPinned={headerPinned} focusLeadIds={focusLeadIds} clearFocus={clearFocus} sortBy={sortBy} sortDir={sortDir} setSortBy={setSortBy} setSortDir={setSortDir} />
+  return <TableGrid items={focusedItems} boot={boot} lookup={lookup} openLead={openLead} openQuickAction={openQuickAction} changeStage={changeStage} changeAssociate={changeAssociate} changeLeadField={changeLeadField} toggleManualFlag={toggleManualFlag} onMessage={onMessage} onTemplateMessage={onTemplateMessage} selected={selected} toggleSelect={toggleSelect} toggleSelectAll={toggleSelectAll} columns={columns} density={density} rowHeight={rowHeight} tableZoom={tableZoom} colWidths={colWidths} setColWidths={setColWidths} manualFlagOverrides={manualFlagOverrides} headerPinned={headerPinned} focusLeadIds={focusLeadIds} clearFocus={clearFocus} sortBy={sortBy} sortDir={sortDir} setSortBy={setSortBy} setSortDir={setSortDir} />
 }
 
-function TableGrid({ items, boot, lookup, openLead, changeStage, changeAssociate, changeLeadField, toggleManualFlag, onMessage, onTemplateMessage, selected, toggleSelect, toggleSelectAll, columns, density, rowHeight = 58, tableZoom = 100, colWidths = {}, setColWidths, manualFlagOverrides = {}, headerPinned = true, focusLeadIds = [], clearFocus, sortBy, sortDir, setSortBy, setSortDir }) {
+function TableGrid({ items, boot, lookup, openLead, openQuickAction, changeStage, changeAssociate, changeLeadField, toggleManualFlag, onMessage, onTemplateMessage, selected, toggleSelect, toggleSelectAll, columns, density, rowHeight = 58, tableZoom = 100, colWidths = {}, setColWidths, manualFlagOverrides = {}, headerPinned = true, focusLeadIds = [], clearFocus, sortBy, sortDir, setSortBy, setSortDir }) {
   const cadenceDays = boot?.settings?.cadence?.outreachDays || 7
   const activeChannels = ['fu1', 'fu2', 'fu3', 'fu4']
   const [columnSearch, setColumnSearch] = useState({})
@@ -636,11 +796,13 @@ function TableGrid({ items, boot, lookup, openLead, changeStage, changeAssociate
     if (field === 'fullName') return lead.fullName
     if (field === 'stage') return lead.stage
     if (field === 'createdAt') return fmtDate(lead.createdAt)
+    if (field === 'trialDate') return lead.trialDate || lead.momenceEvidence?.trialDate || ''
+    if (field === 'firstPurchaseDate') return lead.firstPurchaseDate || lead.momenceEvidence?.firstPurchaseDate || lead.convertedAt || ''
     if (field === 'source') return lead.sourceName
     if (field === 'owner') return lookup.asnById[lead.associateId]?.name
     if (field === 'location') return lookup.locById[lead.locationId]?.name
     if (field === 'score') return lead.ai?.score
-    if (field === 'statusGroup') return lead.stage
+    if (field === 'statusGroup') return lead.statusGroup
     if (field === 'status') return lead.status
     return getColumnValue(visibleCols.find(c => (c.field || c.id) === field) || { field }, lead, lookup)
   }
@@ -655,7 +817,7 @@ function TableGrid({ items, boot, lookup, openLead, changeStage, changeAssociate
   const stageW = widthOf('stage', 220)
   const setColSearch = field => value => setColumnSearch(current => ({ ...current, [field]: value }))
   const autoFitColumns = () => {
-    const next = { select: 76, lead: 260, stage: 190, createdAt: 140, remarksField: 350, message: 112 }
+    const next = { select: 76, lead: 260, stage: 190, createdAt: 140, remarksField: 350, actions: 82 }
     for (const c of visibleCols) next[c.id] = c.field === 'owner' ? 180 : c.field === 'score' ? 104 : 145
     for (const ch of activeChannels) next[ch] = 54
     setColWidths?.(next)
@@ -709,9 +871,9 @@ function TableGrid({ items, boot, lookup, openLead, changeStage, changeAssociate
               </th>
               )
             })}
-            <th className="resizable-th px-4 py-3 font-semibold" style={{ width: widthOf('message', 118), minWidth: widthOf('message', 118) }}>
-              <span>Message</span>
-              <span className="col-resize-handle" onDoubleClick={autoFitColumns} onMouseDown={startResize('message', widthOf('message', 118))} title="Drag to resize column. Double-click to auto-fit all columns." />
+            <th className="resizable-th px-3 py-3 font-semibold text-center" style={{ width: widthOf('actions', 82), minWidth: widthOf('actions', 82) }}>
+              <span>Actions</span>
+              <span className="col-resize-handle" onDoubleClick={autoFitColumns} onMouseDown={startResize('actions', widthOf('actions', 82))} title="Drag to resize column. Double-click to auto-fit all columns." />
             </th>
           </tr>
         </thead>
@@ -792,7 +954,7 @@ function TableGrid({ items, boot, lookup, openLead, changeStage, changeAssociate
                     return <td key={c.id} className={`px-4 ${py}`} onClick={e => e.stopPropagation()}><select className="table-inline-select capitalize" value={l.status || 'open'} onChange={e => changeLeadField(l, { status: e.target.value })}><option value="open">Open</option><option value="won">Won</option><option value="lost">Lost</option></select></td>
                   }
                   if (c.field === 'statusGroup') {
-                    return <td key={c.id} className={`px-4 ${py}`} onClick={e => e.stopPropagation()}><select className="table-inline-select" value={l.stage} onChange={e => changeStage(l, e.target.value)}>{(boot?.stages || []).map(stage => <option key={stage} value={stage}>{stage}</option>)}</select></td>
+                    return <td key={c.id} className={`px-4 ${py}`}><span className={`verified-lifecycle-status ${l.statusGroup === 'Membership Sold' ? 'is-sold' : l.statusGroup === 'Trial Completed' ? 'is-trial' : ''}`}>{l.statusGroup || 'Pre-Trial'}</span></td>
                   }
                   if (c.field === 'score') {
                     return (
@@ -818,22 +980,59 @@ function TableGrid({ items, boot, lookup, openLead, changeStage, changeAssociate
                     <FuCell lead={l} fuIndex={fuIndex} forceMissed={cadenceMissedOpen} />
                   </td>
                 ))}
-                <td className="px-4 text-left" onClick={e => e.stopPropagation()}>
-                  <button className="btn btn-ghost !p-1.5 !text-[11px] mr-1" onClick={() => onMessage(l)} title="Send a message via Respond.io">
-                    <MessageCircle size={13} className="text-emerald-400" />
-                  </button>
-                  <button className="btn btn-ghost !p-1.5 !text-[11px]" onClick={() => onTemplateMessage(l)} title="Send an approved WhatsApp template via Respond.io">
-                    <Sparkles size={13} className="text-fuchsia-400" />
-                  </button>
+                <td className="px-3 text-center" onClick={e => e.stopPropagation()}>
+                  <RowActionsMenu lead={l} openLead={openLead} openQuickAction={openQuickAction} onMessage={onMessage} onTemplateMessage={onTemplateMessage} toggleManualFlag={() => toggleManualFlag({ ...l, manualFlags: rowManualFlags })} />
                 </td>
               </tr>
             )
           })}
         </tbody>
       </table>
-      {scoreTip && <ScoreDetailsPopover tip={scoreTip} onClose={() => setScoreTip(null)} />}
     </div>
   )
+}
+
+function RowActionsMenu({ lead, openLead, openQuickAction, onMessage, onTemplateMessage, toggleManualFlag }) {
+  const { toast, refreshData } = useApp()
+  const [open, setOpen] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [position, setPosition] = useState({ left: 0, top: 0 })
+  const buttonRef = useRef(null)
+  const show = () => {
+    const rect = buttonRef.current?.getBoundingClientRect()
+    if (rect) {
+      const menuHeight = 340
+      setPosition({ left: Math.max(12, Math.min(window.innerWidth - 250, rect.right - 232)), top: rect.bottom + menuHeight > window.innerHeight ? Math.max(12, rect.top - menuHeight) : rect.bottom + 6 })
+    }
+    setOpen(true)
+  }
+  const run = (action) => { setOpen(false); action() }
+  const createMember = async () => {
+    setBusy(true)
+    try {
+      const parts = String(lead.fullName || '').trim().split(/\s+/).filter(Boolean)
+      const firstName = parts.shift() || ''
+      const result = await api.post(`/api/momence/create/${lead.id}`, { firstName, lastName: parts.join(' ') || 'Member', email: lead.email, phoneNumber: lead.phone, homeLocationId: lead.locationId })
+      toast(result.warning || `Momence member #${result.memberId} created and linked`)
+      refreshData()
+    } catch (e) { toast(e.message, 'error') } finally { setBusy(false); setOpen(false) }
+  }
+  return <>
+    <button ref={buttonRef} type="button" className="lead-actions-trigger" aria-label={`Actions for ${lead.fullName}`} aria-haspopup="menu" aria-expanded={open} disabled={busy} onClick={show}><MoreVertical size={16} /></button>
+    {open && createPortal(<div className="lead-actions-layer"><button className="lead-actions-dismiss" aria-label="Close actions" onClick={() => setOpen(false)} /><div className="lead-actions-menu" role="menu" style={position}>
+      <div className="lead-actions-menu-head"><span>Lead actions</span><strong>{lead.fullName}</strong></div>
+      <button role="menuitem" onClick={() => run(() => openLead(lead.id))}><Eye /><span><b>Open details</b><small>View the complete lead record</small></span></button>
+      <button role="menuitem" onClick={() => run(() => openQuickAction(lead, 'book'))}><CalendarPlus /><span><b>Book into class</b><small>Choose session and membership</small></span></button>
+      <button role="menuitem" onClick={() => run(() => openQuickAction(lead, 'stripe'))}><CreditCard /><span><b>Take payment</b><small>Open Momence Quick Sale</small></span></button>
+      <div className="lead-actions-divider" />
+      <button role="menuitem" onClick={() => run(() => { openLead(lead.id); toast('Open the Momence profile section to review and assign member tags.') })}><Tags /><span><b>Assign tags</b><small>Manage Momence member tags</small></span></button>
+      <button role="menuitem" disabled={!!lead.memberId} onClick={createMember}><UserPlus /><span><b>{lead.memberId ? 'Member already linked' : 'Create member'}</b><small>{lead.memberId ? `Momence #${lead.memberId}` : 'Convert lead before checkout'}</small></span></button>
+      <div className="lead-actions-divider" />
+      <button role="menuitem" onClick={() => run(() => onMessage(lead))}><MessageCircle /><span><b>Send message</b><small>Compose through Respond.io</small></span></button>
+      <button role="menuitem" onClick={() => run(() => onTemplateMessage(lead))}><Sparkles /><span><b>WhatsApp template</b><small>Send an approved template</small></span></button>
+      <button role="menuitem" onClick={() => run(toggleManualFlag)}><Flag /><span><b>Toggle priority flag</b><small>Highlight this lead for follow-up</small></span></button>
+    </div></div>, document.body)}
+  </>
 }
 
 function AssociateCell({ lead, owner, associates, onChange }) {

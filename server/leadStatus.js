@@ -8,6 +8,7 @@ export const STATUS_GROUPS = [
   'Unresponsive',
   'Trial Scheduled',
   'Trial Completed',
+  'Membership Sold',
   'Post-Trial Follow-up',
   'Disqualified',
   'Not Interested',

@@ -80,7 +80,7 @@ export function Modal({ open, onClose, children, width = 520 }) {
   if (!open) return null
   return (
     <div className="fixed inset-0 z-[90] flex items-center justify-center p-4" role="dialog">
-      <div className="absolute inset-0 modal-backdrop" onClick={onClose} />
+      <div className="absolute inset-0 modal-backdrop" onMouseDown={onClose} />
       <div
         className="relative card modal-panel p-6 w-full"
         style={{ maxWidth: width, animation: 'fadeIn .18s ease' }}
@@ -89,6 +89,24 @@ export function Modal({ open, onClose, children, width = 520 }) {
       </div>
     </div>
   )
+}
+
+export function useOverlayDismiss(open, onClose) {
+  useEffect(() => {
+    if (!open) return
+    const onKeyDown = (e) => { if (e.key === 'Escape') onClose() }
+    const onMouseDown = (e) => {
+      const root = e.target?.closest?.('[data-overlay-root="true"]')
+      const panel = e.target?.closest?.('[data-overlay-panel="true"]')
+      if (root && !panel) onClose()
+    }
+    document.addEventListener('keydown', onKeyDown)
+    document.addEventListener('mousedown', onMouseDown, true)
+    return () => {
+      document.removeEventListener('keydown', onKeyDown)
+      document.removeEventListener('mousedown', onMouseDown, true)
+    }
+  }, [open, onClose])
 }
 
 export function ModalHeader({ title, subtitle, onClose }) {
@@ -105,7 +123,25 @@ export function ModalHeader({ title, subtitle, onClose }) {
 
 export function Spinner({ size = 18 }) {
   return (
-    <span className="inline-block animate-spin rounded-full border-2 border-white/20 border-t-white/80" style={{ width: size, height: size }} />
+    <span className="elegant-spinner" style={{ width: size, height: size }} aria-label="Loading" />
+  )
+}
+
+export function AppLoader() {
+  return (
+    <div className="app-loader-shell" role="status" aria-live="polite">
+      <div className="app-loader-orbit">
+        <span className="app-loader-ring app-loader-ring-a" />
+        <span className="app-loader-ring app-loader-ring-b" />
+        <span className="app-loader-core">
+          <span className="app-loader-core-mark" />
+        </span>
+      </div>
+      <div className="app-loader-copy">
+        <strong>Physique 57 CRM</strong>
+        <span>Loading your workspace…</span>
+      </div>
+    </div>
   )
 }
 

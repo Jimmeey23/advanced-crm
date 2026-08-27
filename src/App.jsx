@@ -23,6 +23,7 @@ import LeadDrawer from './components/LeadDrawer.jsx'
 import AddLeadModal from './components/AddLeadModal.jsx'
 import AlertsDropdown from './components/AlertsDropdown.jsx'
 import Logo from './components/Logo.jsx'
+import { AppLoader } from './ui.jsx'
 
 const NAV = [
   { id: 'dashboard', label: 'Dashboard', title: 'Executive Overview', icon: LayoutDashboard },
@@ -264,16 +265,18 @@ export default function App() {
   const [addOpen, setAddOpen] = useState(false)
   return (
     <AppProvider>
-      <div className="h-screen flex overflow-hidden">
-        <Sidebar />
-        <div className="flex-1 flex flex-col min-w-0">
-          <Topbar onAdd={() => setAddOpen(true)} />
-          <main className="flex-1 overflow-y-auto scrollbar-thin">
-            <MarqueeBanner />
-            <Shell />
-          </main>
+      <BootstrapGate>
+        <div className="h-screen flex overflow-hidden">
+          <Sidebar />
+          <div className="flex-1 flex flex-col min-w-0">
+            <Topbar onAdd={() => setAddOpen(true)} />
+            <main className="flex-1 overflow-y-auto scrollbar-thin">
+              <MarqueeBanner />
+              <Shell />
+            </main>
+          </div>
         </div>
-      </div>
+      </BootstrapGate>
       <LeadDrawer />
       <AddLeadModal open={addOpen} onClose={() => setAddOpen(false)} />
       <Toasts />
@@ -297,4 +300,10 @@ function Shell() {
     case 'settings': return <SettingsPage />
     default: return <Dashboard />
   }
+}
+
+function BootstrapGate({ children }) {
+  const { boot } = useApp()
+  if (!boot) return <AppLoader />
+  return children
 }

@@ -325,9 +325,23 @@ export function enrichLead(lead, db) {
       `Sentiment reads ${senti}. ${insights[0] ? insights[0] : 'A steady follow-up cadence is recommended.'}`
   }
 
+  const rawStatusGroup = statusGroupOf(lead.stage)
+  const evidence = lead.momenceEvidence || {}
+  const verifiedStatusGroup = evidence.membershipSold
+    ? 'Membership Sold'
+    : evidence.trialCompleted
+      ? 'Trial Completed'
+      : rawStatusGroup === 'Won' || rawStatusGroup === 'Trial Completed'
+        ? 'Pre-Trial'
+        : rawStatusGroup
+  const verifiedOutcome = evidence.membershipSold ? 'won' : (lead.status === 'won' ? 'open' : lead.status)
+
   return {
     ...lead,
-    statusGroup: statusGroupOf(lead.stage),
+    status: verifiedOutcome,
+    statusGroup: verifiedStatusGroup,
+    trialDate: evidence.trialDate || null,
+    firstPurchaseDate: evidence.firstPurchaseDate || null,
     gpt: lead.aiGpt || null,
     fu: {
       missedCount: missed.length,
