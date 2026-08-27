@@ -12,7 +12,7 @@ import { useApp } from '../store.jsx'
 import { useFetch } from '../hooks.js'
 import { api, buildQuery } from '../api.js'
 import { Avatar, ScorePill, Empty } from '../ui.jsx'
-import { fmtDate, stageClass, stageBadgeStyle, stageColor, riskClass, daysFromNow, downloadText, money, baseColumnValue, buildFormulaContext, evalFormula, lookupColumnValue, formatColumnValue } from '../lib.js'
+import { fmtDate, stageClass, stageBadgeStyle, stageColor, riskClass, daysFromNow, downloadText, money, baseColumnValue, buildFormulaContext, evalFormula, lookupColumnValue, formatColumnValue, phoneCountryFlag } from '../lib.js'
 import Tip from '../components/Tip.jsx'
 import ComposeModal from '../components/ComposeModal.jsx'
 import RespondioTemplateModal from '../components/RespondioTemplateModal.jsx'
@@ -28,10 +28,14 @@ const cleanDate = value => {
   const text = String(value ?? '').trim()
   return !text || text === '-' || text === '\u2014' ? '' : text
 }
+function withLifecycleColumns(configured) {
+  const missing = DEFAULT_COLUMNS.filter(column => ['trialDate', 'firstPurchaseDate'].includes(column.field) && !configured.some(existing => existing.field === column.field))
+  return missing.length ? [...configured, ...missing.map(c => ({ ...c }))] : configured
+}
 function loadColumns() {
   try {
     const raw = localStorage.getItem(COLUMNS_KEY)
-    if (raw) return JSON.parse(raw)
+    if (raw) return withLifecycleColumns(JSON.parse(raw))
   } catch (e) { /* ignore */ }
   return DEFAULT_COLUMNS.map(c => ({ ...c }))
 }
@@ -141,8 +145,7 @@ export default function Leads({ initialSearch = '' }) {
   React.useEffect(() => {
     const configured = boot?.settings?.leadColumns
     if (!Array.isArray(configured) || !configured.length) return
-    const lifecycleColumns = DEFAULT_COLUMNS.filter(column => ['trialDate', 'firstPurchaseDate'].includes(column.field) && !configured.some(existing => existing.field === column.field))
-    const next = [...configured.map(column => ({ ...column })), ...lifecycleColumns]
+    const next = withLifecycleColumns(configured.map(column => ({ ...column })))
     setColumnsRaw(next)
     try { localStorage.setItem(COLUMNS_KEY, JSON.stringify(next)) } catch (e) { /* ignore */ }
   }, [boot?.settings?.leadColumns])
@@ -312,11 +315,8 @@ export default function Leads({ initialSearch = '' }) {
 
   const toggleSelectAll = () => {
     if (selected.size > 0) { clearSelection(); return }
-    // More filtered leads exist beyond this page — go straight to selecting
-    // all of them rather than only the current page, which previously took
-    // a second click on a separate "select all matching" button most people
-    // never noticed.
-    if ((data?.total || 0) > items.length) { selectAllMatchingFilter(); return }
+    // Select only the currently visible rows first. If more filtered leads
+    // exist beyond this page, a follow-up prompt offers to select all of them.
     setSelectAllMatching(false)
     setSelected(new Set(items.map(l => l.id)))
   }
@@ -930,6 +930,27 @@ function TableGrid({ items, boot, lookup, openLead, openQuickAction, changeStage
                 </td>
                 <td className={`px-4 ${py} text-[12px] text-slate-400 mono`} style={{ width: widthOf('createdAt', 150), minWidth: widthOf('createdAt', 150) }}>{fmtDate(l.createdAt)}</td>
                 {visibleCols.map(c => {
+                  if (c.field === 'phone') {
+                    return (
+                      <td key={c.id} className={`px-4 ${py} text-[12.5px] mono text-slate-400`}>
+                        {l.phone
+                          ? <span className="inline-flex items-center gap-1.5"><span aria-hidden="true">{phoneCountryFlag(l.phone)}</span>{l.phone}</span>
+                          : <span className="table-empty-icon" title="No phone number"><PhoneOff size={13} /></span>}
+                      </td>
+                    )
+                  }
+                  if (c.field === 'trialDate' || c.field === 'firstPurchaseDate') {
+                    const raw = c.field === 'trialDate'
+                      ? (l.trialDate || l.momenceEvidence?.trialDate)
+                      : (l.firstPurchaseDate || l.momenceEvidence?.firstPurchaseDate || l.convertedAt)
+                    return (
+                      <td key={c.id} className={`px-4 ${py} text-[12.5px] mono text-slate-400`}>
+                        {raw
+                          ? fmtDate(raw)
+                          : <span className="table-empty-icon" title={c.field === 'trialDate' ? 'No trial booked yet' : 'No purchase yet'}><CalendarDays size={13} /></span>}
+                      </td>
+                    )
+                  }
                   if (c.field === 'source') {
                     return (
                       <td key={c.id} className={`px-4 ${py} text-[12.5px] text-slate-400 truncate`}>
@@ -954,7 +975,7 @@ function TableGrid({ items, boot, lookup, openLead, openQuickAction, changeStage
                     return <td key={c.id} className={`px-4 ${py}`} onClick={e => e.stopPropagation()}><select className="table-inline-select capitalize" value={l.status || 'open'} onChange={e => changeLeadField(l, { status: e.target.value })}><option value="open">Open</option><option value="won">Won</option><option value="lost">Lost</option></select></td>
                   }
                   if (c.field === 'statusGroup') {
-                    return <td key={c.id} className={`px-4 ${py}`}><span className={`verified-lifecycle-status ${l.statusGroup === 'Membership Sold' ? 'is-sold' : l.statusGroup === 'Trial Completed' ? 'is-trial' : ''}`}>{l.statusGroup || 'Pre-Trial'}</span></td>
+                    return <td key={c.id} className={`px-4 ${py} text-[12.5px] text-left ${l.statusGroup === 'Membership Sold' ? 'text-emerald-400' : l.statusGroup === 'Trial Completed' ? 'text-sky-400' : 'text-slate-400'}`}>{l.statusGroup || 'Pre-Trial'}</td>
                   }
                   if (c.field === 'score') {
                     return (
@@ -1084,13 +1105,43 @@ function SortHead({ label, field, resizeId, width, style, onResize, onAutoFit, c
   const active = sortBy === field
   const nextDir = active && sortDir === 'asc' ? 'desc' : 'asc'
   const thStyle = style || { width, minWidth: width }
+  const [searchOpen, setSearchOpen] = useState(false)
+  const searchRef = useRef(null)
+  useEffect(() => { if (searchOpen) searchRef.current?.focus() }, [searchOpen])
+  const showSearch = searchOpen || !!searchValue
   return (
-    <th className={`resizable-th ${className} cursor-pointer select-none`} style={thStyle} onClick={() => { setSortBy(field); setSortDir(nextDir) }}>
-      <span className="inline-flex items-center gap-1.5">
-        {label}
-        <ChevronDown size={11} className={`transition-transform ${active && sortDir === 'asc' ? 'rotate-180' : ''} ${active ? 'text-rose-400' : 'text-slate-500'}`} />
-      </span>
-      {onSearch && <input className="column-header-search" value={searchValue} onClick={e => e.stopPropagation()} onChange={e => onSearch(e.target.value)} placeholder={`Search ${label.toLowerCase()}`} aria-label={`Search ${label} column`} />}
+    <th className={`resizable-th ${className} select-none`} style={thStyle}>
+      <div className="th-head-row">
+        <button type="button" className="th-sort-trigger" onClick={() => { setSortBy(field); setSortDir(nextDir) }} title={`Sort by ${label}`}>
+          <span className="truncate">{label}</span>
+          <ChevronDown size={11} className={`shrink-0 transition-transform ${active && sortDir === 'asc' ? 'rotate-180' : ''} ${active ? 'text-rose-400' : 'text-slate-500'}`} />
+        </button>
+        {onSearch && (
+          <button
+            type="button"
+            className={`th-search-toggle ${showSearch ? 'is-active' : ''}`}
+            onClick={(e) => { e.stopPropagation(); setSearchOpen(o => !o) }}
+            title={`Search ${label}`}
+            aria-label={`Search ${label} column`}
+          >
+            <Search size={11} />
+          </button>
+        )}
+      </div>
+      {onSearch && showSearch && (
+        <div className="th-search-pop" onClick={e => e.stopPropagation()}>
+          <input
+            ref={searchRef}
+            className="column-header-search"
+            value={searchValue}
+            onChange={e => onSearch(e.target.value)}
+            onBlur={() => { if (!searchValue) setSearchOpen(false) }}
+            onKeyDown={e => { if (e.key === 'Escape') { onSearch(''); setSearchOpen(false) } }}
+            placeholder={`Search ${label.toLowerCase()}…`}
+            aria-label={`Search ${label} column`}
+          />
+        </div>
+      )}
       <span className="col-resize-handle" onDoubleClick={(e) => { e.preventDefault(); e.stopPropagation(); onAutoFit?.() }} onMouseDown={onResize(resizeId || field, width)} title="Drag to resize column. Double-click a header edge to auto-fit all columns." />
     </th>
   )
@@ -1329,7 +1380,7 @@ function CardsView({ items, lookup, openLead, grouped, collapsed, toggleGroup, b
             </div>
             <div className="flex flex-wrap items-center gap-1.5 mb-2.5">
               <span className={`chip !py-0.5 !px-2 text-[10px] ${riskClass(l.ai.risk)}`}>{l.ai.risk}</span>
-              <span className="chip bg-white/5 border border-white/10 text-slate-400 !py-0.5 !px-2 text-[10px]">{l.stage}</span>
+              <span className={`chip stage-badge !py-0.5 !px-2 !w-auto !h-auto text-[10px]`} style={stageBadgeStyle(l.stage)}>{l.stage}</span>
               <span className="chip bg-white/5 border border-white/10 text-slate-400 !py-0.5 !px-2 text-[10px]">{l.sourceName}</span>
             </div>
             <div className="text-[11.5px] text-slate-400 truncate mb-2.5">{l.ai?.nextAction?.text}</div>

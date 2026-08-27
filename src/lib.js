@@ -113,6 +113,28 @@ export const scoreColor = (score) => {
 
 export const AVATAR_COLORS = ['#f43f5e', '#8b5cf6', '#06b6d4', '#f59e0b', '#10b981', '#6366f1', '#ec4899', '#14b8a6', '#e11d48', '#7c3aed']
 
+// Longest-dialing-code-first so e.g. +1242 (Bahamas) isn't mistaken for +1 (US).
+const COUNTRY_CALLING_CODES = [
+  ['1242', '🇧🇸'], ['1246', '🇧🇧'], ['971', '🇦🇪'], ['966', '🇸🇦'], ['974', '🇶🇦'], ['965', '🇰🇼'],
+  ['973', '🇧🇭'], ['968', '🇴🇲'], ['880', '🇧🇩'], ['977', '🇳🇵'], ['960', '🇲🇻'], ['94', '🇱🇰'],
+  ['92', '🇵🇰'], ['91', '🇮🇳'], ['86', '🇨🇳'], ['82', '🇰🇷'], ['81', '🇯🇵'], ['65', '🇸🇬'],
+  ['66', '🇹🇭'], ['60', '🇲🇾'], ['63', '🇵🇭'], ['62', '🇮🇩'], ['64', '🇳🇿'], ['61', '🇦🇺'],
+  ['49', '🇩🇪'], ['44', '🇬🇧'], ['41', '🇨🇭'], ['39', '🇮🇹'], ['34', '🇪🇸'], ['33', '🇫🇷'],
+  ['31', '🇳🇱'], ['27', '🇿🇦'], ['20', '🇪🇬'], ['1', '🇺🇸']
+]
+export const phoneCountryFlag = (phone) => {
+  const digits = String(phone || '').replace(/[^\d+]/g, '')
+  if (digits.startsWith('+')) {
+    const bare = digits.slice(1)
+    const hit = COUNTRY_CALLING_CODES.find(([code]) => bare.startsWith(code))
+    if (hit) return hit[1]
+  } else if (digits.length > 10) {
+    const hit = COUNTRY_CALLING_CODES.find(([code]) => digits.startsWith(code))
+    if (hit) return hit[1]
+  }
+  return '🇮🇳'
+}
+
 // ---------- Airtable-style column engine ----------
 // Base (built-in) fields available to formula/lookup columns and the table.
 export function baseColumnValue(id, l, lookup) {
@@ -134,8 +156,8 @@ export function baseColumnValue(id, l, lookup) {
     case 'stage': return l.stage || ''
     case 'status': return l.status || ''
     case 'statusGroup': return l.statusGroup || ''
-    case 'trialDate': return l.trialDate || ''
-    case 'firstPurchaseDate': return l.firstPurchaseDate || ''
+    case 'trialDate': return l.trialDate || l.momenceEvidence?.trialDate || ''
+    case 'firstPurchaseDate': return l.firstPurchaseDate || l.momenceEvidence?.firstPurchaseDate || l.convertedAt || ''
     case 'fullName': return l.fullName || ''
     case 'email': return l.email || ''
     default: return ''

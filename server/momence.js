@@ -252,6 +252,29 @@ async function dashboardRequest(db, path, { market = 'mumbai', method = 'GET', b
 }
 
 const wait = ms => new Promise(resolve => setTimeout(resolve, ms))
+
+// Public API v2 async report runner (POST to start, poll GET until complete).
+// Used for sales/purchase history instead of the /host/sales endpoint, which
+// only returns a shallow live listing — the reports endpoint is what Momence
+// itself uses for full, refund-aware sales history.
+export async function runHostReport(db, reportType, { market = 'mumbai', startDate, endDate, locationId, ...extra } = {}) {
+  const hostId = Number(effectiveConfig(db, market).hostId)
+  if (!hostId) throw new Error(`Momence host ID is not configured for ${market === 'blr' ? 'Bengaluru' : 'Mumbai'}.`)
+  const parameters = { reportType, dateRange: { from: startDate, to: endDate }, hostId, ...extra }
+  const resolvedLocationId = resolveHomeLocationId(locationId, db)
+  if (resolvedLocationId) parameters.locationId = resolvedLocationId
+  const started = await request(db, '/api/v2/host/reports', { method: 'POST', market, body: { parameters } })
+  const runId = started?.id
+  if (!runId) throw new Error(`Momence ${reportType} report did not return a report ID.`)
+  for (let attempt = 0; attempt < 180; attempt++) {
+    const result = await request(db, `/api/v2/host/reports/${runId}`, { market })
+    const status = String(result?.status || '').toLowerCase()
+    if (['failed', 'error', 'cancelled'].includes(status)) throw new Error(`Momence ${reportType} report ${runId} ${status}.`)
+    if (status === 'completed') return result?.data?.items || []
+    await wait(1000)
+  }
+  throw new Error(`Momence ${reportType} report timed out.`)
+}
 const firstValue = (value, keys) => {
   for (const key of keys) if (value?.[key] !== undefined && value?.[key] !== null && value?.[key] !== '') return value[key]
   if (value && typeof value === 'object') {
@@ -261,44 +284,6 @@ const firstValue = (value, keys) => {
     }
   }
   return null
-}
-const reportRunId = value => firstValue(value, ['reportRunId', 'runId', 'id']) || firstValue(value?.reportRun, ['id', 'reportRunId'])
-const reportRows = value => {
-  if (Array.isArray(value)) return value
-  for (const key of ['rows', 'items', 'payload', 'data', 'results', 'result', 'report', 'reportData']) {
-    const nested = value?.[key]
-    if (Array.isArray(nested)) return nested
-    const deeper = nested && reportRows(nested)
-    if (deeper?.length) return deeper
-  }
-  return []
-}
-
-export async function runDashboardReport(db, report, { market = 'mumbai', startDate, endDate } = {}) {
-  const now = new Date()
-  const start = startDate || new Date(now.getTime() - 365 * 86400000).toISOString()
-  const end = endDate || now.toISOString()
-  const base = { timeZone: 'Asia/Kolkata', day: now.toISOString(), startDate: start, endDate: end, datePreset: 4 }
-  const body = report === 'total-sales'
-    ? { ...base, startDate2: start, endDate2: end, groupRecurring: false, computedSaleValue: true, includeVatInRevenue: true, useBookedEntityDateRange: false, excludeMembershipRenews: false, moneyCreditSalesFilter: 'filterOutSalesPaidByMoneyCredits', hideVoided: false, excludeInactiveMembers: false, excludeCustomersWithoutVisits: false, includeCustomersActivityLog: false, includeCustomersDetails: true, includeRefunds: true, showOnlySpotfillerRevenue: false, excludeGiftCardPaymentMethod: false, excludeTransactionFeesInSaleValue: false, splitByTeacher: false, saleTypes: ['event', 'membership', 'pack', 'subscription', 'course', 'on-demand', 'appointment'] }
-    : { ...base, membershipTagIds: [], sessionTagIds: [] }
-  const started = await dashboardRequest(db, `/reports/${report}/async`, { market, method: 'POST', body })
-  const runId = reportRunId(started)
-  if (!runId) {
-    const rows = reportRows(started)
-    if (rows.length) return rows
-    throw new Error(`Momence ${report} report did not return a report run ID.`)
-  }
-  for (let attempt = 0; attempt < 180; attempt++) {
-    const result = await dashboardRequest(db, `/reports/${report}/report-runs/${runId}`, { market })
-    const status = String(firstValue(result, ['status', 'state']) || firstValue(result?.reportRun, ['status', 'state']) || '').toLowerCase()
-    if (attempt === 0) console.log(`[momence] ${market} ${report} report run ${runId}: status=${status || 'unknown'} keys=${Object.keys(result || {}).join(',')}`)
-    if (['failed', 'error', 'cancelled'].includes(status)) throw new Error(`Momence ${report} report run ${runId} ${status}.`)
-    const rows = reportRows(result)
-    if (rows.length || ['complete', 'completed', 'finished', 'success', 'succeeded'].includes(status)) return rows
-    await wait(1000)
-  }
-  throw new Error(`Momence ${report} report timed out.`)
 }
 
 const cleanPhone = value => String(value || '').replace(/\D/g, '').slice(-10)
@@ -326,7 +311,7 @@ const rowDate = (row, keys) => {
   return null
 }
 const rowMemberId = row => String(firstValue(row, ['memberId', 'customerId', 'clientId', 'targetMemberId', 'payingMemberId']) || firstValue(row?.member, ['id']) || firstValue(row?.customer, ['id']) || '').trim()
-const rowEmail = row => cleanEmail(firstValue(row, ['email', 'memberEmail', 'customerEmail', 'clientEmail']) || row?.member?.email || row?.customer?.email)
+const rowEmail = row => cleanEmail(firstValue(row, ['email', 'memberEmail', 'customerEmail', 'clientEmail', 'payingCustomerEmail']) || row?.member?.email || row?.customer?.email)
 const rowPhone = row => cleanPhone(firstValue(row, ['phone', 'phoneNumber', 'memberPhone', 'customerPhone']) || row?.member?.phoneNumber || row?.customer?.phoneNumber)
 const matchesLead = (row, lead) => {
   const idMatch = isValidMemberId(lead.memberId) && rowMemberId(row) && String(lead.memberId) === rowMemberId(row)
@@ -335,16 +320,34 @@ const matchesLead = (row, lead) => {
   // Phone values are too easily shared/rewritten to establish lifecycle proof.
   return Boolean(idMatch || emailMatch)
 }
-const saleType = row => String(firstValue(row, ['saleType', 'itemType', 'type', 'productType', 'category']) || firstValue(row?.item, ['itemType', 'type']) || '').toLowerCase()
+const saleType = row => String(firstValue(row, ['saleType', 'itemType', 'type', 'productType', 'category', 'paymentCategory', 'membershipType']) || firstValue(row?.item, ['itemType', 'type']) || '').toLowerCase()
 const isQualifiedMembershipSale = row => {
   const type = saleType(row)
   const voided = asBool(firstValue(row, ['voided', 'isVoided', 'cancelled', 'isCancelled']))
-  const refunded = asBool(firstValue(row, ['fullyRefunded', 'isRefunded'])) || String(firstValue(row, ['status']) || '').toLowerCase().includes('refund')
-  return /membership|subscription|pack/.test(type) && !voided && !refunded
+  const refundedAmount = Number(firstValue(row, ['refunded']) ?? 0)
+  const refunded = asBool(firstValue(row, ['fullyRefunded', 'isRefunded'])) || refundedAmount > 0 || String(firstValue(row, ['status', 'paymentStatus']) || '').toLowerCase().includes('refund')
+  const failed = String(firstValue(row, ['paymentStatus']) || '').toLowerCase() === 'failed'
+  return /membership|subscription|pack/.test(type) && !voided && !refunded && !failed
 }
-const isValidTrialBooking = row => !asBool(firstValue(row, ['cancelled', 'isCancelled'])) && !asBool(firstValue(row, ['lateCancelled', 'isLateCancelled', 'lateCancellation'])) && !asBool(firstValue(row, ['noShow', 'isNoShow', 'noshow']))
 
-export function applyLifecycleEvidence(leads, salesRows, bookingRows, market, db) {
+// Trial completion is proven by the member's own attended-class history, not
+// a booking report — a booking can be made and never shown up to. Only counts
+// if the first attended class happened after the lead was created.
+async function firstAttendedClassDate(db, memberId, market) {
+  try {
+    const sessions = await getMemberSessions(db, memberId, market)
+    const attendedDates = sessions
+      .filter(s => !s.cancelledAt && asBool(firstValue(s, ['checkedIn', 'attended', 'isCheckedIn'])))
+      .map(s => rowDate(s, ['startsAt', 'sessionStartsAt', 'sessionDate', 'classDate']))
+      .filter(Boolean)
+      .sort((a, b) => a - b)
+    return attendedDates[0] || null
+  } catch (e) {
+    return null
+  }
+}
+
+export function applyLifecycleEvidence(leads, salesRows, trialDateByMemberId, market, db) {
   const expandedSales = salesRows.flatMap(row => Array.isArray(row?.items) && row.items.length ? row.items.map(item => ({ ...row, ...item, item, member: item.targetMember || item.payingMember || row.member, customer: item.targetMember || item.payingMember || row.customer })) : [row])
   let updated = 0
   const updatedLeadIds = []
@@ -354,14 +357,11 @@ export function applyLifecycleEvidence(leads, salesRows, bookingRows, market, db
     if (Number.isNaN(createdAt.getTime())) continue
     const firstPurchase = expandedSales
       .filter(row => matchesLead(row, lead) && isQualifiedMembershipSale(row))
-      .map(row => rowDate(row, ['saleDate', 'soldAt', 'purchaseDate', 'transactionDate', 'createdAt', 'date']))
+      .map(row => rowDate(row, ['saleDate', 'soldAt', 'purchaseDate', 'transactionDate', 'paymentDate', 'createdAt', 'date']))
       .filter(date => date && date > createdAt)
       .sort((a, b) => a - b)[0] || null
-    const firstTrial = bookingRows
-      .filter(row => matchesLead(row, lead) && isValidTrialBooking(row))
-      .map(row => rowDate(row, ['sessionDate', 'classDate', 'startsAt', 'sessionStartsAt', 'sessionStartDate', 'bookedEntityStartsAt', 'date']))
-      .filter(date => date && date > createdAt)
-      .sort((a, b) => a - b)[0] || null
+    const attended = isValidMemberId(lead.memberId) ? trialDateByMemberId.get(String(lead.memberId)) : null
+    const firstTrial = attended && attended > createdAt ? attended : null
     const evidence = {
       market,
       trialCompleted: Boolean(firstTrial),
@@ -388,14 +388,35 @@ export async function syncLifecycleEvidence(db, leads = db.leads || []) {
   const summary = []
   const updatedLeadIds = []
   for (const market of ['mumbai', 'blr']) {
-    if (!dashboardCookie(market)) { summary.push({ market, skipped: true, reason: 'dashboard-cookie-missing' }); continue }
-    const [sales, bookings] = await Promise.all([
-      runDashboardReport(db, 'total-sales', { market, startDate, endDate }),
-      runDashboardReport(db, 'session-bookings', { market, startDate, endDate })
-    ])
-    const applied = applyLifecycleEvidence(leads, sales, bookings, market, db)
+    if (!isConfigured(db, market)) { summary.push({ market, skipped: true, reason: 'not-configured' }); continue }
+    const marketLeads = leads.filter(lead => marketForLocation(lead.locationId, db) === market)
+    let sales = []
+    try {
+      sales = await runHostReport(db, 'total-sales', {
+        market,
+        startDate,
+        endDate,
+        saleTypes: ['membership', 'session', 'appointment', 'monthly-subscription', 'custom-member-payment-plan-installment'],
+        moneyCreditSalesFilter: 'noFilter',
+        includeRefunds: true,
+        excludeGiftCardPaymentMethod: true,
+        excludeTransactionFeesInSaleValue: false
+      })
+    } catch (e) {
+      summary.push({ market, skipped: true, reason: e.message })
+      continue
+    }
+    const memberIds = [...new Set(marketLeads.map(lead => lead.memberId).filter(isValidMemberId).map(String))]
+    const trialDateByMemberId = new Map()
+    const CONCURRENCY = 5
+    for (let i = 0; i < memberIds.length; i += CONCURRENCY) {
+      const batch = memberIds.slice(i, i + CONCURRENCY)
+      const results = await Promise.all(batch.map(id => firstAttendedClassDate(db, id, market)))
+      batch.forEach((id, idx) => trialDateByMemberId.set(id, results[idx]))
+    }
+    const applied = applyLifecycleEvidence(marketLeads, sales, trialDateByMemberId, market, db)
     updatedLeadIds.push(...applied.updatedLeadIds)
-    summary.push({ market, sales: sales.length, bookings: bookings.length, updated: applied.updated })
+    summary.push({ market, sales: sales.length, members: memberIds.length, updated: applied.updated })
   }
   save()
   return { summary, updatedLeadIds: [...new Set(updatedLeadIds)] }
@@ -589,10 +610,6 @@ export async function getMemberAppointments(db, memberId, market = 'mumbai') {
   return safePaginate(db, `/api/v2/host/members/${memberId}/appointments`, { market, extra: { includeCancelled: true } }, [])
 }
 
-export async function getSales(db, { memberId, market = 'mumbai' } = {}) {
-  return paginate(db, '/api/v2/host/sales', { market })
-}
-
 export async function searchMembers(db, query, market = 'mumbai') {
   return paginate(db, '/api/v2/host/members', { market, extra: { query } })
 }
@@ -647,24 +664,20 @@ export function mapClassHistory(sessions) {
     .sort((a, b) => new Date(b.startsAt) - new Date(a.startsAt))
 }
 
-export function mapSalesHistory(sales) {
-  const rows = []
-  for (const sale of sales || []) {
-    for (const item of sale.items || []) {
-      rows.push({
-        id: sale.id,
-        saleDate: sale.saleDate,
-        itemType: item.itemType,
-        itemName: item.itemName || item.descriptiveItemName || sale.items[0]?.itemName || 'Sale',
-        quantity: item.quantity,
-        unitPriceInCurrency: item.unitPriceExcludingTaxInCurrency,
-        totalInCurrency: item.unitPriceExcludingTaxInCurrency ? String((parseFloat(item.unitPriceExcludingTaxInCurrency) || 0) * (item.quantity || 1)) : null,
-        paymentMethod: (sale.paymentTransaction?.items || [])[0]?.paymentMethodType || 'unknown',
-        payingMember: item.payingMember ? `${item.payingMember.firstName} ${item.payingMember.lastName}`.trim() : null
-      })
-    }
-  }
-  return rows.sort((a, b) => new Date(b.saleDate) - new Date(a.saleDate))
+// Maps items from the /host/reports "total-sales" report run — the
+// refund-aware, complete purchase history — not the shallow /host/sales listing.
+export function mapSalesHistoryReport(items) {
+  return (items || [])
+    .map(item => ({
+      id: item.paymentTransactionId || item.saleItemId,
+      saleDate: item.paymentDate || item.serviceDate,
+      itemType: item.paymentCategory || item.membershipType || 'sale',
+      itemName: item.paymentItem || 'Sale',
+      totalInCurrency: String(Math.max(0, (Number(item.paymentValue) || 0) - (Number(item.refunded) || 0))),
+      paymentMethod: item.paymentMethod || 'unknown',
+      payingMember: item.payingCustomerName || null
+    }))
+    .sort((a, b) => new Date(b.saleDate) - new Date(a.saleDate))
 }
 
 export function mapMemberships(memberships) {
@@ -716,12 +729,20 @@ export async function buildProfile(db, memberId, locationId) {
   ])
   let salesHistory = []
   try {
-    const sales = await getSales(db, { market })
-    salesHistory = mapSalesHistory(sales.filter(s =>
-      (s.items || []).some(it =>
-        (it.payingMember && String(it.payingMember.id) === String(memberId)) ||
-        (it.targetMember && String(it.targetMember.id) === String(memberId))
-      )
+    const from = member.firstSeen ? new Date(member.firstSeen) : new Date(Date.now() - 3 * 365 * 86400000)
+    const items = await runHostReport(db, 'total-sales', {
+      market,
+      locationId,
+      startDate: from.toISOString(),
+      endDate: new Date().toISOString(),
+      saleTypes: ['membership', 'session', 'appointment', 'monthly-subscription', 'custom-member-payment-plan-installment'],
+      moneyCreditSalesFilter: 'noFilter',
+      includeRefunds: true,
+      excludeGiftCardPaymentMethod: true,
+      excludeTransactionFeesInSaleValue: false
+    })
+    salesHistory = mapSalesHistoryReport(items.filter(item =>
+      String(item.memberId) === String(safeMemberId) || String(item.payingMemberId) === String(safeMemberId)
     ))
   } catch (e) {
     salesHistory = []
