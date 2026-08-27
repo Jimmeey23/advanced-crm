@@ -181,6 +181,49 @@ export async function getSessions(db, filters = {}) {
   return [...new Map(sessions.map(session => [String(session.id), session])).values()].sort((a, b) => new Date(a.startsAt) - new Date(b.startsAt))
 }
 
+// The booking objects Momence returns carry no field for which membership
+// was consumed (confirmed against the public API v2 docs — booking DTOs only
+// have check-in/cancellation metadata). The closest real signal is the
+// member's own active memberships, fetched per booked member.
+async function attachMembershipUsed(db, bookings, market) {
+  const memberIds = [...new Set(bookings.filter(b => !b.cancelledAt && b.member?.id).map(b => String(b.member.id)))]
+  const byMember = new Map()
+  const CONCURRENCY = 5
+  for (let i = 0; i < memberIds.length; i += CONCURRENCY) {
+    const batch = memberIds.slice(i, i + CONCURRENCY)
+    const results = await Promise.all(batch.map(id => getMemberMemberships(db, id, market).catch(() => [])))
+    batch.forEach((id, idx) => byMember.set(id, results[idx]))
+  }
+  return bookings.map(b => {
+    const memberships = b.member?.id ? (byMember.get(String(b.member.id)) || []) : []
+    // No booking-level field ties a booking to a specific membership, so this
+    // is a best-effort pick among the member's active plans: prefer one that's
+    // not frozen, has an explicit active date range (a real subscription
+    // rather than an undated credit pack), and still has usage left.
+    const now = Date.now()
+    const score = m => {
+      let s = 0
+      if (!m.isFrozen) s += 4
+      if (m.startDate && m.endDate && new Date(m.startDate).getTime() <= now && now <= new Date(m.endDate).getTime()) s += 2
+      if (m.eventCreditsLeft == null || m.eventCreditsLeft > 0) s += 1
+      return s
+    }
+    const best = [...memberships].sort((a, b2) => score(b2) - score(a))[0] || null
+    const name = best?.membership?.name || best?.type
+    const isUnlimited = /unlimited/i.test(name || '')
+    return {
+      ...b,
+      membershipUsed: best ? {
+        name,
+        type: best.type,
+        classesLeft: isUnlimited ? null : best.eventCreditsLeft,
+        unlimited: isUnlimited,
+        count: memberships.length
+      } : null
+    }
+  })
+}
+
 export async function getSessionWorkspace(db, sessionId, locationId) {
   const market = marketForLocation(locationId, db)
   const [session, bookings] = await Promise.all([
@@ -189,7 +232,8 @@ export async function getSessionWorkspace(db, sessionId, locationId) {
       pageSize: 100, market, extra: { sortBy: 'firstName', sortOrder: 'ASC', includeCancelled: true }
     })
   ])
-  return { session, bookings }
+  const enrichedBookings = await attachMembershipUsed(db, bookings, market)
+  return { session, bookings: enrichedBookings }
 }
 
 export function addMemberToSession(db, sessionId, memberId, createRecurringBooking = false, locationId) {
@@ -333,7 +377,7 @@ const isQualifiedMembershipSale = row => {
 // Trial completion is proven by the member's own attended-class history, not
 // a booking report — a booking can be made and never shown up to. Only counts
 // if the first attended class happened after the lead was created.
-async function firstAttendedClassDate(db, memberId, market) {
+async function firstAttendedClassDate(db, memberId, market, retried = false) {
   try {
     const sessions = await getMemberSessions(db, memberId, market)
     const attendedDates = sessions
@@ -343,6 +387,10 @@ async function firstAttendedClassDate(db, memberId, market) {
       .sort((a, b) => a - b)
     return attendedDates[0] || null
   } catch (e) {
+    if (!retried && /429|rate limit/i.test(String(e?.message || ''))) {
+      await wait(2000)
+      return firstAttendedClassDate(db, memberId, market, true)
+    }
     return null
   }
 }
@@ -381,6 +429,11 @@ export function applyLifecycleEvidence(leads, salesRows, trialDateByMemberId, ma
   return { updated, updatedLeadIds }
 }
 
+// One /host/members/:id/sessions call per member — bounded per run so a large
+// backlog can't turn a single sync into an hours-long, rate-limit-inviting run.
+// Uncovered members just get picked up first next cycle (see hasEvidence sort).
+const MAX_MEMBERS_PER_MARKET_PER_RUN = 4000
+
 export async function syncLifecycleEvidence(db, leads = db.leads || []) {
   const validDates = leads.map(lead => new Date(lead.createdAt)).filter(date => !Number.isNaN(date.getTime()))
   const startDate = (validDates.sort((a, b) => a - b)[0] || new Date(Date.now() - 365 * 86400000)).toISOString()
@@ -406,13 +459,20 @@ export async function syncLifecycleEvidence(db, leads = db.leads || []) {
       summary.push({ market, skipped: true, reason: e.message })
       continue
     }
+    // Leads without any evidence yet go first, so a large backlog converges
+    // over successive runs instead of an already-checked member starving out
+    // a never-checked one within the same run's cap.
+    const hasEvidence = new Set(marketLeads.filter(lead => lead.momenceEvidence).map(lead => String(lead.memberId)))
     const memberIds = [...new Set(marketLeads.map(lead => lead.memberId).filter(isValidMemberId).map(String))]
+      .sort((a, b) => Number(hasEvidence.has(a)) - Number(hasEvidence.has(b)))
+      .slice(0, MAX_MEMBERS_PER_MARKET_PER_RUN)
     const trialDateByMemberId = new Map()
-    const CONCURRENCY = 5
+    const CONCURRENCY = 3
     for (let i = 0; i < memberIds.length; i += CONCURRENCY) {
       const batch = memberIds.slice(i, i + CONCURRENCY)
       const results = await Promise.all(batch.map(id => firstAttendedClassDate(db, id, market)))
       batch.forEach((id, idx) => trialDateByMemberId.set(id, results[idx]))
+      if (i + CONCURRENCY < memberIds.length) await wait(120)
     }
     const applied = applyLifecycleEvidence(marketLeads, sales, trialDateByMemberId, market, db)
     updatedLeadIds.push(...applied.updatedLeadIds)
@@ -600,6 +660,70 @@ export async function getHostMemberships(db, locationId) {
       onlyFeatured: true
     }
   }, [])
+}
+
+export async function getPaymentTransaction(db, paymentTransactionId, market = 'mumbai') {
+  return request(db, `/api/v2/host/payment-transactions/${paymentTransactionId}`, { market })
+}
+
+// No get-by-id endpoint exists for host memberships, only the list — paginate
+// unfiltered (unlike getHostMemberships, which restricts to featured/enabled
+// for the picker UI) so a disabled or non-featured membership still resolves.
+export async function getMembershipById(db, membershipId, market = 'mumbai') {
+  const all = await safePaginate(db, '/api/v2/host/memberships', { market, pageSize: 200, extra: { includeDisabled: true } }, [])
+  return all.find(m => String(m.id) === String(membershipId)) || null
+}
+
+const EXCLUDED_MEMBERSHIP_TYPES = new Set(['package-money'])
+const EXCLUDED_PURCHASE_TYPES = new Set(['product', 'refund', 'tips'])
+const NEWCOMER_2FOR1_RE = /newcomer.*2.?for.?1|2.?for.?1.*newcomer/i
+
+// Shared gate for "does this purchase count toward Membership Sold / LTV" —
+// excludes products, money-credit packs, and the newcomer 2-for-1 offer per
+// business rule, regardless of which webhook event surfaced the purchase.
+export function isQualifyingPurchase({ purchaseType, membershipType, itemName } = {}) {
+  const type = String(purchaseType || '').toLowerCase()
+  const mType = String(membershipType || '').toLowerCase()
+  const name = String(itemName || '')
+  if (EXCLUDED_PURCHASE_TYPES.has(type)) return false
+  if (EXCLUDED_MEMBERSHIP_TYPES.has(mType)) return false
+  if (NEWCOMER_2FOR1_RE.test(name)) return false
+  return true
+}
+
+// Applies one confirmed purchase (from a Momence webhook) to whichever lead it
+// belongs to. A purchase only counts if it can be matched to a lead created
+// before the purchase happened (webhook basics doc's memberId/email join,
+// same as matchesLead) and passes isQualifyingPurchase.
+// `amount` should only be passed from payment-transaction-succeeded (the
+// event that actually carries a paid amount) — bought-membership-activated
+// is used only to backfill date/item name when no transaction event matched,
+// and never contributes to ltv, so the same purchase can't be double-counted.
+export function recordLeadPurchase(db, { market, memberId, email, purchaseDate, itemName, amount, purchaseType, membershipType }) {
+  if (!purchaseDate || Number.isNaN(new Date(purchaseDate).getTime())) return null
+  if (!isQualifyingPurchase({ purchaseType, membershipType, itemName })) return null
+  const date = new Date(purchaseDate)
+  const pseudoRow = { memberId, email }
+  const lead = (db.leads || [])
+    .filter(l => marketForLocation(l.locationId, db) === market)
+    .filter(l => matchesLead(pseudoRow, l))
+    .filter(l => new Date(l.createdAt || 0) < date)
+    .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))[0]
+  if (!lead) return null
+  const previous = lead.momenceEvidence || {}
+  const isEarliest = !previous.firstPurchaseDate || date < new Date(previous.firstPurchaseDate)
+  lead.momenceEvidence = {
+    ...previous,
+    market,
+    membershipSold: true,
+    firstPurchaseDate: isEarliest ? date.toISOString() : previous.firstPurchaseDate,
+    firstPurchaseItemName: isEarliest ? (itemName || previous.firstPurchaseItemName || null) : (previous.firstPurchaseItemName || itemName || null),
+    ltv: (Number(previous.ltv) || 0) + (Number(amount) || 0),
+    checkedAt: nowIso()
+  }
+  if (!lead.convertedAt || date < new Date(lead.convertedAt)) lead.convertedAt = date.toISOString()
+  save()
+  return lead
 }
 
 export async function getMemberNotes(db, memberId, market = 'mumbai') {

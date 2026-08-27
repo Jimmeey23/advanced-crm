@@ -967,6 +967,86 @@ app.all('/api/webhooks/leads/:key', (req, res) => {
   res.status(201).json({ status: 'created', leadId: lead.id })
 })
 
+// ---------- Momence purchase webhooks ----------
+// Configure the endpoint URL `/api/webhooks/momence/:market` (market =
+// mumbai|blr) in the Momence dashboard, one secret per market, stored at
+// db.settings.momence.webhookSecret (mumbai) / db.settings.momence.blr.webhookSecret (blr).
+// Per the webhooks-basics doc the outer JSON body is `{ payload: "<json string>" }`
+// and x-webhook-signature is an HMAC-SHA256 of that raw string — no need for
+// raw-body middleware since `payload` is already a string field after normal
+// express.json() parsing.
+const MOMENCE_WEBHOOK_SEEN_IDS = new Set()
+function momenceWebhookSecret(market) {
+  if (!db.settings.momence) db.settings.momence = {}
+  return market === 'blr' ? (db.settings.momence.blr?.webhookSecret || '') : (db.settings.momence.webhookSecret || '')
+}
+
+app.post('/api/webhooks/momence/:market', async (req, res) => {
+  const market = req.params.market === 'blr' ? 'blr' : 'mumbai'
+  const secret = momenceWebhookSecret(market)
+  if (!secret) return res.status(404).json({ error: 'Momence webhook not configured for this market' })
+
+  const rawPayload = req.body?.payload
+  if (typeof rawPayload !== 'string') return res.status(400).json({ error: 'Malformed webhook body' })
+
+  const signature = req.header('x-webhook-signature') || ''
+  const expected = crypto.createHmac('sha256', secret).update(rawPayload).digest('hex')
+  const sigOk = signature.length === expected.length && crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected))
+  if (!sigOk) return res.status(401).json({ error: 'Invalid signature' })
+
+  // Dedupe retries by request id (same id redelivered on retry per the docs).
+  const requestId = req.header('x-webhook-reqeuest-id') || req.header('x-webhook-request-id')
+  if (requestId) {
+    if (MOMENCE_WEBHOOK_SEEN_IDS.has(requestId)) return res.json({ status: 'duplicate' })
+    MOMENCE_WEBHOOK_SEEN_IDS.add(requestId)
+    if (MOMENCE_WEBHOOK_SEEN_IDS.size > 5000) MOMENCE_WEBHOOK_SEEN_IDS.clear()
+  }
+
+  let event
+  try { event = JSON.parse(rawPayload) } catch { return res.status(400).json({ error: 'Malformed payload JSON' }) }
+
+  try {
+    if (event.event === 'payment-transaction-succeeded') {
+      const txn = await momence.getPaymentTransaction(db, event.payload.id, market)
+      if (txn.paymentStatus !== 'succeeded') return res.json({ status: 'ignored', reason: 'not succeeded' })
+      const item = txn.sales?.[0]?.items?.[0] || txn.transactionItems?.[0]
+      const lead = momence.recordLeadPurchase(db, {
+        market,
+        memberId: txn.payingMember?.id,
+        email: txn.payingMember?.email,
+        purchaseDate: txn.createdAt,
+        itemName: item?.itemName || null,
+        amount: Number(txn.paidInCurrency) || 0,
+        purchaseType: txn.purchaseType,
+        membershipType: item?.usedBoughtMembership?.type || item?.membershipType
+      })
+      if (lead) { markDirty(lead.id); log('lead', `Momence purchase matched: ${lead.fullName}`, lead.id) }
+      return res.json({ status: lead ? 'applied' : 'no-match' })
+    }
+
+    if (event.event === 'bought-membership-activated') {
+      const p = event.payload
+      const membership = await momence.getMembershipById(db, p.membershipId, market)
+      const member = await momence.getMember(db, p.memberId, market).catch(() => null)
+      const lead = momence.recordLeadPurchase(db, {
+        market,
+        memberId: p.memberId,
+        email: member?.email,
+        purchaseDate: p.startDate || event.timestamp,
+        itemName: membership?.name || null,
+        purchaseType: 'membership',
+        membershipType: p.type
+      })
+      if (lead) { markDirty(lead.id); log('lead', `Momence membership activation matched: ${lead.fullName}`, lead.id) }
+      return res.json({ status: lead ? 'applied' : 'no-match' })
+    }
+
+    res.json({ status: 'ignored', reason: 'unhandled event type' })
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
 // ---------- Google Sheets lead import ----------
 
 function logSheetSync(outcome, detail) {
@@ -1444,6 +1524,13 @@ app.get('/api/momence/members', async (req, res) => {
   if (query.length < 2) return res.json({ members: [] })
   try { res.json({ members: (await momence.searchMembers(db, query, market)).slice(0, 20) }) }
   catch (e) { res.status(502).json({ error: e.message }) }
+})
+
+// Full member profile by Momence member ID directly — used by the schedule's
+// roster (members there may not correspond to any CRM lead at all).
+app.get('/api/momence/members/:memberId/profile', async (req, res) => {
+  try { res.json({ ok: true, profile: await momence.buildProfile(db, req.params.memberId, req.query.locationId) }) }
+  catch (e) { res.status(502).json({ ok: false, error: e.message }) }
 })
 
 app.get('/api/momence/members/:memberId/session-memberships', async (req, res) => {

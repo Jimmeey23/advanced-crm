@@ -17,6 +17,9 @@ export function AppProvider({ children }) {
   const [view, setView] = useState('dashboard')
   const [viewParams, setViewParams] = useState({})
   const [dataVersion, setDataVersion] = useState(0)
+  // Lets the schedule page feed its live session list into the single
+  // top-of-app marquee instead of rendering a second ticker of its own.
+  const [scheduleSessions, setScheduleSessions] = useState([])
   const [toasts, setToasts] = useState([])
   const toastId = useRef(0)
 
@@ -126,7 +129,8 @@ export function AppProvider({ children }) {
   const value = {
     boot, lookup, alerts, toasts, drawerLeadId, view, viewParams, theme, setTheme, accent, setAccent,
     sidebarCollapsed, toggleSidebar,
-    refreshData, refreshAlerts, navigate, openLead, closeLead, toast, dataVersion
+    refreshData, refreshAlerts, navigate, openLead, closeLead, toast, dataVersion,
+    scheduleSessions, setScheduleSessions
   }
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>

@@ -18,7 +18,7 @@ import StudioWeekly from './pages/StudioWeekly.jsx'
 import StudioMonthly from './pages/StudioMonthly.jsx'
 import Inbox from './pages/Inbox.jsx'
 import SettingsPage from './pages/Settings.jsx'
-import MomenceSchedule from './pages/MomenceSchedule.jsx'
+import MomenceSchedule, { formatTone, personName, time as fmtSessionTime } from './pages/MomenceSchedule.jsx'
 import LeadDrawer from './components/LeadDrawer.jsx'
 import AddLeadModal from './components/AddLeadModal.jsx'
 import AlertsDropdown from './components/AlertsDropdown.jsx'
@@ -193,8 +193,30 @@ function Topbar({ onAdd }) {
 }
 
 function MarqueeBanner() {
-  const { boot, alerts, dataVersion, view } = useApp()
+  const { boot, alerts, dataVersion, view, scheduleSessions } = useApp()
   const { data: metrics } = useFetch(() => api.get('/api/analytics/overview'), [dataVersion])
+
+  if (view === 'momence-schedule') {
+    const items = [...scheduleSessions].sort((a, b) => new Date(a.startsAt) - new Date(b.startsAt)).slice(0, 24)
+    if (!items.length) return null
+    const track = items.map(s => (
+      <span key={s.id} className={`tone-${formatTone(s.name)}`}>
+        <i />
+        <b>{fmtSessionTime(s.startsAt)}</b>
+        {s.name}
+        <em>{personName(s.teacher)}</em>
+        <u>{s.bookingCount}/{s.capacity ?? '∞'} IN</u>
+      </span>
+    ))
+    return (
+      <div className="app-marquee is-schedule-marquee" aria-label="Live class schedule" key={view}>
+        <div className="app-marquee-track">
+          <div className="app-marquee-group">{track}</div>
+          <div className="app-marquee-group" aria-hidden="true">{track}</div>
+        </div>
+      </div>
+    )
+  }
   const highPriority = alerts.filter(alert => alert.level === 'high').length
   const integrationCount = boot ? Object.values(boot.integrations || {}).filter(value => value === true).length : 0
   const analytics = metrics || {}

@@ -2,19 +2,20 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { CalendarDays, ChevronLeft, ChevronRight, Clock3, List, MapPin, Search, Users, X, CheckCircle2, UserPlus, RefreshCw, AlertTriangle } from 'lucide-react'
 import { api, buildQuery } from '../api.js'
 import { useApp } from '../store.jsx'
+import MemberProfileModal from '../components/MemberProfileModal.jsx'
 
 const DAY = 86400000
 const startOfDay = d => new Date(d.getFullYear(), d.getMonth(), d.getDate())
 const iso = d => d.toISOString()
 const dayKey = d => `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`
 const sameDay = (a, b) => dayKey(new Date(a)) === dayKey(new Date(b))
-const personName = p => [p?.firstName, p?.lastName].filter(Boolean).join(' ') || 'Unknown member'
-const time = value => new Intl.DateTimeFormat('en-IN', { hour: 'numeric', minute: '2-digit' }).format(new Date(value))
+export const personName = p => [p?.firstName, p?.lastName].filter(Boolean).join(' ') || 'Unknown member'
+export const time = value => new Intl.DateTimeFormat('en-IN', { hour: 'numeric', minute: '2-digit' }).format(new Date(value))
 const fullDate = value => new Intl.DateTimeFormat('en-IN', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' }).format(new Date(value))
 const membershipName = item => item?.name || item?.membership?.name || item?.membershipName || `Membership #${item?.id || item?.membershipId || item?.boughtMembershipId}`
 const membershipId = item => item?.bookingMembershipId || item?.boughtMembershipId || item?.boughtMembership?.id || item?.id || item?.membershipId
 
-const formatTone = name => {
+export const formatTone = name => {
   const value = String(name || '').toLowerCase()
   if (value.includes('powercycle') || value.includes('cycle')) return 'cyan'
   if (value.includes('cardio')) return 'rose'
@@ -40,37 +41,63 @@ function rangeFor(view, anchor) {
   return { start, end: new Date(start.getTime() + 7 * DAY) }
 }
 
+const initials = p => [p?.firstName, p?.lastName].filter(Boolean).map(s => s[0]).join('').toUpperCase() || '—'
+
 function SessionCard({ session, onClick, compact = false }) {
   const remaining = session.capacity == null ? null : Math.max(0, session.capacity - session.bookingCount)
+  const isFull = remaining === 0
   return <button className={`mom-session-card tone-${formatTone(session.name)} ${session.isCancelled ? 'is-cancelled' : ''} ${compact ? 'is-compact' : ''}`} onClick={() => onClick(session)}>
-    <span className="mom-session-time">{time(session.startsAt)}</span>
+    <div className="mom-session-card-top">
+      <span className="mom-session-time">{time(session.startsAt)}</span>
+      {isFull && !session.isCancelled && <span className="mom-session-full-badge">Full</span>}
+    </div>
     <strong>{session.name}</strong>
-    {!compact && <span>{personName(session.teacher)} · {session.inPersonLocation?.name || 'Online'}</span>}
-    <small>{session.bookingCount}/{session.capacity ?? '∞'} booked{remaining === 0 ? ' · Full' : ''}</small>
+    {!compact && <span className="mom-session-instructor"><i>{initials(session.teacher)}</i>{personName(session.teacher)}</span>}
+    <small>{session.bookingCount}/{session.capacity ?? '∞'} booked</small>
   </button>
 }
 
 function WeeklySchedule({ days, sessions, onOpen }) {
-  return <div className="mom-week-table card">
-    <div className="mom-week-columns"><span>Time</span><span>Class name</span><span>Instructor</span><span>Location</span><span>Signups</span></div>
-    {days.map(day => {
-      const rows = sessions.filter(session => sameDay(session.startsAt, day))
-      return <section key={dayKey(day)}>
-        <header><strong>{day.toLocaleDateString('en-IN', { weekday: 'short' })}</strong><span>{day.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}</span><em>{rows.reduce((sum, row) => sum + Number(row.bookingCount || 0), 0)} signups</em></header>
-        {rows.length ? rows.map(session => <button key={session.id} onClick={() => onOpen(session)}>
-          <span>{time(session.startsAt)} – {time(session.endsAt)}</span>
-          <strong>{session.name}</strong>
-          <span>{personName(session.teacher)}</span>
-          <span><MapPin />{session.inPersonLocation?.name || 'Online'}</span>
-          <span>{session.bookingCount}/{session.capacity ?? '∞'}</span>
-        </button>) : <p>No Studio Sessions scheduled.</p>}
-      </section>
-    })}
+  const [instructorQuery, setInstructorQuery] = useState('')
+  const instructors = useMemo(() => [...new Set(sessions.map(s => personName(s.teacher)).filter(n => n !== 'Unknown member'))].sort(), [sessions])
+  const filtered = instructorQuery ? sessions.filter(s => personName(s.teacher) === instructorQuery) : sessions
+
+  return <div className="mom-week-grid card">
+    <div className="mom-week-grid-controls">
+      <span className="mom-week-grid-total">{filtered.length} session{filtered.length === 1 ? '' : 's'} this week</span>
+      <label className="mom-week-instructor-filter">
+        <Users size={13} />
+        <select className="input" value={instructorQuery} onChange={e => setInstructorQuery(e.target.value)}>
+          <option value="">All instructors</option>
+          {instructors.map(name => <option key={name} value={name}>{name}</option>)}
+        </select>
+      </label>
+    </div>
+    <div className="mom-week-grid-scroll">
+      <div className="mom-week-columns-grid">
+        {days.map(day => {
+          const rows = filtered.filter(session => sameDay(session.startsAt, day)).sort((a, b) => new Date(a.startsAt) - new Date(b.startsAt))
+          const isToday = sameDay(day, new Date())
+          return <div key={dayKey(day)} className={`mom-week-grid-day ${isToday ? 'is-today' : ''}`}>
+            <header>
+              <span className="mom-week-day-name">{day.toLocaleDateString('en-IN', { weekday: 'short' })}</span>
+              <span className="mom-week-day-num font-display">{day.getDate()}</span>
+              <em>{rows.length} class{rows.length === 1 ? '' : 'es'}</em>
+            </header>
+            <div className="mom-week-grid-list">
+              {rows.length
+                ? rows.map(session => <SessionCard key={session.id} session={session} onClick={onOpen} />)
+                : <span className="mom-no-session">No sessions</span>}
+            </div>
+          </div>
+        })}
+      </div>
+    </div>
   </div>
 }
 
 export default function MomenceSchedule() {
-  const { boot, toast } = useApp()
+  const { boot, toast, setScheduleSessions } = useApp()
   const [view, setView] = useState('week')
   const [anchor, setAnchor] = useState(startOfDay(new Date()))
   const [sessions, setSessions] = useState([])
@@ -92,6 +119,10 @@ export default function MomenceSchedule() {
   }, [range.start.getTime(), range.end.getTime(), location])
 
   useEffect(() => { load() }, [load])
+  useEffect(() => {
+    setScheduleSessions(sessions)
+    return () => setScheduleSessions([])
+  }, [sessions, setScheduleSessions])
   const openSession = async session => {
     setSelected(session); setDetail(null); setDetailLoading(true)
     try { setDetail(await api.get(`/api/momence/sessions/${session.id}?${buildQuery({ locationId: session.inPersonLocation?.id })}`)) }
@@ -109,17 +140,35 @@ export default function MomenceSchedule() {
   const days = useMemo(() => Array.from({ length: view === 'month' ? Math.ceil((range.end - range.start) / DAY) : view === 'week' ? 7 : 1 }, (_, i) => new Date(range.start.getTime() + i * DAY)), [range, view])
   const locations = useMemo(() => [...new Map(sessions.map(s => s.inPersonLocation).filter(Boolean).map(l => [String(l.id), l])).values()], [sessions])
   const title = view === 'month' ? anchor.toLocaleDateString('en-IN', { month: 'long', year: 'numeric' }) : `${fullDate(range.start)}${view === 'week' ? ` – ${fullDate(new Date(range.end.getTime() - DAY))}` : ''}`
+  const stats = useMemo(() => {
+    const totalCapacity = sessions.reduce((sum, s) => sum + (Number(s.capacity) || 0), 0)
+    const totalBooked = sessions.reduce((sum, s) => sum + (Number(s.bookingCount) || 0), 0)
+    const waitlist = sessions.reduce((sum, s) => sum + (Number(s.waitlistBookingCount) || 0), 0)
+    const cancelled = sessions.filter(s => s.isCancelled).length
+    return {
+      classes: sessions.length,
+      occupancy: totalCapacity ? Math.round((totalBooked / totalCapacity) * 100) : 0,
+      waitlist,
+      cancelled
+    }
+  }, [sessions])
 
   if (!boot?.integrations?.momence) return <div className="mom-schedule-page"><div className="mom-empty card"><AlertTriangle /><h2>Connect Momence to load the schedule</h2><p>Add the Public API credentials in Settings, then return here to manage sessions and rosters.</p></div></div>
 
   return <div className="mom-schedule-page">
     <section className="mom-schedule-toolbar">
-      <div><span className="eyebrow">Live from Momence</span><h2>Schedule</h2><p>Review every Studio Session, open its roster, and complete front-desk actions.</p></div>
+      <div><span className="eyebrow">Live from Momence</span><h2 className="font-display">Schedule</h2><p>Review every Studio Session, open its roster, and complete front-desk actions.</p></div>
       <div className="mom-toolbar-actions">
         <button className="btn btn-ghost" onClick={() => setAnchor(startOfDay(new Date()))}>Today</button>
-        <div className="mom-stepper"><button onClick={() => shift(-1)} aria-label="Previous period"><ChevronLeft /></button><strong>{title}</strong><button onClick={() => shift(1)} aria-label="Next period"><ChevronRight /></button></div>
+        <div className="mom-stepper"><button onClick={() => shift(-1)} aria-label="Previous period"><ChevronLeft /></button><strong className="font-display">{title}</strong><button onClick={() => shift(1)} aria-label="Next period"><ChevronRight /></button></div>
         <button className="mom-icon-btn" onClick={load} aria-label="Refresh schedule"><RefreshCw className={loading ? 'animate-spin' : ''} /></button>
       </div>
+    </section>
+    <section className="mom-stat-strip">
+      <div><strong>{stats.classes}</strong><span>Classes</span></div>
+      <div><strong>{stats.occupancy}%</strong><span>Occupancy</span></div>
+      <div><strong>{stats.waitlist}</strong><span>Waitlist</span></div>
+      <div><strong>{stats.cancelled}</strong><span>Cancelled</span></div>
     </section>
     <section className="mom-filterbar card">
       <div className="mom-view-tabs" role="tablist">{[['day', CalendarDays], ['week', CalendarDays], ['month', CalendarDays], ['list', List]].map(([id, Icon]) => <button key={id} role="tab" aria-selected={view === id} className={view === id ? 'active' : ''} onClick={() => setView(id)}><Icon />{id}</button>)}</div>
@@ -138,6 +187,20 @@ export default function MomenceSchedule() {
 
 const Empty = () => <div className="mom-empty"><CalendarDays /><h3>No sessions in this period</h3><p>Move to another date range or clear the location filter.</p></div>
 
+// Same stat-tile component as Dashboard's PerfStat — kept in sync visually
+// by reusing its exact classes rather than a bespoke metric block.
+function PerfStat({ label, value, color, sub }) {
+  return (
+    <div className="perf-stat-card px-3.5 py-3 flex items-center justify-between">
+      <div>
+        <div className="text-[11px] text-slate-400">{label}</div>
+        {sub && <div className="text-[10.5px] text-slate-600 mt-0.5">{sub}</div>}
+      </div>
+      <div className="font-display text-[17px] font-bold mono" style={{ color }}>{value}</div>
+    </div>
+  )
+}
+
 function SessionDrawer({ session, detail, loading, onClose, onRefresh }) {
   const { toast } = useApp()
   const [memberQuery, setMemberQuery] = useState('')
@@ -155,6 +218,7 @@ function SessionDrawer({ session, detail, loading, onClose, onRefresh }) {
   const [cancelOptions, setCancelOptions] = useState({ refund: true, disableNotifications: false, isLateCancellation: false })
   const [rosterTab, setRosterTab] = useState('signups')
   const [rosterSearch, setRosterSearch] = useState('')
+  const [viewingMemberId, setViewingMemberId] = useState(null)
   useEffect(() => {
     if (memberQuery.trim().length < 2) { setMembers([]); return }
     const timer = setTimeout(async () => { setSearching(true); try { const r = await api.get(`/api/momence/members?${buildQuery({ query: memberQuery, locationId: session.inPersonLocation?.id })}`); setMembers(r.members || []) } catch (e) { toast(e.message, 'error') } finally { setSearching(false) } }, 300)
@@ -204,14 +268,19 @@ function SessionDrawer({ session, detail, loading, onClose, onRefresh }) {
     {loading ? <div className="mom-drawer-loading">Loading roster…</div> : <>
       <div className="mom-class-overview">
         <section className="mom-general-card"><h3>General info</h3><div><Clock3 /><span><small>Date</small><strong>{fullDate(d.startsAt)} · {time(d.startsAt)}–{time(d.endsAt)}</strong></span></div><div><Users /><span><small>Instructor</small><strong>{personName(d.teacher)}</strong></span></div><div><MapPin /><span><small>Location</small><strong>{d.inPersonLocation?.name || 'Online session'}</strong></span></div><div><CalendarDays /><span><small>Session</small><strong>{d.isRecurring ? 'Recurring class' : 'Single class'}</strong></span></div></section>
-        <div className="mom-overview-metrics"><div><small>Signups</small><strong>{d.bookingCount ?? active.length}/{d.capacity ?? '∞'}</strong></div><div><small>Duration</small><strong>{Math.max(0, Math.round((new Date(d.endsAt) - new Date(d.startsAt)) / 60000))} mins</strong></div><div><small>Checked in</small><strong>{active.filter(b => b.checkedIn).length}</strong></div><div><small>Waitlist</small><strong>{d.waitlistBookingCount ?? 0}</strong></div></div>
+        <div className="mom-metric-row">
+          <PerfStat label="Signups" value={`${d.bookingCount ?? active.length}/${d.capacity ?? '∞'}`} color="var(--accent)" />
+          <PerfStat label="Duration" value={`${Math.max(0, Math.round((new Date(d.endsAt) - new Date(d.startsAt)) / 60000))}m`} color="#a78bfa" />
+          <PerfStat label="Checked in" value={active.filter(b => b.checkedIn).length} color="#34d399" />
+          <PerfStat label="Waitlist" value={d.waitlistBookingCount ?? 0} color="#fbbf24" />
+        </div>
         <section className="mom-class-sidecard"><div><strong>Note</strong><button type="button">Edit note</button></div><p>{d.note || d.description || 'Add a note for this class.'}</p><div><strong>Recurring</strong><span>{d.isRecurring ? 'Yes' : 'No'}</span></div></section>
       </div>
       <section className="mom-roster-section"><div className="mom-section-head"><div><h3>Add customer into this class</h3><span>{active.length} current signups</span></div><button className="btn btn-primary" onClick={() => setShowAdd(v => !v)}><UserPlus /> {showAdd ? 'Hide customer search' : 'Add member'}</button></div>
         {showAdd && <div className={`mom-member-search ${selectedMember ? 'has-selected-member' : ''}`}>
           {!selectedMember && <>
             <Search /><input autoFocus className="input" value={memberQuery} onChange={e => { setMemberQuery(e.target.value); setAvailableMemberships([]); setHostMemberships([]); setPaymentMethods([]) }} placeholder="Search Momence members by name, email or phone" />{searching && <RefreshCw className="animate-spin" />}
-            {members.length > 0 && <div className="mom-member-results">{members.map(m => <button type="button" className="mom-member-result-row" key={m.id} disabled={!!acting} onClick={() => inspectMemberships(m)}><span><strong>{personName(m)}</strong><small>{m.email || m.phoneNumber}</small></span><ChevronRight /></button>)}</div>}
+            {members.length > 0 && <div className="mom-member-results">{members.map(m => <div className="mom-member-result-row" key={m.id}><button type="button" className="mom-member-result-name" disabled={!!acting} onClick={() => setViewingMemberId(m.id)}><span><strong>{personName(m)}</strong><small>{m.email || m.phoneNumber}</small></span></button><button type="button" className="mom-member-result-pick" disabled={!!acting} onClick={() => inspectMemberships(m)}><ChevronRight /></button></div>)}</div>}
           </>}
           {selectedMember && <div className="mom-membership-picker">
             <div><span><strong>{personName(selectedMember)}</strong><small>{selectedMember.email || selectedMember.phoneNumber}</small></span><button type="button" title="Choose another member" onClick={() => { setSelectedMember(null); setAvailableMemberships([]); setHostMemberships([]); setPaymentMethods([]) }}><X /></button></div>
@@ -230,9 +299,53 @@ function SessionDrawer({ session, detail, loading, onClose, onRefresh }) {
           </div>}
         </div>}
         <div className="mom-roster-toolbar"><div role="tablist" aria-label="Roster status"><button role="tab" aria-selected={rosterTab === 'signups'} className={rosterTab === 'signups' ? 'active' : ''} onClick={() => setRosterTab('signups')}>Signups <b>{active.length - waitlisted.length}</b></button><button role="tab" aria-selected={rosterTab === 'checked'} className={rosterTab === 'checked' ? 'active' : ''} onClick={() => setRosterTab('checked')}>Checked in <b>{active.filter(b => b.checkedIn).length}</b></button><button role="tab" aria-selected={rosterTab === 'cancelled'} className={rosterTab === 'cancelled' ? 'active' : ''} onClick={() => setRosterTab('cancelled')}>Cancelled <b>{cancelled.length}</b></button><button role="tab" aria-selected={rosterTab === 'waitlist'} className={rosterTab === 'waitlist' ? 'active' : ''} onClick={() => setRosterTab('waitlist')}>Waitlist <b>{Math.max(waitlisted.length, Number(d.waitlistBookingCount || 0))}</b></button></div><label><Search /><input value={rosterSearch} onChange={e => setRosterSearch(e.target.value)} placeholder={`Search ${rosterTab === 'checked' ? 'checked-in members' : rosterTab}…`} /></label><span><button>Options</button><button>Contact this list</button><button>Actions</button></span></div>
-        <div className="mom-roster"><div className="mom-roster-head"><span></span><span>Customer name</span><span>Time of signup</span><span>Payment</span><span>Status</span><span></span></div>{rosterRows.length ? rosterRows.map(b => <div className={`mom-roster-row ${b.cancelledAt ? 'is-cancelled' : ''}`} key={b.id}><span className="mom-avatar">{personName(b.member).split(' ').map(x => x[0]).slice(0,2).join('')}</span><span className="mom-member-copy"><strong>{personName(b.member)}</strong><small>{b.member?.email || b.member?.phoneNumber || `Booking #${b.id}`}</small></span><span className="mom-signup-time">{b.createdAt ? new Date(b.createdAt).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' }) : '—'}</span><span className="mom-payment-copy"><strong>{b.membership?.type || b.boughtMembership?.type || 'Membership'}</strong><small>{b.membership?.name || b.boughtMembership?.membership?.name || b.membershipName || 'Momence booking'}</small></span><span className={`mom-status ${b.cancelledAt ? 'cancelled' : b.checkedIn ? 'checked' : waitlisted.includes(b) ? 'waitlisted' : ''}`}>{b.cancelledAt ? 'Cancelled' : b.checkedIn ? 'Checked in' : waitlisted.includes(b) ? 'Waitlisted' : 'Signed up'}</span>{!b.cancelledAt && !waitlisted.includes(b) ? <div className="mom-row-actions"><button disabled={!!acting} onClick={() => act(`check-${b.id}`, () => api.put(`/api/momence/bookings/${b.id}/check-in`, { checkedIn: !b.checkedIn, locationId: session.inPersonLocation?.id }), b.checkedIn ? 'Check-in removed' : 'Member checked in')}><CheckCircle2 />{b.checkedIn ? 'Undo' : 'Check in'}</button><button className="danger" disabled={!!acting} onClick={() => setCancelBooking(b)}>Cancel</button></div> : <span />}</div>) : <div className="mom-roster-empty">{rosterSearch ? `No ${rosterTab} match “${rosterSearch}”.` : `No ${rosterTab === 'checked' ? 'checked-in members' : rosterTab} for this class.`}</div>}</div>
+        <div className="mom-roster-table-wrap">
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th></th>
+                <th>Customer name</th>
+                <th>Time of signup</th>
+                <th>Membership</th>
+                <th>Status</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {rosterRows.length ? rosterRows.map(b => (
+                <tr key={b.id} className={b.cancelledAt ? 'is-cancelled' : ''}>
+                  <td>
+                    <button type="button" className="mom-roster-avatar-cell" disabled={!b.member?.id} title={b.member?.id ? 'View member profile' : undefined} onClick={() => b.member?.id && setViewingMemberId(b.member.id)}>
+                      <span className="mom-avatar">{personName(b.member).split(' ').map(x => x[0]).slice(0, 2).join('')}</span>
+                    </button>
+                  </td>
+                  <td>
+                    <button type="button" className="mom-roster-identity" disabled={!b.member?.id} title={b.member?.id ? 'View member profile' : undefined} onClick={() => b.member?.id && setViewingMemberId(b.member.id)}>
+                      <span className="mom-member-copy"><strong>{personName(b.member)}</strong><small>{b.member?.email || b.member?.phoneNumber || `Booking #${b.id}`}</small></span>
+                    </button>
+                  </td>
+                  <td className="mom-signup-time">{b.createdAt ? new Date(b.createdAt).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' }) : '—'}</td>
+                  <td>
+                    {b.membershipUsed
+                      ? <span className="mom-payment-copy" title={b.membershipUsed.count > 1 ? `Member has ${b.membershipUsed.count} active memberships — showing the best match` : undefined}>
+                        <strong>{b.membershipUsed.name}</strong>
+                        <small>{b.membershipUsed.unlimited ? 'Unlimited' : b.membershipUsed.classesLeft != null ? `${b.membershipUsed.classesLeft} classes left` : b.membershipUsed.type}</small>
+                      </span>
+                      : <span className="mom-payment-copy"><small>No active membership found</small></span>}
+                  </td>
+                  <td><span className={`mom-status ${b.cancelledAt ? 'cancelled' : b.checkedIn ? 'checked' : waitlisted.includes(b) ? 'waitlisted' : ''}`}>{b.cancelledAt ? 'Cancelled' : b.checkedIn ? 'Checked in' : waitlisted.includes(b) ? 'Waitlisted' : 'Signed up'}</span></td>
+                  <td>{!b.cancelledAt && !waitlisted.includes(b) ? <div className="mom-row-actions"><button disabled={!!acting} onClick={() => act(`check-${b.id}`, () => api.put(`/api/momence/bookings/${b.id}/check-in`, { checkedIn: !b.checkedIn, locationId: session.inPersonLocation?.id }), b.checkedIn ? 'Check-in removed' : 'Member checked in')}><CheckCircle2 />{b.checkedIn ? 'Undo' : 'Check in'}</button><button className="danger" disabled={!!acting} onClick={() => setCancelBooking(b)}>Cancel</button></div> : null}</td>
+                </tr>
+              )) : (
+                <tr><td colSpan={6} className="mom-roster-empty"><Users size={22} /><span>{rosterSearch ? `No ${rosterTab} match “${rosterSearch}”.` : `No ${rosterTab === 'checked' ? 'checked-in members' : rosterTab} for this class.`}</span></td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
       </section>
       {cancelBooking && <div className="mom-cancel-panel" role="alertdialog" aria-label="Cancel booking"><div><strong>Cancel {personName(cancelBooking.member)}?</strong><span>Choose how Momence should process this cancellation.</span></div><label><input type="checkbox" checked={cancelOptions.refund} onChange={e => setCancelOptions(o => ({ ...o, refund: e.target.checked }))} /> Refund eligible credit</label><label><input type="checkbox" checked={cancelOptions.isLateCancellation} onChange={e => setCancelOptions(o => ({ ...o, isLateCancellation: e.target.checked }))} /> Mark as late cancellation</label><label><input type="checkbox" checked={cancelOptions.disableNotifications} onChange={e => setCancelOptions(o => ({ ...o, disableNotifications: e.target.checked }))} /> Do not notify member</label><div><button className="btn btn-ghost" onClick={() => setCancelBooking(null)}>Keep booking</button><button className="btn mom-danger-btn" disabled={!!acting} onClick={() => act(`cancel-${cancelBooking.id}`, () => api.delete(`/api/momence/bookings/${cancelBooking.id}`, { ...cancelOptions, locationId: session.inPersonLocation?.id }), 'Booking cancelled').then(() => setCancelBooking(null))}>Confirm cancellation</button></div></div>}
     </>}
-  </aside></div>
+  </aside>
+  {viewingMemberId && <MemberProfileModal memberId={viewingMemberId} locationId={session.inPersonLocation?.id} onClose={() => setViewingMemberId(null)} />}
+  </div>
 }
