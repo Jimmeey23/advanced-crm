@@ -487,7 +487,7 @@ export default function Leads({ initialSearch = '' }) {
 
       {view === 'summary' && <SummaryView items={items} boot={boot} lookup={lookup} />}
       {view === 'timeline' && <TimelineView items={items} lookup={lookup} openLead={openLead} />}
-      {view === 'kanban' && <KanbanView items={items} boot={boot} lookup={lookup} openLead={openLead} changeStage={changeStage} />}
+      {view === 'kanban' && <KanbanView items={items} boot={boot} lookup={lookup} openLead={openLead} changeStage={changeStage} changeLeadField={changeLeadField} groupBy={groupBy} />}
 
       {view !== 'summary' && view !== 'timeline' && view !== 'kanban' && (
         <div className="card overflow-hidden" ref={tableJumpRef}>
@@ -630,7 +630,8 @@ function TableGrid({ items, boot, lookup, openLead, changeStage, changeAssociate
   const cadenceDays = boot?.settings?.cadence?.outreachDays || 7
   const activeChannels = ['fu1', 'fu2', 'fu3', 'fu4']
   const [columnSearch, setColumnSearch] = useState({})
-  const visibleCols = (columns || []).filter(c => !c.hidden && c.field !== 'created' && !(density === 'compact' && c.field === 'phone'))
+  const compactEmbeddedFields = new Set(['phone', 'source', 'owner'])
+  const visibleCols = (columns || []).filter(c => !c.hidden && c.field !== 'created' && !(density === 'compact' && compactEmbeddedFields.has(c.field)))
   const searchValue = (lead, field) => {
     if (field === 'fullName') return lead.fullName
     if (field === 'stage') return lead.stage
@@ -1321,24 +1322,45 @@ function Mini({ label, value, color }) {
   )
 }
 
-function KanbanView({ items, boot, lookup, openLead, changeStage }) {
-  const map = {}
-  for (const s of boot?.stages || []) map[s] = []
-  for (const l of items) (map[l.stage] = map[l.stage] || []).push(l)
-  const cols = (boot?.stages || []).map(s => ({ stage: s, leads: map[s] || [] }))
+function KanbanView({ items, boot, lookup, openLead, changeStage, changeLeadField, groupBy }) {
+  const field = groupBy || 'stage'
+  const [dragOver, setDragOver] = useState('')
+  const descriptors = useMemo(() => {
+    if (field === 'stage') return (boot?.stages || []).map(value => ({ value, label: value }))
+    if (field === 'locationId') return [...(boot?.locations || []).filter(x => x.active !== false).map(x => ({ value: x.id, label: x.name })), { value: '', label: 'Unassigned' }]
+    if (field === 'associateId') return [...(boot?.associates || []).filter(x => x.active !== false).map(x => ({ value: x.id, label: x.name })), { value: '', label: 'Unassigned' }]
+    if (field === 'status') return ['open', 'won', 'lost'].map(value => ({ value, label: value[0].toUpperCase() + value.slice(1) }))
+    const values = [...new Set(items.map(l => field === 'risk' ? (l.ai?.risk || 'cold') : (l[field] || 'Unknown')))]
+    return values.map(value => ({ value, label: value }))
+  }, [field, boot, items])
+  const valueFor = lead => {
+    if (field === 'risk') return lead.ai?.risk || 'cold'
+    return lead[field] || (field === 'locationId' || field === 'associateId' ? '' : 'Unknown')
+  }
+  const cols = descriptors.map(col => ({ ...col, leads: items.filter(l => String(valueFor(l)) === String(col.value)) }))
+  const moveLead = async (leadId, value) => {
+    const lead = items.find(item => String(item.id) === String(leadId))
+    if (!lead || String(valueFor(lead)) === String(value)) return
+    if (field === 'stage') await changeStage(lead, value)
+    else if (field === 'risk') await changeLeadField(lead, { ai: { ...(lead.ai || {}), risk: value } })
+    else await changeLeadField(lead, { [field]: value || null })
+  }
   return (
-    <div className="flex gap-3 overflow-x-auto scrollbar-thin pb-2 -mx-1 px-1">
+    <div className="kanban-board flex gap-3 overflow-x-auto scrollbar-thin pb-2 -mx-1 px-1">
       {cols.map(col => (
-        <div key={col.stage} className="flex flex-col w-[240px] shrink-0 rounded-2xl bg-white/[0.03] border border-white/6">
+        <div key={String(col.value)} className={`kanban-column flex flex-col w-[240px] shrink-0 rounded-2xl bg-white/[0.03] border border-white/6 ${dragOver === String(col.value) ? 'is-drag-over' : ''}`}
+          onDragOver={e => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; setDragOver(String(col.value)) }}
+          onDragLeave={e => { if (!e.currentTarget.contains(e.relatedTarget)) setDragOver('') }}
+          onDrop={e => { e.preventDefault(); const leadId = e.dataTransfer.getData('text/lead-id'); setDragOver(''); moveLead(leadId, col.value) }}>
           <div className="px-3 py-2.5 flex items-center gap-2">
-            <span className={`pipeline-stage-badge ${stageClass(col.stage)}`} style={stageBadgeStyle(col.stage)} title={col.stage}>{col.stage}</span>
+            <span className={`pipeline-stage-badge ${field === 'stage' ? stageClass(col.label) : ''}`} style={field === 'stage' ? stageBadgeStyle(col.label) : undefined} title={col.label}>{col.label}</span>
             <span className="ml-auto chip bg-white/6 border border-white/10 text-slate-400 mono !py-0.5 !px-2 text-[11px]">{col.leads.length}</span>
           </div>
           <div className="flex-1 px-2 pb-2 space-y-2 max-h-[560px] overflow-y-auto scrollbar-thin">
             {col.leads.map(l => {
               const owner = lookup.asnById[l.associateId]
               return (
-                <div key={l.id} className="card card-hover !rounded-xl p-3 cursor-pointer" onClick={() => openLead(l.id)}>
+                <div key={l.id} draggable className="kanban-lead-card card card-hover !rounded-xl p-3 cursor-grab active:cursor-grabbing" onDragStart={e => { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/lead-id', String(l.id)) }} onDragEnd={() => setDragOver('')} onClick={() => openLead(l.id)}>
                   <div className="flex items-center gap-2 mb-1.5">
                     <Avatar name={l.fullName} color={owner?.color} size={26} />
                     <div className="flex-1 min-w-0">

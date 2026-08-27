@@ -9,27 +9,59 @@ export function momenceConfig(db) {
 }
 
 // Effective config: env vars take priority, then Settings, then defaults.
-export function effectiveConfig(db) {
+export function effectiveConfig(db, market = 'mumbai') {
   const c = momenceConfig(db)
+  const suffix = market === 'blr' ? '_BLR' : ''
   const env = {
-    clientId: (process.env.USER_MOMENCE_CLIENT_ID || '').trim(),
-    clientSecret: (process.env.USER_MOMENCE_CLIENT_SECRET || '').trim(),
-    username: (process.env.USER_MOMENCE_USERNAME || '').trim(),
-    password: (process.env.USER_MOMENCE_PASSWORD || '').trim(),
-    hostId: (process.env.USER_MOMENCE_HOST_ID || '').trim()
+    clientId: (process.env[`USER_MOMENCE_CLIENT_ID${suffix}`] || '').trim(),
+    clientSecret: (process.env[`USER_MOMENCE_CLIENT_SECRET${suffix}`] || '').trim(),
+    username: (process.env[`USER_MOMENCE_USERNAME${suffix}`] || '').trim(),
+    password: (process.env[`USER_MOMENCE_PASSWORD${suffix}`] || '').trim(),
+    hostId: (process.env[`USER_MOMENCE_HOST_ID${suffix}`] || '').trim()
   }
+  const stored = market === 'blr' ? (c.blr || {}) : c
   return {
-    clientId: env.clientId || c.clientId || '',
-    clientSecret: env.clientSecret || c.clientSecret || '',
-    username: env.username || c.username || '',
-    password: env.password || c.password || '',
-    hostId: env.hostId || c.hostId || ''
+    clientId: env.clientId || stored.clientId || '',
+    clientSecret: env.clientSecret || stored.clientSecret || '',
+    username: env.username || stored.username || '',
+    password: env.password || stored.password || '',
+    hostId: env.hostId || stored.hostId || (market === 'blr' ? '33905' : '13752')
   }
 }
 
-export function isConfigured(db) {
-  const c = effectiveConfig(db)
+export function isConfigured(db, market = 'mumbai') {
+  const c = effectiveConfig(db, market)
   return Boolean(c.clientId && c.clientSecret && c.username && c.password)
+}
+
+export function isAnyConfigured(db) {
+  return isConfigured(db, 'mumbai') || isConfigured(db, 'blr')
+}
+
+export const HOME_LOCATION_IDS = Object.freeze({
+  kwality: 9030,
+  supreme: 29821,
+  kenkere: 22116,
+  copper: 36372,
+  plash: 287883
+})
+
+export function resolveHomeLocationId(value, db) {
+  const numeric = Number(value)
+  if (Number.isInteger(numeric) && numeric > 0) return numeric
+  const location = db?.locations?.find(item => String(item.id) === String(value))
+  const text = `${location?.name || ''} ${location?.city || ''} ${value || ''}`.toLowerCase()
+  if (text.includes('kwality') || text.includes('kemps')) return HOME_LOCATION_IDS.kwality
+  if (text.includes('supreme') || text.includes('bandra')) return HOME_LOCATION_IDS.supreme
+  if (text.includes('kenkere')) return HOME_LOCATION_IDS.kenkere
+  if (text.includes('copper') || text.includes('indiranagar')) return HOME_LOCATION_IDS.copper
+  if (text.includes('plash')) return HOME_LOCATION_IDS.plash
+  return null
+}
+
+export function marketForLocation(value, db) {
+  const id = resolveHomeLocationId(value, db)
+  return [HOME_LOCATION_IDS.kenkere, HOME_LOCATION_IDS.copper, HOME_LOCATION_IDS.plash].includes(id) ? 'blr' : 'mumbai'
 }
 
 export function isValidMemberId(memberId) {
@@ -37,19 +69,20 @@ export function isValidMemberId(memberId) {
   return Boolean(id && !['-', 'null', 'undefined', 'nan'].includes(id.toLowerCase()))
 }
 
-export function getCachedToken(db) {
+export function getCachedToken(db, market = 'mumbai') {
   const c = momenceConfig(db)
-  if (c.token && c.token.expiresAt && new Date(c.token.expiresAt).getTime() > Date.now() + 300000) {
-    return c.token.accessToken
+  const token = market === 'blr' ? c.tokenBlr : c.token
+  if (token && token.expiresAt && new Date(token.expiresAt).getTime() > Date.now() + 300000) {
+    return token.accessToken
   }
   return null
 }
 
-export async function getAccessToken(db) {
-  const cached = getCachedToken(db)
+export async function getAccessToken(db, market = 'mumbai') {
+  const cached = getCachedToken(db, market)
   if (cached) return cached
 
-  const c = effectiveConfig(db)
+  const c = effectiveConfig(db, market)
   if (!c.clientId || !c.clientSecret || !c.username || !c.password) {
     throw new Error('Momence is not configured. Add client ID, secret, username and password in Settings.')
   }
@@ -79,16 +112,18 @@ export async function getAccessToken(db) {
   if (!accessToken) throw new Error('Momence returned no access token.')
 
   const expiresIn = data.accessTokenExpiresIn || data.expires_in || 3600
-  c.token = {
+  const tokenRecord = {
     accessToken,
     expiresAt: new Date(Date.now() + expiresIn * 1000).toISOString()
   }
+  if (market === 'blr') momenceConfig(db).tokenBlr = tokenRecord
+  else momenceConfig(db).token = tokenRecord
   save()
   return accessToken
 }
 
-async function request(db, path, { method = 'GET', query, body } = {}) {
-  const token = await getAccessToken(db)
+async function request(db, path, { method = 'GET', query, body, market = 'mumbai' } = {}) {
+  const token = await getAccessToken(db, market)
   const url = new URL(BASE + path)
   if (query) for (const [k, v] of Object.entries(query)) if (v !== undefined && v !== null && v !== '') url.searchParams.set(k, v)
 
@@ -97,9 +132,10 @@ async function request(db, path, { method = 'GET', query, body } = {}) {
 
   const res = await fetch(url, { method, headers, body: body ? JSON.stringify(body) : undefined })
   if (res.status === 401) {
-    momenceConfig(db).token = null
+    if (market === 'blr') momenceConfig(db).tokenBlr = null
+    else momenceConfig(db).token = null
     save()
-    const token2 = await getAccessToken(db)
+    const token2 = await getAccessToken(db, market)
     headers.Authorization = `Bearer ${token2}`
     const retry = await fetch(url, { method, headers, body: body ? JSON.stringify(body) : undefined })
     if (!retry.ok) throw new Error(`Momence API ${retry.status}: ${await retry.text()}`)
@@ -112,51 +148,116 @@ async function request(db, path, { method = 'GET', query, body } = {}) {
 }
 
 export async function getSessions(db, filters = {}) {
-  return paginate(db, '/api/v2/host/sessions', {
-    pageSize: 200,
-    extra: {
-      sortBy: 'startsAt', sortOrder: 'ASC', includeCancelled: true,
-      startAfter: filters.startAfter, startBefore: filters.startBefore,
-      locationId: filters.locationId
-    }
-  })
+  const locationMarket = filters.locationId ? marketForLocation(filters.locationId, db) : null
+  const markets = locationMarket ? [locationMarket] : ['mumbai', 'blr'].filter(market => isConfigured(db, market))
+  const results = await Promise.allSettled(markets.map(market => paginate(db, '/api/v2/host/sessions', {
+    pageSize: 200, market,
+    extra: { sortBy: 'startsAt', sortOrder: 'ASC', includeCancelled: true, startAfter: filters.startAfter, startBefore: filters.startBefore, locationId: filters.locationId }
+  })))
+  const sessions = results.flatMap(result => result.status === 'fulfilled' ? result.value : [])
+  if (!sessions.length && results.some(result => result.status === 'rejected')) throw results.find(result => result.status === 'rejected').reason
+  return [...new Map(sessions.map(session => [String(session.id), session])).values()].sort((a, b) => new Date(a.startsAt) - new Date(b.startsAt))
 }
 
-export async function getSessionWorkspace(db, sessionId) {
+export async function getSessionWorkspace(db, sessionId, locationId) {
+  const market = marketForLocation(locationId, db)
   const [session, bookings] = await Promise.all([
-    request(db, `/api/v2/host/sessions/${sessionId}`),
+    request(db, `/api/v2/host/sessions/${sessionId}`, { market }),
     paginate(db, `/api/v2/host/sessions/${sessionId}/bookings`, {
-      pageSize: 100, extra: { sortBy: 'firstName', sortOrder: 'ASC', includeCancelled: true }
+      pageSize: 100, market, extra: { sortBy: 'firstName', sortOrder: 'ASC', includeCancelled: true }
     })
   ])
   return { session, bookings }
 }
 
-export function addMemberToSession(db, sessionId, memberId, createRecurringBooking = false) {
+export function addMemberToSession(db, sessionId, memberId, createRecurringBooking = false, locationId) {
   return request(db, `/api/v2/host/sessions/${sessionId}/bookings/free`, {
-    method: 'POST', body: { memberId: Number(memberId), createRecurringBooking: Boolean(createRecurringBooking) }
+    method: 'POST', market: marketForLocation(locationId, db), body: { memberId: Number(memberId), createRecurringBooking: Boolean(createRecurringBooking) }
   })
 }
 
-export function addMemberToWaitlist(db, sessionId, memberId) {
+export function addMemberToWaitlist(db, sessionId, memberId, locationId) {
   return request(db, `/api/v2/host/sessions/${sessionId}/waitlist/bookings`, {
-    method: 'POST', body: { memberId: Number(memberId) }
+    method: 'POST', market: marketForLocation(locationId, db), body: { memberId: Number(memberId) }
   })
 }
 
-export function setBookingCheckIn(db, bookingId, checkedIn) {
+export function setBookingCheckIn(db, bookingId, checkedIn, locationId) {
   return request(db, `/api/v2/host/session-bookings/${bookingId}/check-in`, {
-    method: checkedIn ? 'POST' : 'DELETE'
+    method: checkedIn ? 'POST' : 'DELETE', market: marketForLocation(locationId, db)
   })
 }
 
 export function cancelSessionBooking(db, bookingId, options = {}) {
   return request(db, `/api/v2/host/session-bookings/${bookingId}`, {
-    method: 'DELETE',
+    method: 'DELETE', market: marketForLocation(options.locationId, db),
     body: {
       refund: options.refund !== false,
       disableNotifications: Boolean(options.disableNotifications),
       isLateCancellation: Boolean(options.isLateCancellation)
+    }
+  })
+}
+
+function dashboardCookie(market) {
+  return String(market === 'blr'
+    ? (process.env.MOMENCE_ALL_COOKIES_BLR || process.env.MOMENCE_BLR_COOKIES || '')
+    : (process.env.MOMENCE_ALL_COOKIES || process.env.MOMENCE_MUMBAI_COOKIES || '')).trim()
+}
+
+async function dashboardRequest(db, path, { market = 'mumbai', method = 'GET', body } = {}) {
+  const cookie = dashboardCookie(market)
+  if (!cookie) throw new Error(`Momence dashboard session is not configured for ${market === 'blr' ? 'Bengaluru' : 'Mumbai'}. Refresh the server-side login cookie first.`)
+  const hostId = effectiveConfig(db, market).hostId
+  const origin = `https://momence.com/dashboard/${hostId}`
+  const response = await fetch(`https://momence.com/_api/primary/host/${hostId}${path}`, {
+    method,
+    headers: {
+      Accept: 'application/json, text/plain, */*',
+      ...(body ? { 'Content-Type': 'application/json' } : {}),
+      Cookie: cookie,
+      Origin: 'https://momence.com',
+      Referer: `${origin}/`,
+      'x-origin': origin,
+      'x-idempotence-key': crypto.randomUUID()
+    },
+    body: body ? JSON.stringify(body) : undefined
+  })
+  const text = await response.text()
+  const data = text ? (() => { try { return JSON.parse(text) } catch { return { message: text } } })() : { ok: true }
+  if (!response.ok) throw new Error(`Momence dashboard API ${response.status}: ${data.error || data.message || 'Request failed'}`)
+  return data
+}
+
+const membershipRows = data => data?.payload || data?.items || data?.memberships || (Array.isArray(data) ? data : [])
+
+export async function getAvailableBookingMemberships(db, memberId, sessionId, locationId) {
+  const market = marketForLocation(locationId, db)
+  return membershipRows(await dashboardRequest(db, `/auto-book/member/${Number(memberId)}/session/${Number(sessionId)}/memberships`, { market }))
+}
+
+export async function autoBookMember(db, sessionId, memberId, options = {}) {
+  const market = marketForLocation(options.locationId, db)
+  const memberships = await getAvailableBookingMemberships(db, memberId, sessionId, options.locationId)
+  const selected = options.membershipId
+    ? memberships.find(item => String(item.id || item.membershipId || item.boughtMembershipId) === String(options.membershipId))
+    : memberships.find(item => item.isActive !== false && item.isEligible !== false && item.canBook !== false)
+  const membershipId = selected?.id || selected?.membershipId || selected?.boughtMembershipId
+  if (!membershipId) {
+    const error = new Error('No eligible active membership is available for this session. Select a host membership to create a new sale first.')
+    error.code = 'NO_ELIGIBLE_MEMBERSHIP'
+    error.memberships = memberships
+    throw error
+  }
+  return dashboardRequest(db, `/auto-book/member/${Number(memberId)}/session/${Number(sessionId)}`, {
+    market,
+    method: 'POST',
+    body: {
+      autoCheckin: Boolean(options.autoCheckin),
+      membershipIds: [Number(membershipId)],
+      createRecurringBooking: Boolean(options.createRecurringBooking),
+      isCapacityOverriden: Boolean(options.overrideCapacity),
+      isAgeRestrictionOverridden: Boolean(options.overrideAgeRestriction)
     }
   })
 }
@@ -166,7 +267,7 @@ export async function createMember(db, input = {}) {
   const firstName = String(input.firstName || '').trim()
   const lastName = String(input.lastName || '').trim()
   const phoneNumber = String(input.phoneNumber || '').trim()
-  const homeLocationId = Number(input.homeLocationId)
+  const homeLocationId = resolveHomeLocationId(input.homeLocationId, db)
 
   if (!email || !firstName || !lastName) {
     throw new Error('Email, first name and last name are required to create a Momence member.')
@@ -177,18 +278,19 @@ export async function createMember(db, input = {}) {
 
   const payload = { email, firstName, lastName }
   if (phoneNumber) payload.phoneNumber = phoneNumber
-  if (Number.isInteger(homeLocationId) && homeLocationId > 0) payload.homeLocationId = homeLocationId
+  if (!homeLocationId) throw new Error('Select a supported home location before creating the Momence member.')
+  payload.homeLocationId = homeLocationId
 
-  const created = await request(db, '/api/v2/host/members', { method: 'POST', body: payload })
+  const created = await request(db, '/api/v2/host/members', { method: 'POST', market: marketForLocation(homeLocationId, db), body: payload })
   if (!isValidMemberId(created?.memberId)) throw new Error('Momence created the member but returned no valid member ID.')
   return { memberId: String(created.memberId) }
 }
 
-async function paginate(db, path, { pageSize = 100, extra = {} } = {}) {
+async function paginate(db, path, { pageSize = 100, extra = {}, market = 'mumbai' } = {}) {
   const all = []
   let page = 0
   for (;;) {
-    const data = await request(db, path, { query: { page, pageSize, ...extra } })
+    const data = await request(db, path, { market, query: { page, pageSize, ...extra } })
     const payload = data.payload || data.items || data.data || []
     all.push(...payload)
     const meta = data.meta || {}
@@ -213,32 +315,37 @@ export async function getProfile(db) {
   return request(db, '/api/v2/auth/profile')
 }
 
-export async function getMember(db, memberId) {
-  return request(db, `/api/v2/host/members/${memberId}`)
+export async function getMember(db, memberId, market = 'mumbai') {
+  return request(db, `/api/v2/host/members/${memberId}`, { market })
 }
 
-export async function getMemberSessions(db, memberId) {
-  return safePaginate(db, `/api/v2/host/members/${memberId}/sessions`, { extra: { includeCancelled: true } }, [])
+export async function getMemberSessions(db, memberId, market = 'mumbai') {
+  return safePaginate(db, `/api/v2/host/members/${memberId}/sessions`, { market, extra: { includeCancelled: true } }, [])
 }
 
-export async function getMemberMemberships(db, memberId) {
-  return safePaginate(db, `/api/v2/host/members/${memberId}/bought-memberships/active`, { extra: { includeFrozen: true } }, [])
+export async function getMemberMemberships(db, memberId, market = 'mumbai') {
+  return safePaginate(db, `/api/v2/host/members/${memberId}/bought-memberships/active`, { market, extra: { includeFrozen: true } }, [])
 }
 
-export async function getMemberNotes(db, memberId) {
-  return safePaginate(db, `/api/v2/host/members/${memberId}/notes`, {}, [])
+export async function getHostMemberships(db, locationId) {
+  const market = marketForLocation(locationId, db)
+  return safePaginate(db, '/api/v2/host/memberships', { market, pageSize: 200, extra: { locationId, includeInactive: false } }, [])
 }
 
-export async function getMemberAppointments(db, memberId) {
-  return safePaginate(db, `/api/v2/host/members/${memberId}/appointments`, { extra: { includeCancelled: true } }, [])
+export async function getMemberNotes(db, memberId, market = 'mumbai') {
+  return safePaginate(db, `/api/v2/host/members/${memberId}/notes`, { market }, [])
 }
 
-export async function getSales(db, { memberId } = {}) {
-  return paginate(db, '/api/v2/host/sales')
+export async function getMemberAppointments(db, memberId, market = 'mumbai') {
+  return safePaginate(db, `/api/v2/host/members/${memberId}/appointments`, { market, extra: { includeCancelled: true } }, [])
 }
 
-export async function searchMembers(db, query) {
-  return paginate(db, '/api/v2/host/members', { extra: { query } })
+export async function getSales(db, { memberId, market = 'mumbai' } = {}) {
+  return paginate(db, '/api/v2/host/sales', { market })
+}
+
+export async function searchMembers(db, query, market = 'mumbai') {
+  return paginate(db, '/api/v2/host/members', { market, extra: { query } })
 }
 
 const digitsOnly = (v) => String(v || '').replace(/\D+/g, '')
@@ -249,18 +356,19 @@ const normEmail = (v) => String(v || '').trim().toLowerCase()
 // member ID. Email match takes priority (unique in practice); phone falls
 // back to comparing the last 10 digits, since Momence and CRM numbers may
 // differ in country-code formatting.
-export async function findMemberCandidates(db, { email, phone } = {}) {
+export async function findMemberCandidates(db, { email, phone, locationId } = {}) {
+  const market = marketForLocation(locationId, db)
   const wantEmail = normEmail(email)
   const wantPhone = digitsOnly(phone).slice(-10)
 
   if (wantEmail) {
-    const byEmail = await searchMembers(db, email)
+    const byEmail = await searchMembers(db, email, market)
     const exact = byEmail.filter(m => normEmail(m.email) === wantEmail)
     if (exact.length) return exact
   }
 
   if (wantPhone && wantPhone.length >= 7) {
-    const byPhone = await searchMembers(db, phone)
+    const byPhone = await searchMembers(db, phone, market)
     const exact = byPhone.filter(m => digitsOnly(m.phoneNumber).slice(-10) === wantPhone)
     if (exact.length) return exact
   }
@@ -344,21 +452,22 @@ export function mapAppointments(appointments) {
     .sort((a, b) => new Date(b.startsAt) - new Date(a.startsAt))
 }
 
-export async function buildProfile(db, memberId) {
+export async function buildProfile(db, memberId, locationId) {
   const safeMemberId = String(memberId || '').trim()
   if (!isValidMemberId(safeMemberId)) {
     throw new Error('Momence member ID is missing or invalid.')
   }
-  const member = await getMember(db, safeMemberId)
+  const market = marketForLocation(locationId, db)
+  const member = await getMember(db, safeMemberId, market)
   const [sessions, memberships, notes, appointments] = await Promise.all([
-    getMemberSessions(db, safeMemberId).catch(() => []),
-    getMemberMemberships(db, safeMemberId).catch(() => []),
-    getMemberNotes(db, safeMemberId).catch(() => []),
-    getMemberAppointments(db, safeMemberId).catch(() => [])
+    getMemberSessions(db, safeMemberId, market).catch(() => []),
+    getMemberMemberships(db, safeMemberId, market).catch(() => []),
+    getMemberNotes(db, safeMemberId, market).catch(() => []),
+    getMemberAppointments(db, safeMemberId, market).catch(() => [])
   ])
   let salesHistory = []
   try {
-    const sales = await getSales(db)
+    const sales = await getSales(db, { market })
     salesHistory = mapSalesHistory(sales.filter(s =>
       (s.items || []).some(it =>
         (it.payingMember && String(it.payingMember.id) === String(memberId)) ||
@@ -410,7 +519,7 @@ export async function syncLeadMomence(db, lead) {
   if (!isValidMemberId(lead?.memberId)) {
     throw new Error('Lead is not linked to a valid Momence member yet.')
   }
-  const profile = await buildProfile(db, lead.memberId)
+  const profile = await buildProfile(db, lead.memberId, lead.locationId)
   lead.momence = profile
   lead.momenceSyncedAt = nowIso()
   save()
@@ -424,7 +533,7 @@ export async function resolveLeadMember(db, lead) {
   if (isValidMemberId(lead.memberId)) return { memberId: String(lead.memberId).trim(), candidates: null }
   if (lead.memberId) lead.memberId = ''
 
-  const candidates = await findMemberCandidates(db, { email: lead.email, phone: lead.phone })
+  const candidates = await findMemberCandidates(db, { email: lead.email, phone: lead.phone, locationId: lead.locationId })
   if (candidates.length === 1) {
     lead.memberId = String(candidates[0].id)
     save()

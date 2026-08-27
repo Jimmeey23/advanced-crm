@@ -101,7 +101,7 @@ function leadById(id) {
 
 function safePatch(lead, body) {
   const allowed = ['fullName', 'phone', 'email', 'stage', 'status', 'associateId', 'locationId',
-    'sourceName', 'sourceId', 'remarks', 'classType', 'center', 'channel', 'memberId', 'valueEstimate', 'convertedAt', 'manualFlags']
+    'sourceName', 'sourceId', 'remarks', 'classType', 'center', 'channel', 'memberId', 'valueEstimate', 'convertedAt', 'manualFlags', 'statusGroup', 'ai']
   for (const key of allowed) {
     if (key in body) lead[key] = body[key]
   }
@@ -1381,7 +1381,7 @@ app.post('/api/momence/test', async (req, res) => {
 })
 
 app.get('/api/momence/sessions', async (req, res) => {
-  if (!momence.isConfigured(db)) return res.status(400).json({ error: 'Momence is not configured. Complete the connection in Settings.' })
+  if (!momence.isAnyConfigured(db)) return res.status(400).json({ error: 'Momence is not configured. Complete the connection in Settings.' })
   try {
     const sessions = await momence.getSessions(db, req.query)
     res.json({ sessions })
@@ -1389,30 +1389,43 @@ app.get('/api/momence/sessions', async (req, res) => {
 })
 
 app.get('/api/momence/sessions/:sessionId', async (req, res) => {
-  if (!momence.isConfigured(db)) return res.status(400).json({ error: 'Momence is not configured.' })
-  try { res.json(await momence.getSessionWorkspace(db, req.params.sessionId)) }
+  if (!momence.isAnyConfigured(db)) return res.status(400).json({ error: 'Momence is not configured.' })
+  try { res.json(await momence.getSessionWorkspace(db, req.params.sessionId, req.query.locationId)) }
   catch (e) { res.status(502).json({ error: e.message }) }
 })
 
 app.get('/api/momence/members', async (req, res) => {
-  if (!momence.isConfigured(db)) return res.status(400).json({ error: 'Momence is not configured.' })
+  const market = momence.marketForLocation(req.query.locationId, db)
+  if (!momence.isConfigured(db, market)) return res.status(400).json({ error: `Momence is not configured for ${market === 'blr' ? 'Bengaluru' : 'Mumbai'}.` })
   const query = String(req.query.query || '').trim()
   if (query.length < 2) return res.json({ members: [] })
-  try { res.json({ members: (await momence.searchMembers(db, query)).slice(0, 20) }) }
+  try { res.json({ members: (await momence.searchMembers(db, query, market)).slice(0, 20) }) }
+  catch (e) { res.status(502).json({ error: e.message }) }
+})
+
+app.get('/api/momence/members/:memberId/session-memberships', async (req, res) => {
+  try {
+    const memberships = await momence.getAvailableBookingMemberships(db, req.params.memberId, req.query.sessionId, req.query.locationId)
+    res.json({ memberships })
+  } catch (e) { res.status(502).json({ error: e.message }) }
+})
+
+app.get('/api/momence/host-memberships', async (req, res) => {
+  try { res.json({ memberships: await momence.getHostMemberships(db, req.query.locationId) }) }
   catch (e) { res.status(502).json({ error: e.message }) }
 })
 
 app.post('/api/momence/sessions/:sessionId/bookings', async (req, res) => {
   try {
     const result = req.body.waitlist
-      ? await momence.addMemberToWaitlist(db, req.params.sessionId, req.body.memberId)
-      : await momence.addMemberToSession(db, req.params.sessionId, req.body.memberId, req.body.createRecurringBooking)
+      ? await momence.addMemberToWaitlist(db, req.params.sessionId, req.body.memberId, req.body.locationId)
+      : await momence.autoBookMember(db, req.params.sessionId, req.body.memberId, req.body)
     res.json({ ok: true, result })
-  } catch (e) { res.status(502).json({ error: e.message }) }
+  } catch (e) { res.status(e.code === 'NO_ELIGIBLE_MEMBERSHIP' ? 409 : 502).json({ error: e.message, code: e.code, memberships: e.memberships }) }
 })
 
 app.put('/api/momence/bookings/:bookingId/check-in', async (req, res) => {
-  try { await momence.setBookingCheckIn(db, req.params.bookingId, req.body.checkedIn !== false); res.json({ ok: true }) }
+  try { await momence.setBookingCheckIn(db, req.params.bookingId, req.body.checkedIn !== false, req.body.locationId); res.json({ ok: true }) }
   catch (e) { res.status(502).json({ error: e.message }) }
 })
 
@@ -1431,7 +1444,7 @@ app.get('/api/momence/lookup/:leadId', async (req, res) => {
   if (!momence.isConfigured(db)) return res.status(400).json({ ok: false, error: 'Momence is not configured' })
   try {
     if (lead.memberId) return res.json({ ok: true, memberId: lead.memberId, candidates: null })
-    const candidates = await momence.findMemberCandidates(db, { email: lead.email, phone: lead.phone })
+    const candidates = await momence.findMemberCandidates(db, { email: lead.email, phone: lead.phone, locationId: lead.locationId })
     res.json({ ok: true, memberId: null, candidates })
   } catch (e) {
     res.status(502).json({ ok: false, error: e.message })
@@ -1480,7 +1493,7 @@ app.post('/api/momence/create/:leadId', async (req, res) => {
   try {
     const created = await momence.createMember(db, {
       email, firstName, lastName, phoneNumber,
-      homeLocationId: req.body?.homeLocationId
+      homeLocationId: req.body?.homeLocationId || lead.locationId
     })
     lead.memberId = created.memberId
     lead.lastActivityAt = nowIso()
