@@ -74,7 +74,7 @@ export function scopeLocation(req, res, next) {
   const { role, associateId, locationIds } = req.authUser
   if (role === 'admin') return next()
 
-  const isInbox = req.path.startsWith('/api/inbox')
+  const isInbox = req.originalUrl.startsWith('/api/inbox')
   if (isInbox) {
     req.query.associate = associateId || '__none__'
   } else {
