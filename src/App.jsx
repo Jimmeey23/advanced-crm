@@ -1,12 +1,14 @@
-import React, { useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import {
   LayoutDashboard, KanbanSquare, Users, UploadCloud, Settings, Search,
   Plus, Zap, Link2, ShieldCheck, Sun, Moon, BarChart3, ChevronsLeft, ChevronsRight,
-  CalendarDays, CalendarRange, Activity, Inbox as InboxIcon, CalendarClock
+  CalendarDays, CalendarRange, Activity, Inbox as InboxIcon, CalendarClock, LogOut
 } from 'lucide-react'
 import { AppProvider, Toasts, useApp } from './store.jsx'
 import { useFetch } from './hooks.js'
 import { api } from './api.js'
+import { supabase } from './lib/supabaseClient.js'
+import LoginPage from './pages/LoginPage.jsx'
 import { money } from './lib.js'
 import Dashboard from './pages/Dashboard.jsx'
 import Performance from './pages/Performance.jsx'
@@ -118,7 +120,7 @@ function Sidebar() {
 }
 
 function Topbar({ onAdd }) {
-  const { view, navigate, alerts, boot, theme, setTheme, refreshData, toast } = useApp()
+  const { view, navigate, alerts, boot, theme, setTheme, refreshData, toast, signOut } = useApp()
   const [query, setQuery] = useState('')
   const [refreshing, setRefreshing] = useState(false)
   const title = NAV.find(n => n.id === view)?.title || 'Executive Overview'
@@ -179,6 +181,14 @@ function Topbar({ onAdd }) {
       </button>
 
       <AlertsDropdown />
+
+      <button
+        className="w-9 h-9 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center text-slate-300 hover:text-white hover:bg-white/10 transition-colors"
+        onClick={signOut}
+        title="Sign out"
+      >
+        <LogOut size={16} />
+      </button>
 
       <button className="btn btn-primary" onClick={onAdd}>
         <Plus size={15} /> Add Lead
@@ -285,6 +295,23 @@ function MarqueeBanner() {
 
 export default function App() {
   const [addOpen, setAddOpen] = useState(false)
+  const [session, setSession] = useState(null)
+  const [authLoading, setAuthLoading] = useState(true)
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data }) => {
+      setSession(data.session)
+      setAuthLoading(false)
+    })
+    const { data: sub } = supabase.auth.onAuthStateChange((_event, newSession) => {
+      setSession(newSession)
+    })
+    return () => sub.subscription.unsubscribe()
+  }, [])
+
+  if (authLoading) return <AppLoader />
+  if (!session) return <LoginPage />
+
   return (
     <AppProvider>
       <BootstrapGate>

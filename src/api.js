@@ -1,3 +1,5 @@
+import { supabase } from './lib/supabaseClient.js'
+
 // When the frontend and API are deployed separately (e.g. frontend on
 // Vercel, API server on Railway), set VITE_API_BASE_URL to the API's origin
 // (e.g. https://your-app.up.railway.app). Empty by default so relative paths
@@ -56,6 +58,9 @@ async function req(method, path, body, isForm) {
     if (isForm) { opts.body = body }
     else { opts.headers['Content-Type'] = 'application/json'; opts.body = JSON.stringify(body) }
   }
+
+  const { data: { session } } = await supabase.auth.getSession()
+  if (session) opts.headers['Authorization'] = `Bearer ${session.access_token}`
 
   let lastError = null
   const preferredBase = await resolveApiBase()

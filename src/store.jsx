@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api } from './api.js'
+import { supabase } from './lib/supabaseClient.js'
 
 const Ctx = createContext(null)
 
@@ -130,7 +131,11 @@ export function AppProvider({ children }) {
     boot, lookup, alerts, toasts, drawerLeadId, view, viewParams, theme, setTheme, accent, setAccent,
     sidebarCollapsed, toggleSidebar,
     refreshData, refreshAlerts, navigate, openLead, closeLead, toast, dataVersion,
-    scheduleSessions, setScheduleSessions
+    scheduleSessions, setScheduleSessions,
+    role: boot?.authUser?.role || 'agent',
+    locationIds: boot?.authUser?.locationIds || [],
+    associateId: boot?.authUser?.associateId || null,
+    signOut: () => supabase.auth.signOut()
   }
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>
