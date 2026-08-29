@@ -24,18 +24,29 @@ const CURRENT_MONTH = new Date().toISOString().slice(0, 7)
 const EMPTY_FILTERS = { studio: '', associate: '' }
 
 export default function Performance() {
-  const { openLead, dataVersion, boot } = useApp()
+  const { openLead, dataVersion, boot, role, locationIds } = useApp()
   const [range, setRange] = useState('month')
-  const [filters, setFilters] = useState(EMPTY_FILTERS)
+  const [filters, setFilters] = useState(() => (role === 'agent' && locationIds[0])
+    ? { ...EMPTY_FILTERS, studio: locationIds[0] }
+    : EMPTY_FILTERS)
   const [panelOpen, setPanelOpen] = useState(false)
   const [data, setData] = useState(null)
   const [details, setDetails] = useState(null)
   const [loading, setLoading] = useState(false)
   const [drawerBucket, setDrawerBucket] = useState(null)
 
+  // `boot` (and therefore locationIds) is usually still empty on first render,
+  // so the lazy initializer above can't lock the filter. Re-apply the lock once
+  // the agent's locations actually arrive.
+  useEffect(() => {
+    if (role !== 'agent' || !locationIds[0]) return
+    setFilters(f => (f.studio === locationIds[0] ? f : { ...f, studio: locationIds[0] }))
+  }, [role, locationIds[0]])
+
   const setF = (k) => (e) => setFilters(f => ({ ...f, [k]: e.target.value }))
-  const hasFilters = filters.studio || filters.associate
-  const clearFilters = () => setFilters(EMPTY_FILTERS)
+  const lockedStudio = role === 'agent' ? locationIds[0] : undefined
+  const hasFilters = (filters.studio && filters.studio !== lockedStudio) || filters.associate
+  const clearFilters = () => setFilters(lockedStudio ? { ...EMPTY_FILTERS, studio: lockedStudio } : EMPTY_FILTERS)
   const scopeQuery = buildQuery({ range, studio: filters.studio, associate: filters.associate })
 
   useEffect(() => {
@@ -108,7 +119,7 @@ export default function Performance() {
         <div className="card p-4 grid grid-cols-1 sm:grid-cols-2 gap-3" style={{ animation: 'fadeIn .15s ease' }}>
           <div>
             <label className="text-[10.5px] uppercase tracking-wider text-slate-500 font-semibold mb-1 block">Studio</label>
-            <select className="input !py-1.5" value={filters.studio} onChange={setF('studio')}>
+            <select className="input !py-1.5" value={filters.studio} onChange={setF('studio')} disabled={role === 'agent'}>
               <option value="">All studios</option>
               {(boot?.locations || []).map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
             </select>

@@ -44,9 +44,15 @@ const TABS = [
   { id: 'data', label: 'Data', icon: Database }
 ]
 
+const AGENT_TAB_IDS = ['general', 'appearance']
+
 export default function SettingsPage() {
-  const { boot, refreshData, toast, theme, setTheme, accent, setAccent } = useApp()
-  const [tab, setTab] = useState(() => new URLSearchParams(window.location.search).get('tab') || 'general')
+  const { boot, refreshData, toast, theme, setTheme, accent, setAccent, role } = useApp()
+  const visibleTabs = TABS.filter(t => role === 'admin' || AGENT_TAB_IDS.includes(t.id))
+  const [tab, setTab] = useState(() => {
+    const requested = new URLSearchParams(window.location.search).get('tab') || 'general'
+    return role !== 'admin' && !AGENT_TAB_IDS.includes(requested) ? 'general' : requested
+  })
   const [activeIntegration, setActiveIntegration] = useState(() => new URLSearchParams(window.location.search).get('app') || null)
   const settings = boot?.settings || {}
 
@@ -598,7 +604,7 @@ export default function SettingsPage() {
       </div>
 
       <div className="flex flex-wrap gap-1.5 mb-5 border-b border-white/6 pb-3">
-        {TABS.map(t => {
+        {visibleTabs.map(t => {
           const Icon = t.icon
           return (
             <button key={t.id} onClick={() => setTab(t.id)}

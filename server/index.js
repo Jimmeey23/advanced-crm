@@ -14,6 +14,7 @@ import * as respondioInternal from './respondioInternal.js'
 import * as inbox from './inbox.js'
 import * as mailer from './mailer.js'
 import * as supabase from './supabaseStore.js'
+import { requireAuth, requireAuthWithQueryToken, scopeLocation, blockAgentWrite, adminCodeHandler, isAllowedLocation, allowedLocationIds } from './auth.js'
 import { runReminderDigest, startReminderScheduler } from './reminders.js'
 import { parseCsv, autoMap, normalizeStage, normalizeStatus, parseFlexibleDate } from './csv.js'
 import { STATUS_GROUPS, statusGroupOf } from './leadStatus.js'
@@ -65,6 +66,53 @@ app.use((req, res, next) => {
 
 app.use(express.json({ limit: '200mb' }))
 app.use(express.urlencoded({ extended: true, limit: '200mb' }))
+
+// Public health check stays unauthenticated; everything else under /api
+// requires a verified Supabase session. `db` is declared further below and
+// only populated once startup loads it, so these wrap the lookup in a
+// closure that reads the module-level `db` binding at request time rather
+// than capturing it (which would still be `null`) at route-registration time.
+app.get('/api/auth/whoami', (req, res, next) => requireAuth(db)(req, res, next), (req, res) => res.json(req.authUser))
+app.post('/api/auth/admin-code', (req, res, next) => requireAuth(db)(req, res, next), adminCodeHandler)
+app.use('/api', (req, res, next) => {
+  // /runtime is the public health check. /events is the SSE stream, which the
+  // browser opens with EventSource — it cannot set an Authorization header, so
+  // that one route authenticates itself off `?token=` in its own handler
+  // below. Nothing else is exempt from the mandatory bearer token.
+  if (req.path === '/runtime' || req.path === '/events') return next()
+  requireAuth(db)(req, res, (err) => {
+    if (err) return next(err)
+    scopeLocation(req, res, next)
+  })
+})
+app.delete('/api/leads/bulk', (req, res, next) => blockAgentWrite(req, res, next))
+app.post('/api/leads/import/parse', (req, res, next) => blockAgentWrite(req, res, next))
+app.post('/api/leads/import/apply', (req, res, next) => blockAgentWrite(req, res, next))
+// Org-wide configuration writes. Agents' locationIds are re-derived on every
+// request from db.associates[].email, so letting an agent write the associate
+// or location tables would let them grant themselves every location (or mint
+// a second associate row on their own email) and escape their scope entirely.
+app.put('/api/associates', (req, res, next) => blockAgentWrite(req, res, next))
+app.post('/api/associates', (req, res, next) => blockAgentWrite(req, res, next))
+app.patch('/api/associates/:id', (req, res, next) => blockAgentWrite(req, res, next))
+app.put('/api/locations', (req, res, next) => blockAgentWrite(req, res, next))
+app.post('/api/locations', (req, res, next) => blockAgentWrite(req, res, next))
+app.patch('/api/locations/:id', (req, res, next) => blockAgentWrite(req, res, next))
+app.put('/api/settings', (req, res, next) => blockAgentWrite(req, res, next))
+app.post('/api/reset', (req, res, next) => blockAgentWrite(req, res, next))
+// Integration credentials + webhook config: same self-escalation surface
+// (a webhook mapping or a rewritten Momence/Sheets credential can inject or
+// re-home leads across every location), and none of it is agent-facing.
+app.post('/api/webhooks', (req, res, next) => blockAgentWrite(req, res, next))
+app.patch('/api/webhooks/:id', (req, res, next) => blockAgentWrite(req, res, next))
+app.delete('/api/webhooks/:id', (req, res, next) => blockAgentWrite(req, res, next))
+app.post('/api/webhooks/:id/regenerate', (req, res, next) => blockAgentWrite(req, res, next))
+app.put('/api/google-sheets/config', (req, res, next) => blockAgentWrite(req, res, next))
+app.post('/api/google-sheets/disconnect', (req, res, next) => blockAgentWrite(req, res, next))
+app.put('/api/zoho-people/config', (req, res, next) => blockAgentWrite(req, res, next))
+app.put('/api/momence/config', (req, res, next) => blockAgentWrite(req, res, next))
+app.post('/api/leads/dedupe', (req, res, next) => blockAgentWrite(req, res, next))
+app.put('/api/lists', (req, res, next) => blockAgentWrite(req, res, next))
 
 // Lets the local frontend discover this instance if the preferred API port
 // was occupied and startup moved to the next available port.
@@ -174,12 +222,14 @@ function computeFollowUpState(lead) {
   }
 }
 
-function buildAlerts(scope = {}) {
+function buildAlerts(scope = {}, req = null) {
   const today = new Date().toISOString().slice(0, 10)
   const alerts = []
   const cad = db.settings.cadence || { outreachDays: 7 }
   const notif = db.settings.notifications || {}
-  const leads = (scope.studio || scope.associate) ? scopeLeads(db.leads, scope) : db.leads
+  // `req` is passed so alerts obey the caller's location scope too — without
+  // it an agent's alert feed would surface leads from every studio.
+  const leads = req ? scopeLeadsForReq(req) : ((scope.studio || scope.associate) ? scopeLeads(db.leads, scope) : db.leads)
   for (const lead of leads) {
     if (lead.status !== 'open') continue
     const e = enrichLead(lead, db)
@@ -269,6 +319,7 @@ function buildAlerts(scope = {}) {
 
 app.get('/api/bootstrap', (req, res) => {
   res.json({
+    authUser: req.authUser,
     settings: db.settings,
     locations: db.locations,
     associates: db.associates,
@@ -292,7 +343,7 @@ app.get('/api/bootstrap', (req, res) => {
 
 // ---------- alerts ----------
 
-app.get('/api/alerts', (req, res) => res.json(buildAlerts(req.query)))
+app.get('/api/alerts', (req, res) => res.json(buildAlerts(req.query, req)))
 
 // ---------- locations ----------
 
@@ -338,7 +389,11 @@ function associateInLocation(associate, locationId) {
   return (associate.locationIds || [associate.locationId]).filter(Boolean).includes(locationId)
 }
 
-app.get('/api/associates', (req, res) => res.json(db.associates))
+app.get('/api/associates', (req, res) => {
+  if (!req.query.locationId) return res.json(db.associates)
+  const ids = String(req.query.locationId).split(',').filter(Boolean)
+  res.json(db.associates.filter(a => ids.some(id => associateInLocation(a, id))))
+})
 app.put('/api/associates', async (req, res) => {
   if (Array.isArray(req.body)) db.associates = req.body.map(normalizeAssociate)
   try { await saveMetaNow() }
@@ -367,7 +422,10 @@ app.patch('/api/associates/:id', async (req, res) => {
 function applyFilters(list, q) {
   const now = Date.now()
   let out = list
-  if (q.locationId) out = out.filter(l => l.locationId === q.locationId)
+  if (q.locationId) {
+    const ids = String(q.locationId).split(',').filter(Boolean)
+    out = out.filter(l => ids.includes(l.locationId))
+  }
   if (q.associateId) out = out.filter(l => l.associateId === q.associateId)
   if (q.stage) out = out.filter(l => l.stage === q.stage)
   if (q.status) out = out.filter(l => enrichLead(l, db).status === q.status)
@@ -453,9 +511,16 @@ app.get('/api/leads/ids', (req, res) => {
   res.json({ ids: list.map(l => l.id), total: list.length })
 })
 
+// Single-lead reads bypass applyFilters entirely, so the location check has
+// to happen here — otherwise an agent could enumerate ids and read any lead
+// in the org. 404 (not 403) so the response doesn't confirm the id exists.
+function canSeeLead(req, lead) {
+  return !!lead && isAllowedLocation(req, lead.locationId)
+}
+
 app.get('/api/leads/:id', (req, res) => {
   const lead = leadById(req.params.id)
-  if (!lead) return res.status(404).json({ error: 'Lead not found' })
+  if (!canSeeLead(req, lead)) return res.status(404).json({ error: 'Lead not found' })
   res.json(enrichLead(lead, db))
 })
 
@@ -614,7 +679,7 @@ app.delete('/api/leads/bulk', (req, res) => {
 
 app.patch('/api/leads/:id', (req, res) => {
   const lead = leadById(req.params.id)
-  if (!lead) return res.status(404).json({ error: 'Lead not found' })
+  if (!canSeeLead(req, lead)) return res.status(404).json({ error: 'Lead not found' })
   const before = lead.stage
   safePatch(lead, req.body)
   markDirty(lead.id)
@@ -626,7 +691,7 @@ app.patch('/api/leads/:id', (req, res) => {
 
 app.post('/api/leads/:id/followups', (req, res) => {
   const lead = leadById(req.params.id)
-  if (!lead) return res.status(404).json({ error: 'Lead not found' })
+  if (!canSeeLead(req, lead)) return res.status(404).json({ error: 'Lead not found' })
   lead.followUps = lead.followUps || []
   const normalized = normalizeFollowUpFields(req.body.date, req.body.comments)
   if (!req.body.replaceId && !normalized.date && !normalized.comments) {
@@ -668,7 +733,7 @@ app.post('/api/leads/:id/followups', (req, res) => {
 
 app.post('/api/leads/:id/assign', (req, res) => {
   const lead = leadById(req.params.id)
-  if (!lead) return res.status(404).json({ error: 'Lead not found' })
+  if (!canSeeLead(req, lead)) return res.status(404).json({ error: 'Lead not found' })
   if (req.body.associateId) {
     lead.associateId = req.body.associateId
     if (req.body.locationId) lead.locationId = req.body.locationId
@@ -1317,12 +1382,29 @@ function scopeLeads(leads, { studio, associate } = {}) {
   return out
 }
 
+// scopeLocation only rewrites `locationId`; these analytics endpoints read
+// `studio` instead, so a client-supplied `?studio=` would otherwise reach
+// straight through. Clamp it to the caller's own locations here — for an
+// admin `allowedLocationIds` returns null (unrestricted), for an agent it
+// returns the intersection, which is empty when they asked for a studio
+// they don't own (so they get an empty dataset, not someone else's).
+function allowedStudioIds(req) {
+  return allowedLocationIds(req, req.query?.studio || null)
+}
+
+function scopeLeadsForReq(req, leads = db.leads) {
+  let out = scopeLeads(leads, req.query || {})
+  const allowed = allowedStudioIds(req)
+  if (allowed) out = out.filter(l => allowed.includes(l.locationId))
+  return out
+}
+
 function resolveMonth(req) {
   return /^\d{4}-\d{2}$/.test(req.query.month || '') ? req.query.month : new Date().toISOString().slice(0, 7)
 }
 
 app.get('/api/analytics/overview', (req, res) => {
-  const leads = scopeLeads(db.leads, req.query)
+  const leads = scopeLeadsForReq(req)
   const now = Date.now()
   const thisMonth = resolveMonth(req)
   const [ty, tm] = thisMonth.split('-').map(Number)
@@ -1375,7 +1457,7 @@ app.get('/api/analytics/overview', (req, res) => {
 })
 
 app.get('/api/analytics/timeline', (req, res) => {
-  const scoped = scopeLeads(db.leads, req.query)
+  const scoped = scopeLeadsForReq(req)
   const months = []
   const now = new Date()
   for (let i = 11; i >= 0; i--) {
@@ -1422,7 +1504,7 @@ app.get('/api/analytics/funnel', (req, res) => {
 
 app.get('/api/analytics/sources', (req, res) => {
   const month = resolveMonth(req)
-  const leads = scopeLeads(db.leads, req.query).filter(l => (l.createdAt || '').slice(0, 7) === month)
+  const leads = scopeLeadsForReq(req).filter(l => (l.createdAt || '').slice(0, 7) === month)
   const map = {}
   for (const l of leads) {
     const key = l.sourceName || 'Unknown'
@@ -1435,8 +1517,12 @@ app.get('/api/analytics/sources', (req, res) => {
 
 app.get('/api/analytics/team', (req, res) => {
   const month = resolveMonth(req)
+  // Clamp `?studio=` to the caller's own locations; an agent asking for
+  // another studio gets an empty allowed set and therefore no rows.
+  const allowed = allowedStudioIds(req)
   const rows = db.associates.filter(a => a.active !== false)
-    .filter(a => !req.query.studio || a.locationId === req.query.studio || (a.locationIds || []).includes(req.query.studio))
+    .filter(a => !allowed || allowed.some(id => associateInLocation(a, id)))
+    .filter(a => !req.query.studio || associateInLocation(a, req.query.studio))
     .filter(a => !req.query.associate || a.id === req.query.associate)
     .map(a => {
     const owned = db.leads.filter(l => l.associateId === a.id && (l.createdAt || '').slice(0, 7) === month)
@@ -1506,14 +1592,26 @@ app.post('/api/momence/test', async (req, res) => {
 app.get('/api/momence/sessions', async (req, res) => {
   if (!momence.isAnyConfigured(db)) return res.status(400).json({ error: 'Momence is not configured. Complete the connection in Settings.' })
   try {
-    const sessions = await momence.getSessions(db, req.query)
+    // scopeLocation writes a comma-joined id list for a multi-location agent,
+    // but Momence's API takes exactly one location (marketForLocation() and
+    // the upstream call both expect a single id) — forwarding "loc1,loc2"
+    // verbatim would break the upstream request. Query the first id instead.
+    // Known limitation: a multi-location agent only sees their first studio's
+    // sessions; real multi-location aggregation is out of scope here.
+    const params = { ...req.query }
+    if (typeof params.locationId === 'string' && params.locationId.includes(',')) {
+      params.locationId = params.locationId.split(',')[0]
+    }
+    const sessions = await momence.getSessions(db, params)
     res.json({ sessions })
   } catch (e) { res.status(502).json({ error: e.message }) }
 })
 
 app.get('/api/momence/sessions/:sessionId', async (req, res) => {
   if (!momence.isAnyConfigured(db)) return res.status(400).json({ error: 'Momence is not configured.' })
-  try { res.json(await momence.getSessionWorkspace(db, req.params.sessionId, req.query.locationId)) }
+  // Same single-location constraint as /api/momence/sessions above.
+  const locId = String(req.query.locationId || '').split(',')[0] || undefined
+  try { res.json(await momence.getSessionWorkspace(db, req.params.sessionId, locId)) }
   catch (e) { res.status(502).json({ error: e.message }) }
 })
 
@@ -1704,7 +1802,7 @@ app.delete('/api/momence/bookings/:bookingId', async (req, res) => {
 // short pick-list instead of asking for a raw ID.
 app.get('/api/momence/lookup/:leadId', async (req, res) => {
   const lead = leadById(req.params.leadId)
-  if (!lead) return res.status(404).json({ error: 'Lead not found' })
+  if (!canSeeLead(req, lead)) return res.status(404).json({ error: 'Lead not found' })
   if (!momence.isConfigured(db)) return res.status(400).json({ ok: false, error: 'Momence is not configured' })
   try {
     if (lead.memberId) return res.json({ ok: true, memberId: lead.memberId, candidates: null })
@@ -1719,7 +1817,7 @@ app.get('/api/momence/lookup/:leadId', async (req, res) => {
 // lookup finds more than one candidate) and syncs its profile immediately.
 app.post('/api/momence/link/:leadId', async (req, res) => {
   const lead = leadById(req.params.leadId)
-  if (!lead) return res.status(404).json({ error: 'Lead not found' })
+  if (!canSeeLead(req, lead)) return res.status(404).json({ error: 'Lead not found' })
   if (!momence.isConfigured(db)) return res.status(400).json({ ok: false, error: 'Momence is not configured' })
   const memberId = String(req.body?.memberId || '').trim()
   if (!memberId) return res.status(400).json({ ok: false, error: 'memberId is required' })
@@ -1741,7 +1839,7 @@ app.post('/api/momence/link/:leadId', async (req, res) => {
 // created member can take a moment to become readable from the member endpoint.
 app.post('/api/momence/create/:leadId', async (req, res) => {
   const lead = leadById(req.params.leadId)
-  if (!lead) return res.status(404).json({ ok: false, error: 'Lead not found' })
+  if (!canSeeLead(req, lead)) return res.status(404).json({ ok: false, error: 'Lead not found' })
   if (!momence.isConfigured(db)) return res.status(400).json({ ok: false, error: 'Momence is not configured' })
   if (momence.isValidMemberId(lead.memberId)) {
     return res.status(409).json({ ok: false, error: `This lead is already linked to Momence member #${lead.memberId}.` })
@@ -1778,7 +1876,7 @@ app.post('/api/momence/create/:leadId', async (req, res) => {
 
 app.post('/api/momence/sync/:leadId', async (req, res) => {
   const lead = leadById(req.params.leadId)
-  if (!lead) return res.status(404).json({ error: 'Lead not found' })
+  if (!canSeeLead(req, lead)) return res.status(404).json({ error: 'Lead not found' })
   if (!momence.isConfigured(db)) return res.status(400).json({ ok: false, error: 'Momence is not configured' })
   try {
     if (!lead.memberId) {
@@ -1973,7 +2071,7 @@ app.get('/api/analytics/performance', (req, res) => {
 
   const validDate = (v) => v && v !== '-' && !isNaN(new Date(v).getTime())
 
-  const scoped = scopeLeads(db.leads, req.query)
+  const scoped = scopeLeadsForReq(req)
   for (const l of scoped) {
     if (validDate(l.createdAt)) {
       const ck = fmt(new Date(l.createdAt))
@@ -2553,18 +2651,57 @@ function periodLostBySource(start, end, locationId) {
 // switched by `scope`. Always returns three comparison columns (selected
 // period, immediately preceding period, same period last year) rather than
 // the single either/or `compare` mode the older by-location endpoint uses.
-app.get('/api/analytics/report', (req, res) => {
+// `scope`/`entityId` are fully client-supplied and default to "every entity",
+// so for an agent they must be pinned to something inside their own scope:
+// a studio entityId must be one of their locations, an associate entityId
+// must belong to one of their locations, and the "all entities" default is
+// downgraded to their first location (never left global). Returns null when
+// the request names an entity outside their scope, which callers turn into a
+// 403 rather than silently showing different data than was asked for.
+function resolveReportScope(req) {
   const scope = req.query.scope === 'associate' ? 'associate' : 'studio'
   const entityId = req.query.entityId || null
+  const allowed = allowedLocationIds(req, null)
+  if (!allowed) return { scope, entityId } // admin: unrestricted
+
+  if (scope === 'studio') {
+    if (!entityId) return { scope, entityId: allowed[0] || '__none__' }
+    return allowed.includes(entityId) ? { scope, entityId } : null
+  }
+  const inScope = db.associates.filter(a => allowed.some(id => associateInLocation(a, id)))
+  if (!entityId) {
+    const own = req.authUser.associateId
+    return { scope, entityId: (own && inScope.some(a => a.id === own)) ? own : (inScope[0]?.id || '__none__') }
+  }
+  return inScope.some(a => a.id === entityId) ? { scope, entityId } : null
+}
+
+// Entity picker options, clamped the same way so the UI can't offer a studio
+// or associate the caller isn't allowed to select.
+function reportEntitiesFor(req, scope) {
+  const allowed = allowedLocationIds(req, null)
+  if (scope === 'associate') {
+    return db.associates
+      .filter(a => a.active !== false)
+      .filter(a => !allowed || allowed.some(id => associateInLocation(a, id)))
+      .map(a => ({ id: a.id, name: a.name, locationId: a.locationId }))
+  }
+  return db.locations
+    .filter(l => !allowed || allowed.includes(l.id))
+    .map(l => ({ id: l.id, name: l.name }))
+}
+
+app.get('/api/analytics/report', (req, res) => {
+  const resolved = resolveReportScope(req)
+  if (!resolved) return res.status(403).json({ error: 'Not permitted for this location' })
+  const { scope, entityId } = resolved
   const now = new Date()
   const period = resolveReportPeriod(req, now)
   const { start, end } = period
   const prev = precedingPeriod(start, end)
   const yoy = yearAgoPeriod(start, end)
 
-  const entities = scope === 'associate'
-    ? db.associates.filter(a => a.active !== false).map(a => ({ id: a.id, name: a.name, locationId: a.locationId }))
-    : db.locations.map(l => ({ id: l.id, name: l.name }))
+  const entities = reportEntitiesFor(req, scope)
   const entityName = entityId
     ? (entities.find(e => e.id === entityId)?.name || 'Unknown')
     : (scope === 'associate' ? 'All associates' : 'All studios')
@@ -2614,8 +2751,9 @@ app.get('/api/analytics/report', (req, res) => {
 // same period/scope filters, narrowed to one group value, returning enough
 // per-lead detail to list and open each one.
 app.get('/api/analytics/report/drill', (req, res) => {
-  const scope = req.query.scope === 'associate' ? 'associate' : 'studio'
-  const entityId = req.query.entityId || null
+  const resolved = resolveReportScope(req)
+  if (!resolved) return res.status(403).json({ error: 'Not permitted for this location' })
+  const { scope, entityId } = resolved
   const period = resolveReportPeriod(req, new Date())
   const inRange = periodInRangeFn(period.start, period.end)
   const groupField = req.query.stage !== undefined ? 'stage' : 'source'
@@ -2632,7 +2770,20 @@ app.get('/api/analytics/performance/by-location', (req, res) => {
   const range = req.query.range === 'month' ? 'month' : 'week'
   const offset = Math.max(0, Number(req.query.offset) || 0)
   const now = new Date()
-  const locationId = req.query.location || null
+  // `?location=` is client-supplied and this handler otherwise falls back to
+  // whole-org aggregates when it's absent. For an agent, clamp it to their
+  // own locations and never allow the unscoped fallback: `agentScopeIds` is
+  // null for an admin, and the agent's allowed ids otherwise.
+  const agentScopeIds = allowedLocationIds(req, null)
+  const requestedLocation = req.query.location || null
+  if (agentScopeIds && requestedLocation && !agentScopeIds.includes(requestedLocation)) {
+    return res.status(403).json({ error: 'Not permitted for this location' })
+  }
+  // Every aggregate below that would otherwise be org-wide is computed for
+  // this single location when the caller is an agent.
+  const scopeLoc = agentScopeIds ? (requestedLocation || agentScopeIds[0] || '__none__') : null
+  const visibleLocations = agentScopeIds ? db.locations.filter(l => agentScopeIds.includes(l.id)) : db.locations
+  const locationId = requestedLocation
 
   // Lightweight per-location history mode: used by expandable studio rows to
   // lazily fetch just that location's sparkline data, avoiding the heavier
@@ -2684,42 +2835,46 @@ app.get('/api/analytics/performance/by-location', (req, res) => {
   } else {
     ;({ start: pStart, end: pEnd } = periodBounds(range, offset + 1, now))
   }
-  const previous = periodSummary(pStart, pEnd)
+  const previous = periodSummary(pStart, pEnd, scopeLoc)
 
-  const rows = periodLocationRows(start, end, db.locations)
+  const rows = periodLocationRows(start, end, visibleLocations)
 
   let history = []
   const historyLen = Math.min(24, Math.max(0, Number(req.query.history) || 0))
   if (historyLen > 0 && !customRange) {
     for (let i = historyLen - 1; i >= 0; i--) {
       const { start: s, end: e } = periodBounds(range, offset + i, now)
-      history.push({ periodLabel: periodLabelFor(range, s), ...periodSummary(s, e) })
+      history.push({ periodLabel: periodLabelFor(range, s), ...periodSummary(s, e, scopeLoc) })
     }
   }
 
   const funnel = {
-    ...periodFunnel(start, end),
-    byLocation: db.locations.map(loc => ({ locationId: loc.id, locationName: loc.name, ...periodFunnel(start, end, loc.id) }))
+    ...periodFunnel(start, end, scopeLoc),
+    byLocation: visibleLocations.map(loc => ({ locationId: loc.id, locationName: loc.name, ...periodFunnel(start, end, loc.id) }))
   }
-  const leaderboard = periodLeaderboard(start, end)
-  const sourceBreakdown = periodSourceBreakdown(start, end)
-  const channelPerformance = periodChannelPerformance(start, end)
-  const followUpAnalytics = periodFollowUpAnalytics(start, end)
-  const revenueMix = periodRevenueMix(start, end)
+  const leaderboard = periodLeaderboard(start, end, scopeLoc)
+  const sourceBreakdown = periodSourceBreakdown(start, end, scopeLoc)
+  const channelPerformance = periodChannelPerformance(start, end, scopeLoc)
+  const followUpAnalytics = periodFollowUpAnalytics(start, end, scopeLoc)
+  const revenueMix = periodRevenueMix(start, end, scopeLoc)
   // Cohort conversion looks back across period-cohorts distinct from the
   // selected window; a custom date range doesn't map onto week/month cohorts
   // cleanly, so it falls back to cohorts anchored on the current bucketed
   // period (offset 0) for that range.
-  const cohortConversion = periodCohortConversion(range, customRange ? 0 : offset, now)
-  const goalTracking = periodGoalTracking(range, start, end, customRange)
+  const cohortConversion = periodCohortConversion(range, customRange ? 0 : offset, now, scopeLoc)
+  const goalTracking = periodGoalTracking(range, start, end, customRange, scopeLoc)
 
   // Per-location breakdown, scoped to whichever studios the client selected
   // (`&locations=id1,id2`) — the report renders one full section per entry
   // here, primary studio first, defaulting to just the first studio in `rows`
   // when nothing was requested so the report opens focused rather than dumping
   // every studio at once.
+  // Clamped to the caller's own studios: an agent's `&locations=` can never
+  // name a studio outside their scope, and an empty request falls back to
+  // their own first studio rather than an arbitrary one.
   const requestedIds = (req.query.locations || '').split(',').map(s => s.trim()).filter(Boolean)
-  const selectedIds = requestedIds.length ? requestedIds : (rows[0] ? [rows[0].locationId] : [])
+  const permittedIds = agentScopeIds ? requestedIds.filter(id => agentScopeIds.includes(id)) : requestedIds
+  const selectedIds = permittedIds.length ? permittedIds : (rows[0] ? [rows[0].locationId] : [])
   const perLocation = selectedIds.map(id => {
     const loc = db.locations.find(l => l.id === id)
     const locStart = periodSummary(start, end, id)
@@ -2764,8 +2919,8 @@ app.get('/api/analytics/performance/by-location', (req, res) => {
     revenueMix,
     cohortConversion,
     goalTracking,
-    stageBreakdown: currentStageBreakdown(),
-    lostBySource: periodLostBySource(start, end),
+    stageBreakdown: currentStageBreakdown(scopeLoc),
+    lostBySource: periodLostBySource(start, end, scopeLoc),
     selectedLocationIds: selectedIds,
     perLocation
   })
@@ -2775,7 +2930,12 @@ app.get('/api/analytics/associate-compare', (req, res) => {
   const now = new Date()
   const thisMonth = now.toISOString().slice(0, 7)
   const lastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1).toISOString().slice(0, 7)
-  const rows = db.associates.filter(a => a.active !== false).map(a => {
+  // Agents only ever compare against peers in their own studio(s).
+  const allowed = allowedLocationIds(req, null)
+  const rows = db.associates
+    .filter(a => a.active !== false)
+    .filter(a => !allowed || allowed.some(id => associateInLocation(a, id)))
+    .map(a => {
     const owned = db.leads.filter(l => l.associateId === a.id)
     const open = owned.filter(l => l.status === 'open')
     const won = owned.filter(l => l.status === 'won')
@@ -2810,6 +2970,11 @@ app.get('/api/analytics/associate-compare', (req, res) => {
 app.get('/api/analytics/associate/:id/scorecard', (req, res) => {
   const associate = db.associates.find(a => a.id === req.params.id)
   if (!associate) return res.status(404).json({ error: 'Associate not found' })
+  // An agent may only open the scorecard of someone in their own studio(s).
+  const allowed = allowedLocationIds(req, null)
+  if (allowed && !allowed.some(id => associateInLocation(associate, id))) {
+    return res.status(403).json({ error: 'Not permitted for this associate' })
+  }
 
   const owned = db.leads.filter(l => l.associateId === associate.id)
   const open = owned.filter(l => l.status === 'open')
@@ -2932,7 +3097,7 @@ app.post('/api/gpt/test', async (req, res) => {
 
 app.post('/api/leads/:id/enrich', async (req, res) => {
   const lead = leadById(req.params.id)
-  if (!lead) return res.status(404).json({ error: 'Lead not found' })
+  if (!canSeeLead(req, lead)) return res.status(404).json({ error: 'Lead not found' })
   try {
     const result = await gpt.enrichLeadWithGpt(lead, db)
     if (!result) return res.status(400).json({ ok: false, error: 'OpenAI is not configured. Add your API key in Settings > Integrations (or OPENAI_API_KEY env).' })
@@ -3139,7 +3304,7 @@ app.post('/api/respondio/sync-all-contacts', async (req, res) => {
 
 app.get('/api/respondio/conversations/:leadId', async (req, res) => {
   const lead = leadById(req.params.leadId)
-  if (!lead) return res.status(404).json({ error: 'Lead not found' })
+  if (!canSeeLead(req, lead)) return res.status(404).json({ error: 'Lead not found' })
   if (!respondio.isConfigured(db)) return res.json({ configured: false, conversations: [] })
   try {
     const data = await respondio.syncLeadConversations(db, lead)
@@ -3377,8 +3542,29 @@ app.get('/api/inbox', (req, res) => {
 // for a respond.io contact with no matching CRM lead (see inbox.js). Those
 // rows are read-only (no lead to send/assign against), so only /messages
 // and /read need to handle both; /status and /assign require a real lead.
+// The /api/inbox list scopes rows by `assigneeId` (the conversation's
+// assignee, falling back to the lead's owner) — see inbox.listConversations.
+// The per-conversation routes below did no check at all, so an agent could
+// read any conversation by id. Mirror the list's rule here, plus the lead's
+// location, and answer 404 so a miss doesn't confirm the key exists.
+function canSeeInboxKey(req, key) {
+  if (req.authUser.role === 'admin') return true
+  inbox.ensure(db)
+  const conv = db.inbox?.conversations?.[key]
+  const lead = key.startsWith('contact:') ? null : leadById(key)
+  if (!key.startsWith('contact:') && !lead) return false
+  if (lead && !isAllowedLocation(req, lead.locationId)) return false
+  const assigneeId = conv?.assigneeId || lead?.associateId || null
+  return !!req.authUser.associateId && assigneeId === req.authUser.associateId
+}
+
+function denyInbox(res) {
+  return res.status(404).json({ error: 'Lead not found' })
+}
+
 app.get('/api/inbox/:key/messages', async (req, res) => {
   const key = req.params.key
+  if (!canSeeInboxKey(req, key)) return denyInbox(res)
   if (key.startsWith('contact:')) {
     if (respondio.isConfigured(db)) {
       const contactId = key.slice('contact:'.length)
@@ -3407,6 +3593,7 @@ app.get('/api/inbox/:key/messages', async (req, res) => {
 // the panel polls this every 5 min while a conversation is open.
 app.get('/api/inbox/:key/profile', async (req, res) => {
   const key = req.params.key
+  if (!canSeeInboxKey(req, key)) return denyInbox(res)
   inbox.ensure(db)
   const lead = key.startsWith('contact:') ? null : leadById(key)
   if (!lead && !key.startsWith('contact:')) return res.status(404).json({ error: 'Lead not found' })
@@ -3427,6 +3614,7 @@ app.get('/api/inbox/:key/profile', async (req, res) => {
 
 app.post('/api/inbox/:key/read', (req, res) => {
   const key = req.params.key
+  if (!canSeeInboxKey(req, key)) return denyInbox(res)
   if (!key.startsWith('contact:') && !leadById(key)) return res.status(404).json({ error: 'Lead not found' })
   res.json(inbox.markRead(db, key))
   save()
@@ -3434,7 +3622,8 @@ app.post('/api/inbox/:key/read', (req, res) => {
 
 app.post('/api/inbox/:leadId/status', (req, res) => {
   const lead = leadById(req.params.leadId)
-  if (!lead) return res.status(404).json({ error: 'Lead not found' })
+  if (!canSeeLead(req, lead)) return res.status(404).json({ error: 'Lead not found' })
+  if (!canSeeInboxKey(req, req.params.leadId)) return denyInbox(res)
   try {
     const c = inbox.setStatus(db, lead.id, req.body.status)
     save()
@@ -3444,7 +3633,8 @@ app.post('/api/inbox/:leadId/status', (req, res) => {
 
 app.post('/api/inbox/:leadId/assign', (req, res) => {
   const lead = leadById(req.params.leadId)
-  if (!lead) return res.status(404).json({ error: 'Lead not found' })
+  if (!canSeeLead(req, lead)) return res.status(404).json({ error: 'Lead not found' })
+  if (!canSeeInboxKey(req, req.params.leadId)) return denyInbox(res)
   const c = inbox.assign(db, lead.id, req.body.associateId || null)
   save()
   res.json(c)
@@ -3460,6 +3650,7 @@ app.post('/api/inbox/:leadId/assign', (req, res) => {
 app.post('/api/inbox/:key/agent', async (req, res) => {
   if (!respondio.isConfigured(db)) return res.status(400).json({ error: 'Respond.io is not configured.' })
   const key = req.params.key
+  if (!canSeeInboxKey(req, key)) return denyInbox(res)
   const agentId = req.body.agentId === undefined || req.body.agentId === '' ? null : req.body.agentId
   let lead = null
   let identifier
@@ -3594,7 +3785,7 @@ app.get('/api/analytics/performance/details', (req, res) => {
     value: lead.valueEstimate || 0
   })
 
-  for (const l of scopeLeads(db.leads, req.query)) {
+  for (const l of scopeLeadsForReq(req)) {
     if (validDate2(l.createdAt)) {
       const ck = fmt(new Date(l.createdAt))
       if (idx[ck] !== undefined && row[idx[ck]].newLeads.length < 200) row[idx[ck]].newLeads.push(detailLead(l))
@@ -3628,7 +3819,9 @@ function broadcastChange(type, data) {
   for (const res of sseClients) res.write(`data: ${JSON.stringify(payload)}\n\n`)
 }
 
-app.get('/api/events', (req, res) => {
+// Authenticated like every other /api route, except the token may arrive as
+// `?token=` because EventSource can't send headers (see the /api gate above).
+app.get('/api/events', (req, res, next) => requireAuthWithQueryToken(db)(req, res, next), (req, res) => {
   res.writeHead(200, {
     'Content-Type': 'text/event-stream',
     'Cache-Control': 'no-cache',

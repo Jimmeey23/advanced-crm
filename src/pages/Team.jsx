@@ -8,7 +8,7 @@ import { money } from '../lib.js'
 import AssociateCompareModal from '../components/AssociateCompareModal.jsx'
 
 export default function Team() {
-  const { boot, refreshData, toast, dataVersion, openLead } = useApp()
+  const { boot, refreshData, toast, dataVersion, openLead, role, locationIds } = useApp()
   const [locModal, setLocModal] = useState({ open: false, location: null })
   const [asnModal, setAsnModal] = useState({ open: false, locationId: '' })
   const [faceoffOpen, setFaceoffOpen] = useState(false)
@@ -42,14 +42,16 @@ export default function Team() {
         </div>
         <div className="flex items-center gap-2">
           <button className="btn btn-soft" onClick={() => setFaceoffOpen(true)}><Swords size={15} /> Associate faceoff</button>
-          <button className="btn btn-primary" onClick={() => setLocModal({ open: true, location: null })}><Plus size={15} /> Add location</button>
+          {role !== 'agent' && (
+            <button className="btn btn-primary" onClick={() => setLocModal({ open: true, location: null })}><Plus size={15} /> Add location</button>
+          )}
         </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-        {(boot?.locations || []).map(loc => {
+        {(boot?.locations || []).filter(loc => role === 'admin' || locationIds.includes(loc.id)).map(loc => {
           const locLeads = leads.filter(l => l.locationId === loc.id)
-          const locTeam = (boot?.associates || []).filter(a => (a.locationIds || [a.locationId]).includes(loc.id))
+          const locTeam = (boot?.associates || []).filter(a => (role === 'admin' || (a.locationIds || [a.locationId]).some(id => locationIds.includes(id))) && (a.locationIds || [a.locationId]).includes(loc.id))
           const won = locLeads.filter(l => l.status === 'won').length
           return (
             <div key={loc.id} className={`card card-hover p-5 ${loc.active === false ? 'opacity-60' : ''}`}>
@@ -60,8 +62,10 @@ export default function Team() {
                 </div>
                 <div className="flex items-center gap-1">
                   {loc.active === false && <span className="chip bg-amber-500/10 border border-amber-400/20 text-amber-300">Inactive</span>}
-                  <button className="btn btn-ghost !p-1.5" title="Edit studio" onClick={() => setLocModal({ open: true, location: loc })}><Pencil size={13} /></button>
-                  <button className="btn btn-ghost !p-1.5" title={loc.active === false ? 'Restore studio' : 'Remove studio'} onClick={() => setLocationActive(loc, loc.active === false)}>{loc.active === false ? <RotateCcw size={13} /> : <UserMinus size={13} />}</button>
+                  {role !== 'agent' && <>
+                    <button className="btn btn-ghost !p-1.5" title="Edit studio" onClick={() => setLocModal({ open: true, location: loc })}><Pencil size={13} /></button>
+                    <button className="btn btn-ghost !p-1.5" title={loc.active === false ? 'Restore studio' : 'Remove studio'} onClick={() => setLocationActive(loc, loc.active === false)}>{loc.active === false ? <RotateCcw size={13} /> : <UserMinus size={13} />}</button>
+                  </>}
                 </div>
               </div>
 
@@ -91,10 +95,12 @@ export default function Team() {
                 {!locTeam.length && <p className="text-[11.5px] text-slate-600">No associates yet.</p>}
               </div>
 
-              <div className="grid grid-cols-2 gap-2 mt-3">
-                <button className="btn btn-ghost !py-1.5 !text-[12px]" onClick={() => setManageTeamLocation(loc)}><UserCog size={13} /> Manage team</button>
-                <button className="btn btn-ghost !py-1.5 !text-[12px]" onClick={() => setAsnModal({ open: true, locationId: loc.id })}><Plus size={13} /> New associate</button>
-              </div>
+              {role !== 'agent' && (
+                <div className="grid grid-cols-2 gap-2 mt-3">
+                  <button className="btn btn-ghost !py-1.5 !text-[12px]" onClick={() => setManageTeamLocation(loc)}><UserCog size={13} /> Manage team</button>
+                  <button className="btn btn-ghost !py-1.5 !text-[12px]" onClick={() => setAsnModal({ open: true, locationId: loc.id })}><Plus size={13} /> New associate</button>
+                </div>
+              )}
             </div>
           )
         })}

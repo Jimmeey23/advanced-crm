@@ -97,7 +97,7 @@ function WeeklySchedule({ days, sessions, onOpen }) {
 }
 
 export default function MomenceSchedule() {
-  const { boot, toast, setScheduleSessions } = useApp()
+  const { boot, toast, setScheduleSessions, role, locationIds } = useApp()
   const [view, setView] = useState('week')
   const [anchor, setAnchor] = useState(startOfDay(new Date()))
   const [sessions, setSessions] = useState([])
@@ -106,7 +106,13 @@ export default function MomenceSchedule() {
   const [selected, setSelected] = useState(null)
   const [detail, setDetail] = useState(null)
   const [detailLoading, setDetailLoading] = useState(false)
-  const [location, setLocation] = useState('')
+  const [location, setLocation] = useState(() => (role === 'agent' && locationIds[0]) ? locationIds[0] : '')
+  // boot/locationIds arrive after first render; re-apply the agent lock then.
+  useEffect(() => {
+    if (role !== 'agent' || !locationIds[0]) return
+    setLocation(l => (l === locationIds[0] ? l : locationIds[0]))
+  }, [role, locationIds[0]])
+
   const range = useMemo(() => rangeFor(view, anchor), [view, anchor])
 
   const load = useCallback(async () => {
@@ -172,7 +178,7 @@ export default function MomenceSchedule() {
     </section>
     <section className="mom-filterbar card">
       <div className="mom-view-tabs" role="tablist">{[['day', CalendarDays], ['week', CalendarDays], ['month', CalendarDays], ['list', List]].map(([id, Icon]) => <button key={id} role="tab" aria-selected={view === id} className={view === id ? 'active' : ''} onClick={() => setView(id)}><Icon />{id}</button>)}</div>
-      <label><MapPin /><select className="input" value={location} onChange={e => setLocation(e.target.value)}><option value="">All locations</option>{locations.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}</select></label>
+      <label><MapPin /><select className="input" value={location} onChange={e => setLocation(e.target.value)} disabled={role === 'agent'}><option value="">All locations</option>{locations.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}</select></label>
       <span className="mom-session-total">{sessions.length} sessions</span>
     </section>
     {error ? <div className="mom-error card"><AlertTriangle /><div><strong>Schedule could not be loaded</strong><span>{error}</span></div><button className="btn btn-ghost" onClick={load}>Retry</button></div> : loading ? <div className="mom-skeleton-grid">{Array.from({ length: 7 }, (_, i) => <div className="card" key={i} />)}</div> : view === 'week' ? <WeeklySchedule days={days} sessions={sessions} onOpen={openSession} /> : view === 'list' ? <div className="mom-list card">{sessions.length ? sessions.map(s => <SessionCard key={s.id} session={s} onClick={openSession} />) : <Empty />}</div> : <div className={`mom-calendar mom-calendar-${view}`}>{view === 'month' && <div className="mom-month-weekdays">{['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(day => <span key={day}>{day}</span>)}</div>}{days.map(day => {
