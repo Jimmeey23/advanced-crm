@@ -14,6 +14,7 @@ import * as respondioInternal from './respondioInternal.js'
 import * as inbox from './inbox.js'
 import * as mailer from './mailer.js'
 import * as supabase from './supabaseStore.js'
+import { requireAuth, scopeLocation, blockAgentWrite, adminCodeHandler } from './auth.js'
 import { runReminderDigest, startReminderScheduler } from './reminders.js'
 import { parseCsv, autoMap, normalizeStage, normalizeStatus, parseFlexibleDate } from './csv.js'
 import { STATUS_GROUPS, statusGroupOf } from './leadStatus.js'
@@ -65,6 +66,24 @@ app.use((req, res, next) => {
 
 app.use(express.json({ limit: '200mb' }))
 app.use(express.urlencoded({ extended: true, limit: '200mb' }))
+
+// Public health check stays unauthenticated; everything else under /api
+// requires a verified Supabase session. `db` is declared further below and
+// only populated once startup loads it, so these wrap the lookup in a
+// closure that reads the module-level `db` binding at request time rather
+// than capturing it (which would still be `null`) at route-registration time.
+app.get('/api/auth/whoami', (req, res, next) => requireAuth(db)(req, res, next), (req, res) => res.json(req.authUser))
+app.post('/api/auth/admin-code', (req, res, next) => requireAuth(db)(req, res, next), adminCodeHandler)
+app.use('/api', (req, res, next) => {
+  if (req.path === '/runtime') return next()
+  requireAuth(db)(req, res, (err) => {
+    if (err) return next(err)
+    scopeLocation(req, res, next)
+  })
+})
+app.delete('/api/leads/bulk', (req, res, next) => blockAgentWrite(req, res, next))
+app.post('/api/leads/import/parse', (req, res, next) => blockAgentWrite(req, res, next))
+app.post('/api/leads/import/apply', (req, res, next) => blockAgentWrite(req, res, next))
 
 // Lets the local frontend discover this instance if the preferred API port
 // was occupied and startup moved to the next available port.
@@ -269,6 +288,7 @@ function buildAlerts(scope = {}) {
 
 app.get('/api/bootstrap', (req, res) => {
   res.json({
+    authUser: req.authUser,
     settings: db.settings,
     locations: db.locations,
     associates: db.associates,
@@ -338,7 +358,11 @@ function associateInLocation(associate, locationId) {
   return (associate.locationIds || [associate.locationId]).filter(Boolean).includes(locationId)
 }
 
-app.get('/api/associates', (req, res) => res.json(db.associates))
+app.get('/api/associates', (req, res) => {
+  if (!req.query.locationId) return res.json(db.associates)
+  const ids = String(req.query.locationId).split(',').filter(Boolean)
+  res.json(db.associates.filter(a => ids.some(id => associateInLocation(a, id))))
+})
 app.put('/api/associates', async (req, res) => {
   if (Array.isArray(req.body)) db.associates = req.body.map(normalizeAssociate)
   try { await saveMetaNow() }
@@ -367,7 +391,10 @@ app.patch('/api/associates/:id', async (req, res) => {
 function applyFilters(list, q) {
   const now = Date.now()
   let out = list
-  if (q.locationId) out = out.filter(l => l.locationId === q.locationId)
+  if (q.locationId) {
+    const ids = String(q.locationId).split(',').filter(Boolean)
+    out = out.filter(l => ids.includes(l.locationId))
+  }
   if (q.associateId) out = out.filter(l => l.associateId === q.associateId)
   if (q.stage) out = out.filter(l => l.stage === q.stage)
   if (q.status) out = out.filter(l => enrichLead(l, db).status === q.status)
