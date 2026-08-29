@@ -229,7 +229,7 @@ function NewConversationModal({ open, onClose, onCreated }) {
 }
 
 export default function Inbox() {
-  const { boot, toast } = useApp()
+  const { boot, toast, role, associateId } = useApp()
   const [rows, setRows] = useState([])
   const [loadingList, setLoadingList] = useState(true)
   const [selectedLeadId, setSelectedLeadId] = useState(null)
@@ -239,7 +239,7 @@ export default function Inbox() {
 
   const [q, setQ] = useState('')
   const [studio, setStudio] = useState('')
-  const [associate, setAssociate] = useState('')
+  const [associate, setAssociate] = useState(() => (role === 'agent' && associateId) ? associateId : '')
   const [channel, setChannel] = useState('')
   const [status, setStatus] = useState('')
   const [unreadOnly, setUnreadOnly] = useState(false)
@@ -549,11 +549,11 @@ export default function Inbox() {
                   {SORT_OPTIONS.map(o => <option key={o.id} value={o.id}>{o.label}</option>)}
                 </select>
               </div>
-              <select className="input select-strong !py-1.5 !text-[12px]" value={studio} onChange={e => setStudio(e.target.value)}>
+              <select className="input select-strong !py-1.5 !text-[12px]" value={studio} onChange={e => setStudio(e.target.value)} disabled={role === 'agent'}>
                 <option value="">All studios</option>
                 {(boot?.locations || []).map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
               </select>
-              <select className="input select-strong !py-1.5 !text-[12px]" value={associate} onChange={e => setAssociate(e.target.value)}>
+              <select className="input select-strong !py-1.5 !text-[12px]" value={associate} onChange={e => setAssociate(e.target.value)} disabled={role === 'agent'}>
                 <option value="">All owners</option>
                 {(boot?.associates || []).map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
               </select>

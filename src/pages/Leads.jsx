@@ -110,9 +110,11 @@ const GROUP_OPTIONS = [
 ]
 
 export default function Leads({ initialSearch = '' }) {
-  const { boot, lookup, openLead, refreshData, toast, navigate, dataVersion } = useApp()
+  const { boot, lookup, openLead, refreshData, toast, navigate, dataVersion, role, locationIds } = useApp()
   const [search, setSearch] = useState(initialSearch)
-  const [filters, setFilters] = useState(EMPTY_FILTERS)
+  const [filters, setFilters] = useState(() => role === 'agent' && locationIds[0]
+    ? { ...EMPTY_FILTERS, locationId: locationIds[0] }
+    : EMPTY_FILTERS)
 
   React.useEffect(() => { if (initialSearch) { setSearch(initialSearch); setPage(0) } }, [initialSearch])
   const [panelOpen, setPanelOpen] = useState(false)
@@ -444,9 +446,11 @@ export default function Leads({ initialSearch = '' }) {
             <option value="" disabled>Reassign owner…</option>
             {(boot?.associates || []).filter(a => a.active !== false).map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
           </select>
-          <button className="btn btn-ghost !py-1.5 !text-[12.5px] text-rose-300 hover:!bg-rose-500/10" disabled={bulkBusy} onClick={bulkDelete}>
-            <Trash2 size={13} /> Delete
-          </button>
+          {role !== 'agent' && (
+            <button className="btn btn-ghost !py-1.5 !text-[12.5px] text-rose-300 hover:!bg-rose-500/10" disabled={bulkBusy} onClick={bulkDelete}>
+              <Trash2 size={13} /> Delete
+            </button>
+          )}
           <button className="btn btn-ghost !py-1.5 !text-[12.5px] ml-auto" onClick={clearSelection}>
             <X size={13} /> Clear selection
           </button>
@@ -517,7 +521,7 @@ export default function Leads({ initialSearch = '' }) {
       {/* filter panel */}
       {panelOpen && (
         <div className="card p-4 grid grid-cols-2 md:grid-cols-4 xl:grid-cols-6 gap-3" style={{ animation: 'fadeIn .15s ease' }}>
-          <Filter label="Location" value={filters.locationId} onChange={setF('locationId')}>
+          <Filter label="Location" value={filters.locationId} onChange={setF('locationId')} disabled={role === 'agent'}>
             <option value="">All locations</option>
             {(boot?.locations || []).map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
           </Filter>
@@ -1686,11 +1690,11 @@ function TimelineView({ items, lookup, openLead }) {
   )
 }
 
-function Filter({ label, value, onChange, children }) {
+function Filter({ label, value, onChange, children, disabled }) {
   return (
     <div>
       <label className="text-[10.5px] uppercase tracking-wider text-slate-500 font-semibold mb-1 block">{label}</label>
-      <select className="input !py-1.5" value={value} onChange={onChange}>{children}</select>
+      <select className="input !py-1.5" value={value} onChange={onChange} disabled={disabled}>{children}</select>
     </div>
   )
 }

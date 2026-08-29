@@ -42,10 +42,11 @@ const NAV = [
 ]
 
 function Sidebar() {
-  const { view, navigate, boot, alerts, sidebarCollapsed, toggleSidebar } = useApp()
+  const { view, navigate, boot, alerts, sidebarCollapsed, toggleSidebar, role } = useApp()
   const momenceOn = boot?.integrations?.momence
   const rrEnabled = boot?.settings?.roundRobin?.enabled
   const highCount = alerts.filter(a => a.level === 'high').length
+  const visibleNav = NAV.filter(item => role === 'admin' || item.id !== 'import')
 
   return (
     <aside className={`${sidebarCollapsed ? 'w-[72px]' : 'w-[248px]'} shrink-0 h-full flex flex-col border-r border-white/6 bg-[#0c0c0c]/80 backdrop-blur-xl transition-[width] duration-200`}>
@@ -62,7 +63,7 @@ function Sidebar() {
       </div>
 
       <nav className="flex-1 px-3 space-y-1 overflow-y-auto scrollbar-thin">
-        {NAV.map(item => {
+        {visibleNav.map(item => {
           const Icon = item.icon
           const active = view === item.id
           return (

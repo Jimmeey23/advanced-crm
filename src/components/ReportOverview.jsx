@@ -42,9 +42,10 @@ const tooltipStyle = () => ({
 const AXIS = { fill: 'var(--axis)', fontSize: 10.5 }
 
 export default function ReportOverview({ title, desc }) {
-  const { openLead } = useApp()
+  const { openLead, role, locationIds } = useApp()
+  const locked = role === 'agent'
   const [scope, setScope] = useState('studio')
-  const [entityId, setEntityId] = useState('')
+  const [entityId, setEntityId] = useState(() => (locked && locationIds[0]) ? locationIds[0] : '')
   const [preset, setPreset] = useState('prev_week')
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
@@ -66,8 +67,13 @@ export default function ReportOverview({ title, desc }) {
   const { data, loading, reload } = useFetch(() => api.get(`/api/analytics/report?${params}`), [params])
 
   // Reset the entity selection when switching scope — an associate id is
-  // meaningless as a locationId and vice versa.
-  useEffect(() => { setEntityId('') }, [scope])
+  // meaningless as a locationId and vice versa. Agents are locked to their
+  // own studio, so this reset never applies to them (scope switching itself
+  // is disabled below).
+  useEffect(() => {
+    if (locked) return
+    setEntityId('')
+  }, [scope, locked])
 
   const toggleSeries = (key) => setVisibleSeries(s => {
     const next = new Set(s)
@@ -160,11 +166,11 @@ export default function ReportOverview({ title, desc }) {
 
         <div className="ml-auto flex flex-wrap items-center gap-2">
           <div className="flex rounded-xl bg-white/5 border border-white/10 p-1">
-            <button className={`px-3 py-1.5 rounded-lg text-[12px] font-semibold flex items-center gap-1.5 ${scope === 'studio' ? 'bg-rose-500/25 text-white' : 'text-slate-400 hover:text-white'}`} onClick={() => setScope('studio')}><Building2 size={13} /> Studio overview</button>
-            <button className={`px-3 py-1.5 rounded-lg text-[12px] font-semibold flex items-center gap-1.5 ${scope === 'associate' ? 'bg-rose-500/25 text-white' : 'text-slate-400 hover:text-white'}`} onClick={() => setScope('associate')}><UserCircle2 size={13} /> Associate overview</button>
+            <button disabled={locked} className={`px-3 py-1.5 rounded-lg text-[12px] font-semibold flex items-center gap-1.5 ${scope === 'studio' ? 'bg-rose-500/25 text-white' : 'text-slate-400 hover:text-white'}`} onClick={() => setScope('studio')}><Building2 size={13} /> Studio overview</button>
+            <button disabled={locked} className={`px-3 py-1.5 rounded-lg text-[12px] font-semibold flex items-center gap-1.5 ${scope === 'associate' ? 'bg-rose-500/25 text-white' : 'text-slate-400 hover:text-white'}`} onClick={() => setScope('associate')}><UserCircle2 size={13} /> Associate overview</button>
           </div>
 
-          <select className="input !w-auto !py-2 !text-[12px]" value={entityId} onChange={e => setEntityId(e.target.value)}>
+          <select className="input !w-auto !py-2 !text-[12px]" value={entityId} onChange={e => setEntityId(e.target.value)} disabled={locked}>
             <option value="">{scope === 'associate' ? 'All associates' : 'All studios'}</option>
             {(data?.entities || []).map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
           </select>
