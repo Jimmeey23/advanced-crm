@@ -1,16 +1,27 @@
 import React, { useState } from 'react'
 import { Mail, Lock, ShieldCheck, Loader2, ArrowRight } from 'lucide-react'
 import { supabase } from '../lib/supabaseClient.js'
+import { api } from '../api.js'
 
+const NO_SESSION_MESSAGE = 'Account created. Confirm your email, then sign in and re-enter your admin code to be promoted to admin.'
+
+// Goes through api.post so it uses the app's API base resolution (relative
+// paths break whenever the API isn't same-origin) and so a failed promotion
+// surfaces as an error instead of silently doing nothing. Returns null on
+// success or a message to show the user.
 async function claimAdminCode(code) {
-  if (!code.trim()) return
+  const trimmed = code.trim()
+  if (!trimmed) return null
   const { data: { session } } = await supabase.auth.getSession()
-  if (!session) return
-  await fetch('/api/auth/admin-code', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
-    body: JSON.stringify({ code: code.trim() })
-  })
+  // signUp with email confirmation enabled returns no session yet, so the
+  // code can't be redeemed now — tell the user rather than dropping it.
+  if (!session) return NO_SESSION_MESSAGE
+  try {
+    await api.post('/api/auth/admin-code', { code: trimmed })
+    return null
+  } catch (err) {
+    return err?.message ? `Admin code was not applied: ${err.message}` : 'Admin code was not applied.'
+  }
 }
 
 export default function LoginPage() {
@@ -37,7 +48,8 @@ export default function LoginPage() {
       } else {
         const { error: err } = await supabase.auth.signUp({ email, password })
         if (err) throw err
-        await claimAdminCode(adminCode)
+        const codeProblem = await claimAdminCode(adminCode)
+        if (codeProblem) setError(codeProblem)
       }
     } catch (err) {
       setError(err.message || 'Something went wrong')

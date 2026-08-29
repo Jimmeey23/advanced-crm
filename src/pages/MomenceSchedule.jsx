@@ -107,6 +107,12 @@ export default function MomenceSchedule() {
   const [detail, setDetail] = useState(null)
   const [detailLoading, setDetailLoading] = useState(false)
   const [location, setLocation] = useState(() => (role === 'agent' && locationIds[0]) ? locationIds[0] : '')
+  // boot/locationIds arrive after first render; re-apply the agent lock then.
+  useEffect(() => {
+    if (role !== 'agent' || !locationIds[0]) return
+    setLocation(l => (l === locationIds[0] ? l : locationIds[0]))
+  }, [role, locationIds[0]])
+
   const range = useMemo(() => rangeFor(view, anchor), [view, anchor])
 
   const load = useCallback(async () => {

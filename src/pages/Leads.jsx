@@ -116,6 +116,13 @@ export default function Leads({ initialSearch = '' }) {
     ? { ...EMPTY_FILTERS, locationId: locationIds[0] }
     : EMPTY_FILTERS)
 
+  // boot/locationIds arrive after first render, so re-apply the agent lock
+  // once they do (the lazy initializer above sees an empty list).
+  React.useEffect(() => {
+    if (role !== 'agent' || !locationIds[0]) return
+    setFilters(f => (f.locationId === locationIds[0] ? f : { ...f, locationId: locationIds[0] }))
+  }, [role, locationIds[0]])
+
   React.useEffect(() => { if (initialSearch) { setSearch(initialSearch); setPage(0) } }, [initialSearch])
   const [panelOpen, setPanelOpen] = useState(false)
   const [page, setPage] = useState(0)

@@ -71,12 +71,15 @@ export function AppProvider({ children }) {
   useEffect(() => {
     let es = null
     let cancelled = false
-    api.resolveBase().then(base => {
-      if (cancelled) return
-      es = new EventSource(base + '/api/events')
-      es.onmessage = () => { refreshData(); refreshAlerts() }
-      es.onerror = () => { /* browser auto-reconnects */ }
-    })
+    // EventSource can't set an Authorization header, so /api/events (and only
+    // that route) accepts the same Supabase access token as ?token=.
+    Promise.all([api.resolveBase(), supabase.auth.getSession().catch(() => ({ data: { session: null } }))])
+      .then(([base, { data: { session } }]) => {
+        if (cancelled || !session) return
+        es = new EventSource(`${base}/api/events?token=${encodeURIComponent(session.access_token)}`)
+        es.onmessage = () => { refreshData(); refreshAlerts() }
+        es.onerror = () => { /* browser auto-reconnects */ }
+      })
     return () => { cancelled = true; es?.close() }
   }, [refreshData, refreshAlerts])
 

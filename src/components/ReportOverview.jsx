@@ -54,6 +54,13 @@ export default function ReportOverview({ title, desc }) {
   const [exporting, setExporting] = useState(false)
   const reportRef = useRef(null)
 
+  // boot/locationIds arrive after first render; re-apply the agent lock then.
+  useEffect(() => {
+    if (!locked || !locationIds[0]) return
+    if (scope !== 'studio') return
+    setEntityId(id => (id === locationIds[0] ? id : locationIds[0]))
+  }, [locked, locationIds[0], scope])
+
   const customRange = preset === 'custom' && dateFrom && dateTo
 
   const params = useMemo(() => {

@@ -35,6 +35,14 @@ export default function Performance() {
   const [loading, setLoading] = useState(false)
   const [drawerBucket, setDrawerBucket] = useState(null)
 
+  // `boot` (and therefore locationIds) is usually still empty on first render,
+  // so the lazy initializer above can't lock the filter. Re-apply the lock once
+  // the agent's locations actually arrive.
+  useEffect(() => {
+    if (role !== 'agent' || !locationIds[0]) return
+    setFilters(f => (f.studio === locationIds[0] ? f : { ...f, studio: locationIds[0] }))
+  }, [role, locationIds[0]])
+
   const setF = (k) => (e) => setFilters(f => ({ ...f, [k]: e.target.value }))
   const lockedStudio = role === 'agent' ? locationIds[0] : undefined
   const hasFilters = (filters.studio && filters.studio !== lockedStudio) || filters.associate
