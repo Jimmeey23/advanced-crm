@@ -59,7 +59,15 @@ async function req(method, path, body, isForm) {
     else { opts.headers['Content-Type'] = 'application/json'; opts.body = JSON.stringify(body) }
   }
 
-  const { data: { session } } = await supabase.auth.getSession()
+  let session = null
+  try {
+    ({ data: { session } } = await supabase.auth.getSession())
+  } catch (err) {
+    if (!req._sessionWarned) {
+      req._sessionWarned = true
+      console.warn('supabase.auth.getSession() failed; proceeding without auth header', err)
+    }
+  }
   if (session) opts.headers['Authorization'] = `Bearer ${session.access_token}`
 
   let lastError = null

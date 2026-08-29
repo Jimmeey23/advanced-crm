@@ -302,6 +302,10 @@ export default function App() {
     supabase.auth.getSession().then(({ data }) => {
       setSession(data.session)
       setAuthLoading(false)
+    }).catch((err) => {
+      console.warn('supabase.auth.getSession() failed; treating as unauthenticated', err)
+      setSession(null)
+      setAuthLoading(false)
     })
     const { data: sub } = supabase.auth.onAuthStateChange((_event, newSession) => {
       setSession(newSession)
