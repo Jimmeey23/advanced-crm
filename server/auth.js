@@ -39,13 +39,12 @@ export function locationIdsOf(associate) {
   return [...new Set((associate.locationIds || [associate.locationId]).filter(Boolean))]
 }
 
-export function requireAuth(db) {
+function buildAuthMiddleware(db, readToken) {
   return async (req, res, next) => {
     const client = getServiceClient()
     if (!client) return res.status(500).json({ error: 'Auth not configured: USER_SUPABASE_SERVICE_ROLE_KEY missing' })
 
-    const header = req.headers.authorization || ''
-    const token = header.startsWith('Bearer ') ? header.slice(7) : null
+    const token = readToken(req)
     if (!token) return res.status(401).json({ error: 'Missing bearer token' })
 
     const { data: userRes, error: userErr } = await client.auth.getUser(token)
@@ -63,8 +62,51 @@ export function requireAuth(db) {
     const locationIds = role === 'admin' ? null : locationIdsOf(associate)
 
     req.authUser = { userId, email, role, associateId: associate?.id || null, locationIds }
+    // Canonical scope handle for handlers that read a location under some
+    // other param name (`studio`, `location`, `locations`, `entityId`, ...).
+    // null = admin/unrestricted, array (possibly empty) = agent.
+    req.locationScope = locationIds
     next()
   }
+}
+
+function bearerToken(req) {
+  const header = req.headers.authorization || ''
+  return header.startsWith('Bearer ') ? header.slice(7) : null
+}
+
+export function requireAuth(db) {
+  return buildAuthMiddleware(db, bearerToken)
+}
+
+// EventSource cannot set an Authorization header, so the SSE route (and only
+// that route) also accepts the same Supabase access token as `?token=`.
+// Everything else keeps the mandatory bearer-header requirement.
+export function requireAuthWithQueryToken(db) {
+  return buildAuthMiddleware(db, (req) => bearerToken(req) || (req.query?.token ? String(req.query.token) : null))
+}
+
+// Shared clamps for handlers that read a location under some name other than
+// `locationId` (which scopeLocation already overwrites).
+export function isAllowedLocation(req, locationId) {
+  const scope = req.authUser?.locationIds
+  if (scope === null || scope === undefined) return true // admin
+  return !!locationId && scope.includes(locationId)
+}
+
+// Returns the ids an agent may actually see. `requestedIds` may be an array,
+// a comma string, or empty/null meaning "all". Admins get `requestedIds` back
+// as-is (null = unrestricted). Agents always get the intersection with their
+// own locations — an empty request becomes their full (possibly empty) scope.
+export function allowedLocationIds(req, requestedIds) {
+  const asArray = requestedIds == null
+    ? null
+    : (Array.isArray(requestedIds) ? requestedIds : String(requestedIds).split(','))
+      .map(s => String(s || '').trim()).filter(Boolean)
+  const scope = req.authUser?.locationIds
+  if (scope === null || scope === undefined) return asArray && asArray.length ? asArray : null
+  if (!asArray || !asArray.length) return [...scope]
+  return asArray.filter(id => scope.includes(id))
 }
 
 // Overwrites (never merely defaults) the location/associate filters on the
@@ -90,15 +132,53 @@ export function blockAgentWrite(req, res, next) {
   next()
 }
 
-export function adminCodeHandler(req, res) {
+// Simple in-memory brute-force guard on the mastercode: 5 wrong guesses per
+// user id inside a 15-minute window, then locked out until the window lapses.
+// Process-local (resets on restart, not shared across instances) — good
+// enough to stop online guessing of a 4-digit code from one client.
+const ADMIN_CODE_MAX_ATTEMPTS = 5
+const ADMIN_CODE_WINDOW_MS = 15 * 60 * 1000
+const adminCodeAttempts = new Map()
+
+function registerFailedAdminCode(userId) {
+  const now = Date.now()
+  const entry = adminCodeAttempts.get(userId)
+  if (!entry || now - entry.first > ADMIN_CODE_WINDOW_MS) {
+    adminCodeAttempts.set(userId, { count: 1, first: now })
+  } else {
+    entry.count++
+  }
+}
+
+function isAdminCodeLocked(userId) {
+  const entry = adminCodeAttempts.get(userId)
+  if (!entry) return false
+  if (Date.now() - entry.first > ADMIN_CODE_WINDOW_MS) {
+    adminCodeAttempts.delete(userId)
+    return false
+  }
+  return entry.count >= ADMIN_CODE_MAX_ATTEMPTS
+}
+
+export async function adminCodeHandler(req, res) {
   const client = getServiceClient()
   if (!client) return res.status(500).json({ error: 'Auth not configured' })
+  const userId = req.authUser.userId
+  if (isAdminCodeLocked(userId)) {
+    return res.status(429).json({ error: 'Too many invalid admin code attempts. Try again later.' })
+  }
   const code = String(req.body?.code || '').trim()
-  if (code !== ADMIN_CODE) return res.status(400).json({ error: 'Invalid admin code' })
+  if (code !== ADMIN_CODE) {
+    registerFailedAdminCode(userId)
+    return res.status(400).json({ error: 'Invalid admin code' })
+  }
+  adminCodeAttempts.delete(userId)
 
-  client.from('app_users').update({ role: 'admin' }).eq('user_id', req.authUser.userId)
-    .then(({ error }) => {
-      if (error) return res.status(502).json({ error: error.message })
-      res.json({ role: 'admin' })
-    })
+  try {
+    const { error } = await client.from('app_users').update({ role: 'admin' }).eq('user_id', userId)
+    if (error) return res.status(502).json({ error: error.message })
+    res.json({ role: 'admin' })
+  } catch (e) {
+    res.status(502).json({ error: e.message })
+  }
 }
