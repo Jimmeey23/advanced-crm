@@ -176,42 +176,42 @@ export default function ReportOverview({ title, desc }) {
     <div className="p-6 space-y-5">
       <div className="flex flex-wrap items-center gap-3">
         <div>
-          <h2 className="font-display text-[18px] font-bold text-white flex items-center gap-2">
+          <h2 className="font-display text-lg font-bold text-white flex items-center gap-2">
             {scope === 'associate' ? <UserCircle2 size={18} className="text-rose-400" /> : <Building2 size={18} className="text-rose-400" />} {title}
           </h2>
-          <p className="text-[12px] text-slate-500 mt-0.5">{desc}</p>
+          <p className="text-sm text-slate-500 mt-0.5">{desc}</p>
         </div>
 
         <div className="ml-auto flex flex-wrap items-center gap-2">
           <div className="flex rounded-xl bg-white/5 border border-white/10 p-1">
-            <button className={`px-3 py-1.5 rounded-lg text-[12px] font-semibold flex items-center gap-1.5 ${scope === 'studio' ? 'bg-rose-500/25 text-white' : 'text-slate-400 hover:text-white'}`} onClick={() => setScope('studio')}><Building2 size={13} /> Studio overview</button>
-            <button className={`px-3 py-1.5 rounded-lg text-[12px] font-semibold flex items-center gap-1.5 ${scope === 'associate' ? 'bg-rose-500/25 text-white' : 'text-slate-400 hover:text-white'}`} onClick={() => setScope('associate')}><UserCircle2 size={13} /> Associate overview</button>
+            <button className={`px-3 py-1.5 rounded-lg text-sm font-semibold flex items-center gap-1.5 ${scope === 'studio' ? 'bg-rose-500/25 text-white' : 'text-slate-400 hover:text-white'}`} onClick={() => setScope('studio')}><Building2 size={13} /> Studio overview</button>
+            <button className={`px-3 py-1.5 rounded-lg text-sm font-semibold flex items-center gap-1.5 ${scope === 'associate' ? 'bg-rose-500/25 text-white' : 'text-slate-400 hover:text-white'}`} onClick={() => setScope('associate')}><UserCircle2 size={13} /> Associate overview</button>
           </div>
 
-          <select className="input !w-auto !py-2 !text-[12px]" value={entityId} onChange={e => setEntityId(e.target.value)} disabled={locked} title={locked ? 'Agents view their own studio/profile only' : undefined}>
+          <select className="input !w-auto !py-2 !text-sm" value={entityId} onChange={e => setEntityId(e.target.value)} disabled={locked} title={locked ? 'Agents view their own studio/profile only' : undefined}>
             <option value="">{scope === 'associate' ? 'All associates' : 'All studios'}</option>
             {(data?.entities || []).map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
           </select>
 
           <div className="flex items-center gap-1.5 rounded-xl bg-white/5 border border-white/10 px-2 py-1.5">
             <CalendarRange size={13} className="text-slate-500 shrink-0" />
-            <select className="input !w-auto !py-0 !text-[11.5px] !border-0 !bg-transparent" value={preset} onChange={e => setPreset(e.target.value)}>
+            <select className="input !w-auto !py-0 !text-xs !border-0 !bg-transparent" value={preset} onChange={e => setPreset(e.target.value)}>
               {PRESETS.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
             </select>
           </div>
 
           {preset === 'custom' && (
             <div className="flex items-center gap-1.5 rounded-xl bg-white/5 border border-white/10 px-2 py-1">
-              <input type="date" className="input !w-auto !py-1 !text-[11.5px] !px-1.5" value={dateFrom} onChange={e => setDateFrom(e.target.value)} max={dateTo || undefined} />
-              <span className="text-slate-600 text-[11px]">–</span>
-              <input type="date" className="input !w-auto !py-1 !text-[11.5px] !px-1.5" value={dateTo} onChange={e => setDateTo(e.target.value)} min={dateFrom || undefined} />
+              <input type="date" className="input !w-auto !py-1 !text-xs !px-1.5" value={dateFrom} onChange={e => setDateFrom(e.target.value)} max={dateTo || undefined} />
+              <span className="text-slate-600 text-xs">–</span>
+              <input type="date" className="input !w-auto !py-1 !text-xs !px-1.5" value={dateTo} onChange={e => setDateTo(e.target.value)} min={dateFrom || undefined} />
             </div>
           )}
 
-          <button className="btn btn-ghost !py-2 !px-3 !text-[12px] flex items-center gap-1.5" onClick={exportCsv} disabled={!data}>
+          <button className="btn btn-ghost !py-2 !px-3 !text-sm flex items-center gap-1.5" onClick={exportCsv} disabled={!data}>
             <Download size={13} /> CSV
           </button>
-          <button className="btn btn-primary !py-2 !px-3 !text-[12px] flex items-center gap-1.5" onClick={exportPdf} disabled={!data || exporting}>
+          <button className="btn btn-primary !py-2 !px-3 !text-sm flex items-center gap-1.5" onClick={exportPdf} disabled={!data || exporting}>
             {exporting ? <Spinner size={13} /> : <FileDown size={13} />} {exporting ? 'Exporting…' : 'PDF'}
           </button>
         </div>
@@ -221,26 +221,26 @@ export default function ReportOverview({ title, desc }) {
 
       {!loading && data && (
         <div className="space-y-5" ref={reportRef}>
-          <div className="text-[12px] text-slate-500">{data.entityName} · {data.period.label} ({data.period.start} to {data.period.end})</div>
+          <div className="text-sm text-slate-500">{data.entityName} · {data.period.label} ({data.period.start} to {data.period.end})</div>
 
           {associateDetail && (
             <div className="card p-5 flex flex-wrap items-center gap-5">
               <Avatar name={associateDetail.name} color={associateDetail.color} photoUrl={associateDetail.photoUrl} photoZoom={associateDetail.photoZoom} photoPosX={associateDetail.photoPosX} photoPosY={associateDetail.photoPosY} size={96} fallback="👤" />
               <div className="flex-1 min-w-[180px]">
-                <div className="font-display font-bold text-white text-[17px]">{associateDetail.name}</div>
-                <div className="text-[12px] text-slate-500">{associateDetail.role || 'Sales Associate'}{associateDetail.email ? ` · ${associateDetail.email}` : ''}</div>
-                <div className="text-[11.5px] text-slate-500 mt-1">{detailLeads.length} lead{detailLeads.length === 1 ? '' : 's'} in this period</div>
+                <div className="font-display font-bold text-white text-lg">{associateDetail.name}</div>
+                <div className="text-sm text-slate-500">{associateDetail.role || 'Sales Associate'}{associateDetail.email ? ` · ${associateDetail.email}` : ''}</div>
+                <div className="text-xs text-slate-500 mt-1">{detailLeads.length} lead{detailLeads.length === 1 ? '' : 's'} in this period</div>
               </div>
             </div>
           )}
 
           {associateDetail && detailLeads.length > 0 && (
             <div className="card p-0 overflow-hidden">
-              <div className="px-4 py-3 border-b border-white/8 font-display font-semibold text-white text-[13.5px]">Lead activity this period</div>
+              <div className="px-4 py-3 border-b border-white/8 font-display font-semibold text-white text-base">Lead activity this period</div>
               <div className="overflow-x-auto scrollbar-thin">
                 <table className="data-table w-full">
                   <thead>
-                    <tr className="text-[10.5px] uppercase tracking-wider text-slate-500 border-b border-white/8">
+                    <tr className="text-xs uppercase tracking-wider text-slate-500 border-b border-white/8">
                       <th className="px-4 py-2.5 text-left font-semibold">Lead</th>
                       <th className="px-4 py-2.5 text-left font-semibold">Stage</th>
                       <th className="px-4 py-2.5 text-left font-semibold">Latest comment</th>
@@ -252,10 +252,10 @@ export default function ReportOverview({ title, desc }) {
                       const completed = (l.followUps || []).filter(f => f.done).length
                       return (
                         <tr key={l.id} className="border-b border-white/5 hover:bg-white/[0.03] cursor-pointer" onClick={() => openLead(l.id)}>
-                          <td className="px-4 py-2.5 text-[12.5px] text-white font-medium">{l.fullName}</td>
-                          <td className="px-4 py-2.5 text-[12px] text-slate-400">{l.stage}</td>
-                          <td className="px-4 py-2.5 text-[12px] text-slate-500 max-w-[280px] truncate" title={l.remarks || ''}>{l.remarks || '—'}</td>
-                          <td className="px-4 py-2.5 text-[12px] text-slate-400 text-center mono">{completed}</td>
+                          <td className="px-4 py-2.5 text-sm text-white font-medium">{l.fullName}</td>
+                          <td className="px-4 py-2.5 text-sm text-slate-400">{l.stage}</td>
+                          <td className="px-4 py-2.5 text-sm text-slate-500 max-w-[280px] truncate" title={l.remarks || ''}>{l.remarks || '—'}</td>
+                          <td className="px-4 py-2.5 text-sm text-slate-400 text-center mono">{completed}</td>
                         </tr>
                       )
                     })}
@@ -269,7 +269,7 @@ export default function ReportOverview({ title, desc }) {
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
             {cols.map(c => (
               <div key={c.key} className="card p-4 border-t-2" style={{ borderTopColor: c.accent }}>
-                <div className="text-[11px] font-semibold uppercase tracking-wider mb-3" style={{ color: c.accent }}>{c.label}</div>
+                <div className="text-xs font-semibold uppercase tracking-wider mb-3" style={{ color: c.accent }}>{c.label}</div>
                 <div className="grid grid-cols-2 gap-2.5">
                   <Metric icon={<Users size={12} />} label="Leads received" value={c.data.leadsReceived} />
                   <Metric icon={<Target size={12} />} label="Trials scheduled" value={c.data.trialsScheduled} />
@@ -286,11 +286,11 @@ export default function ReportOverview({ title, desc }) {
           {data.trend.length > 0 && (
             <div className="card p-4">
               <div className="flex flex-wrap items-center justify-between gap-3 mb-2">
-                <h3 className="font-display font-semibold text-white text-[14px]">Trend</h3>
+                <h3 className="font-display font-semibold text-white text-md">Trend</h3>
                 <div className="flex items-center gap-1.5">
                   {SERIES.map(s => (
                     <button key={s.key} type="button"
-                      className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold border transition-colors ${visibleSeries.has(s.key) ? 'text-white' : 'text-slate-500 border-white/10 bg-white/[0.02]'}`}
+                      className={`px-2.5 py-1 rounded-lg text-xs font-semibold border transition-colors ${visibleSeries.has(s.key) ? 'text-white' : 'text-slate-500 border-white/10 bg-white/[0.02]'}`}
                       style={visibleSeries.has(s.key) ? { background: `${s.color}22`, borderColor: `${s.color}55` } : undefined}
                       onClick={() => toggleSeries(s.key)}>
                       {s.label}
@@ -323,14 +323,14 @@ export default function ReportOverview({ title, desc }) {
           <div className="card p-4">
             <div className="flex items-center gap-2 mb-3">
               <Filter size={14} className="text-cyan-400" />
-              <h3 className="font-display font-semibold text-white text-[14px]">Pipeline funnel</h3>
-              <span className="ml-auto text-[11px] text-slate-500">leads created in this period, by current outcome</span>
+              <h3 className="font-display font-semibold text-white text-md">Pipeline funnel</h3>
+              <span className="ml-auto text-xs text-slate-500">leads created in this period, by current outcome</span>
             </div>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
               {['new', 'trial', 'won', 'lost'].map(k => (
                 <div key={k} className="rounded-xl bg-white/[0.03] border border-white/8 px-3 py-2.5">
-                  <div className="text-[9.5px] uppercase tracking-wider text-slate-500">{k}</div>
-                  <div className="font-display text-[18px] font-bold mono" style={{ color: FUNNEL_COLORS[k] }}>{data.funnel[k]}</div>
+                  <div className="text-2xs uppercase tracking-wider text-slate-500">{k}</div>
+                  <div className="font-display text-lg font-bold mono" style={{ color: FUNNEL_COLORS[k] }}>{data.funnel[k]}</div>
                 </div>
               ))}
             </div>
@@ -339,7 +339,7 @@ export default function ReportOverview({ title, desc }) {
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             {/* channel performance */}
             <div className="card overflow-hidden">
-              <div className="px-4 py-2.5 border-b border-white/8 flex items-center gap-2 text-[12.5px] font-semibold text-slate-200">
+              <div className="px-4 py-2.5 border-b border-white/8 flex items-center gap-2 text-sm font-semibold text-slate-200">
                 <Radio size={13} className="text-cyan-400" /> Channel performance
               </div>
               {data.channelPerformance.length ? (
@@ -356,12 +356,12 @@ export default function ReportOverview({ title, desc }) {
                     </BarChart>
                   </ResponsiveContainer>
                 </div>
-              ) : <p className="text-[11.5px] text-slate-500 p-4">No channel activity in this period.</p>}
+              ) : <p className="text-xs text-slate-500 p-4">No channel activity in this period.</p>}
             </div>
 
             {/* revenue mix */}
             <div className="card overflow-hidden">
-              <div className="px-4 py-2.5 border-b border-white/8 flex items-center gap-2 text-[12.5px] font-semibold text-slate-200">
+              <div className="px-4 py-2.5 border-b border-white/8 flex items-center gap-2 text-sm font-semibold text-slate-200">
                 <PieChartIcon size={13} className="text-fuchsia-400" /> Revenue mix by class type
               </div>
               {data.revenueMix.length ? (
@@ -375,20 +375,20 @@ export default function ReportOverview({ title, desc }) {
                     </PieChart>
                   </ResponsiveContainer>
                 </div>
-              ) : <p className="text-[11.5px] text-slate-500 p-4">No revenue in this period.</p>}
+              ) : <p className="text-xs text-slate-500 p-4">No revenue in this period.</p>}
             </div>
           </div>
 
           {/* cohort conversion */}
           <div className="card overflow-hidden">
-            <div className="px-4 py-2.5 border-b border-white/8 flex items-center gap-2 text-[12.5px] font-semibold text-slate-200">
+            <div className="px-4 py-2.5 border-b border-white/8 flex items-center gap-2 text-sm font-semibold text-slate-200">
               <Layers size={13} className="text-violet-400" /> Cohort conversion
-              <span className="ml-auto text-[11px] font-normal text-slate-500">% of each cohort's new leads won by 1/2/4 periods later</span>
+              <span className="ml-auto text-xs font-normal text-slate-500">% of each cohort's new leads won by 1/2/4 periods later</span>
             </div>
             <div className="overflow-x-auto scrollbar-thin">
               <table className="w-full text-left">
                 <thead>
-                  <tr className="text-[10px] uppercase tracking-wider text-slate-500 border-b border-white/8">
+                  <tr className="text-xs uppercase tracking-wider text-slate-500 border-b border-white/8">
                     <th className="px-4 py-2 font-semibold">Cohort</th>
                     <th className="px-3 py-2 font-semibold text-center">Size</th>
                     <th className="px-3 py-2 font-semibold text-center">By P+1</th>
@@ -399,11 +399,11 @@ export default function ReportOverview({ title, desc }) {
                 <tbody>
                   {data.cohortConversion.map(c => (
                     <tr key={c.cohortLabel} className="border-b border-white/5 last:border-0">
-                      <td className="px-4 py-2 text-[12px] font-semibold text-white">{c.cohortLabel}</td>
-                      <td className="px-3 py-2 text-[11.5px] text-slate-400 text-center mono">{c.size}</td>
-                      <td className="px-3 py-2 text-[11.5px] text-slate-100 text-center mono">{c.convertedByP1}%</td>
-                      <td className="px-3 py-2 text-[11.5px] text-slate-100 text-center mono">{c.convertedByP2}%</td>
-                      <td className="px-3 py-2 text-[11.5px] text-slate-100 text-center mono">{c.convertedByP4}%</td>
+                      <td className="px-4 py-2 text-sm font-semibold text-white">{c.cohortLabel}</td>
+                      <td className="px-3 py-2 text-xs text-slate-400 text-center mono">{c.size}</td>
+                      <td className="px-3 py-2 text-xs text-slate-100 text-center mono">{c.convertedByP1}%</td>
+                      <td className="px-3 py-2 text-xs text-slate-100 text-center mono">{c.convertedByP2}%</td>
+                      <td className="px-3 py-2 text-xs text-slate-100 text-center mono">{c.convertedByP4}%</td>
                     </tr>
                   ))}
                 </tbody>
@@ -414,14 +414,14 @@ export default function ReportOverview({ title, desc }) {
           {/* leaderboard — only meaningful for a studio scope */}
           {scope === 'studio' && data.leaderboard.length > 0 && (
             <div className="card overflow-hidden">
-              <div className="px-4 py-2.5 border-b border-white/8 flex items-center gap-2 text-[12.5px] font-semibold text-slate-200">
+              <div className="px-4 py-2.5 border-b border-white/8 flex items-center gap-2 text-sm font-semibold text-slate-200">
                 <ListFilter size={13} className="text-fuchsia-400" /> Associate leaderboard
-                <span className="ml-auto text-[11px] font-normal text-slate-500">{data.leaderboard.length} associates</span>
+                <span className="ml-auto text-xs font-normal text-slate-500">{data.leaderboard.length} associates</span>
               </div>
               <div className="overflow-x-auto scrollbar-thin">
                 <table className="w-full text-left">
                   <thead>
-                    <tr className="text-[10px] uppercase tracking-wider text-slate-500 border-b border-white/8">
+                    <tr className="text-xs uppercase tracking-wider text-slate-500 border-b border-white/8">
                       <th className="px-4 py-2 font-semibold">Associate</th>
                       <th className="px-3 py-2 font-semibold text-center">New leads</th>
                       <th className="px-3 py-2 font-semibold text-center">Trials</th>
@@ -433,12 +433,12 @@ export default function ReportOverview({ title, desc }) {
                   <tbody>
                     {data.leaderboard.slice().sort((a, b) => b.revenue - a.revenue).map(a => (
                       <tr key={a.associateId} className="border-b border-white/5 last:border-0 hover:bg-white/[0.03] transition-colors">
-                        <td className="px-4 py-2 text-[12px] font-semibold text-white">{a.name}</td>
-                        <td className="px-3 py-2 text-[11.5px] text-slate-300 text-center mono">{a.newLeads}</td>
-                        <td className="px-3 py-2 text-[11.5px] text-slate-300 text-center mono">{a.trials}</td>
-                        <td className="px-3 py-2 text-[11.5px] text-slate-300 text-center mono">{a.won}</td>
-                        <td className="px-3 py-2 text-[11.5px] text-emerald-400 text-center mono">{money(a.revenue)}</td>
-                        <td className="px-3 py-2 text-[11.5px] text-amber-400 text-center mono">{a.followUpRate}%</td>
+                        <td className="px-4 py-2 text-sm font-semibold text-white">{a.name}</td>
+                        <td className="px-3 py-2 text-xs text-slate-300 text-center mono">{a.newLeads}</td>
+                        <td className="px-3 py-2 text-xs text-slate-300 text-center mono">{a.trials}</td>
+                        <td className="px-3 py-2 text-xs text-slate-300 text-center mono">{a.won}</td>
+                        <td className="px-3 py-2 text-xs text-emerald-400 text-center mono">{money(a.revenue)}</td>
+                        <td className="px-3 py-2 text-xs text-amber-400 text-center mono">{a.followUpRate}%</td>
                       </tr>
                     ))}
                   </tbody>
@@ -450,19 +450,19 @@ export default function ReportOverview({ title, desc }) {
           {drill && (
             <div className="card overflow-hidden">
               <div className="px-4 py-2.5 border-b border-white/8 flex items-center justify-between">
-                <span className="text-[12.5px] font-semibold text-slate-200">Leads — {drill.field}: {drill.value}</span>
-                <button className="btn btn-ghost !py-1 !text-[11px]" onClick={() => setDrill(null)}><ChevronDown size={12} /> Close</button>
+                <span className="text-sm font-semibold text-slate-200">Leads — {drill.field}: {drill.value}</span>
+                <button className="btn btn-ghost !py-1 !text-xs" onClick={() => setDrill(null)}><ChevronDown size={12} /> Close</button>
               </div>
               <div className="max-h-[280px] overflow-y-auto scrollbar-thin">
                 {drillLoading && <div className="py-6 text-center text-slate-500"><Spinner size={16} /></div>}
                 {!drillLoading && drillData?.leads?.map(l => (
-                  <button key={l.id} className="w-full text-left flex items-center gap-3 px-4 py-2 text-[12px] border-b border-white/5 last:border-0 hover:bg-white/[0.04] transition-colors" onClick={() => openLead(l.id)}>
+                  <button key={l.id} className="w-full text-left flex items-center gap-3 px-4 py-2 text-sm border-b border-white/5 last:border-0 hover:bg-white/[0.04] transition-colors" onClick={() => openLead(l.id)}>
                     <span className="flex-1 truncate text-slate-200">{l.fullName}</span>
-                    <span className="chip !px-1.5 !py-0.5 text-[9px] bg-white/5 border border-white/10 text-slate-400 shrink-0">{l.stage}</span>
+                    <span className="chip !px-1.5 !py-0.5 text-2xs bg-white/5 border border-white/10 text-slate-400 shrink-0">{l.stage}</span>
                     <span className="text-slate-500 shrink-0 w-16 text-right">{fmtDate(l.createdAt)}</span>
                   </button>
                 ))}
-                {!drillLoading && !drillData?.leads?.length && <p className="text-[11.5px] text-slate-500 px-4 py-3">No leads found.</p>}
+                {!drillLoading && !drillData?.leads?.length && <p className="text-xs text-slate-500 px-4 py-3">No leads found.</p>}
               </div>
             </div>
           )}
@@ -475,8 +475,8 @@ export default function ReportOverview({ title, desc }) {
 function Metric({ icon, label, value }) {
   return (
     <div className="rounded-xl bg-white/[0.03] border border-white/8 px-2.5 py-2">
-      <div className="flex items-center gap-1 text-[9.5px] uppercase tracking-wider text-slate-500">{icon}{label}</div>
-      <div className="font-display text-[15px] font-bold text-white mono mt-0.5">{value}</div>
+      <div className="flex items-center gap-1 text-2xs uppercase tracking-wider text-slate-500">{icon}{label}</div>
+      <div className="font-display text-md font-bold text-white mono mt-0.5">{value}</div>
     </div>
   )
 }
@@ -484,11 +484,11 @@ function Metric({ icon, label, value }) {
 function BreakdownTable({ title, rows, totals, field, onDrill }) {
   return (
     <div className="card overflow-hidden">
-      <div className="px-4 py-2.5 border-b border-white/8 text-[12.5px] font-semibold text-slate-200">{title}</div>
+      <div className="px-4 py-2.5 border-b border-white/8 text-sm font-semibold text-slate-200">{title}</div>
       <div className="overflow-x-auto scrollbar-thin">
         <table className="w-full text-left">
           <thead>
-            <tr className="text-[10px] uppercase tracking-wider text-slate-500 border-b border-white/8">
+            <tr className="text-xs uppercase tracking-wider text-slate-500 border-b border-white/8">
               <th className="px-4 py-2 font-semibold">{field === 'stage' ? 'Stage' : 'Source'}</th>
               <th className="px-2 py-2 font-semibold text-center">Received</th>
               <th className="px-2 py-2 font-semibold text-center">Scheduled</th>
@@ -500,25 +500,25 @@ function BreakdownTable({ title, rows, totals, field, onDrill }) {
           <tbody>
             {rows?.map(r => (
               <tr key={r.key} className="border-b border-white/5 last:border-0 hover:bg-white/[0.03] transition-colors cursor-pointer" onClick={() => onDrill(field, r.key)}>
-                <td className="px-4 py-2 text-[12px] font-semibold text-white truncate max-w-[180px]" title={r.key}>{r.key}</td>
-                <td className="px-2 py-2 text-[11.5px] text-slate-300 text-center mono">{r.leadsReceived}</td>
-                <td className="px-2 py-2 text-[11.5px] text-cyan-400 text-center mono">{r.trialsScheduled}</td>
-                <td className="px-2 py-2 text-[11.5px] text-cyan-300 text-center mono">{r.trialsCompleted}</td>
-                <td className="px-2 py-2 text-[11.5px] text-emerald-400 text-center mono">{r.converted}</td>
-                <td className="px-2 py-2 text-[11.5px] text-slate-300 text-center mono">{r.conversionRate}%</td>
+                <td className="px-4 py-2 text-sm font-semibold text-white truncate max-w-[180px]" title={r.key}>{r.key}</td>
+                <td className="px-2 py-2 text-xs text-slate-300 text-center mono">{r.leadsReceived}</td>
+                <td className="px-2 py-2 text-xs text-cyan-400 text-center mono">{r.trialsScheduled}</td>
+                <td className="px-2 py-2 text-xs text-cyan-300 text-center mono">{r.trialsCompleted}</td>
+                <td className="px-2 py-2 text-xs text-emerald-400 text-center mono">{r.converted}</td>
+                <td className="px-2 py-2 text-xs text-slate-300 text-center mono">{r.conversionRate}%</td>
               </tr>
             ))}
-            {!rows?.length && <tr><td colSpan={6} className="px-4 py-4 text-[11.5px] text-slate-500 text-center">No data.</td></tr>}
+            {!rows?.length && <tr><td colSpan={6} className="px-4 py-4 text-xs text-slate-500 text-center">No data.</td></tr>}
           </tbody>
           {!!rows?.length && (
             <tfoot>
               <tr className="border-t border-white/10 bg-white/[0.02] font-semibold">
-                <td className="px-4 py-2 text-[12px] text-white">Total</td>
-                <td className="px-2 py-2 text-[11.5px] text-white text-center mono">{totals.leadsReceived}</td>
-                <td className="px-2 py-2 text-[11.5px] text-cyan-400 text-center mono">{totals.trialsScheduled}</td>
-                <td className="px-2 py-2 text-[11.5px] text-cyan-300 text-center mono">{totals.trialsCompleted}</td>
-                <td className="px-2 py-2 text-[11.5px] text-emerald-400 text-center mono">{totals.converted}</td>
-                <td className="px-2 py-2 text-[11.5px] text-white text-center mono">{totals.conversionRate}%</td>
+                <td className="px-4 py-2 text-sm text-white">Total</td>
+                <td className="px-2 py-2 text-xs text-white text-center mono">{totals.leadsReceived}</td>
+                <td className="px-2 py-2 text-xs text-cyan-400 text-center mono">{totals.trialsScheduled}</td>
+                <td className="px-2 py-2 text-xs text-cyan-300 text-center mono">{totals.trialsCompleted}</td>
+                <td className="px-2 py-2 text-xs text-emerald-400 text-center mono">{totals.converted}</td>
+                <td className="px-2 py-2 text-xs text-white text-center mono">{totals.conversionRate}%</td>
               </tr>
             </tfoot>
           )}

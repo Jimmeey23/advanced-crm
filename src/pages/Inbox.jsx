@@ -98,18 +98,18 @@ function ConversationRow({ row, active, onClick }) {
       <Avatar name={row.lead.fullName} size={34} />
       <div className="min-w-0 flex-1">
         <div className="flex items-center justify-between gap-2">
-          <span className="text-[12.5px] font-semibold text-white truncate">{row.lead.fullName}</span>
-          <span className="text-[10px] text-slate-500 shrink-0">{timeAgo(row.lastMessageAt)}</span>
+          <span className="text-sm font-semibold text-white truncate">{row.lead.fullName}</span>
+          <span className="text-xs text-slate-500 shrink-0">{timeAgo(row.lastMessageAt)}</span>
         </div>
         <div className="flex items-center gap-1.5 mt-0.5">
           <Icon size={11} style={{ color: meta.color }} className="shrink-0" />
-          <span className={`text-[11.5px] truncate ${row.unreadCount ? 'text-slate-200 font-medium' : 'text-slate-500'}`}>
+          <span className={`text-xs truncate ${row.unreadCount ? 'text-slate-200 font-medium' : 'text-slate-500'}`}>
             {row.lastMessage?.direction === 'outbound' ? 'You: ' : ''}{preview}
           </span>
         </div>
       </div>
       {row.unreadCount > 0 && (
-        <span className="chip notification-count !px-1.5 !py-0.5 text-[10px] shrink-0">{row.unreadCount}</span>
+        <span className="chip notification-count !px-1.5 !py-0.5 text-xs shrink-0">{row.unreadCount}</span>
       )}
     </button>
   )
@@ -120,22 +120,22 @@ function MessageBubble({ msg }) {
   const TypeIcon = MESSAGE_TYPE_ICON[String(msg.type || '').toLowerCase()]
   return (
     <div className={`flex ${outbound ? 'justify-end' : 'justify-start'}`}>
-      <div className={`max-w-[75%] rounded-2xl px-3.5 py-2 text-[13px] ${
+      <div className={`max-w-[75%] rounded-2xl px-3.5 py-2 text-base ${
         outbound ? 'bg-blue-500/15 border border-blue-500/25 text-slate-100' : 'bg-white/5 border border-white/10 text-slate-200'
       }`}>
         {msg.templateName && (
-          <div className="text-[10.5px] uppercase tracking-wider text-emerald-400 font-semibold mb-1 flex items-center gap-1">
+          <div className="text-xs uppercase tracking-wider text-emerald-400 font-semibold mb-1 flex items-center gap-1">
             <Sparkles size={10} /> Template: {msg.templateName}
           </div>
         )}
         {TypeIcon && (
-          <div className="text-[10.5px] uppercase tracking-wider text-slate-400 font-semibold mb-1 flex items-center gap-1">
+          <div className="text-xs uppercase tracking-wider text-slate-400 font-semibold mb-1 flex items-center gap-1">
             <TypeIcon size={10} /> {msg.type}
           </div>
         )}
         <div className="whitespace-pre-wrap">{msg.content || (msg.templateName || TypeIcon ? '' : '(no content)')}</div>
         <div className="flex items-center justify-end gap-1 mt-1" title={fullTimestamp(msg.sentAt)}>
-          <span className="text-[10px] text-slate-500 flex items-center gap-1"><Clock size={9} /> {timeAgo(msg.sentAt)}</span>
+          <span className="text-xs text-slate-500 flex items-center gap-1"><Clock size={9} /> {timeAgo(msg.sentAt)}</span>
           {outbound && <DeliveryTicks status={msg.status} />}
         </div>
       </div>
@@ -146,7 +146,7 @@ function MessageBubble({ msg }) {
 function DateSeparator({ sentAt }) {
   return (
     <div className="flex items-center justify-center py-1">
-      <span className="text-[10.5px] text-slate-500 bg-white/5 border border-white/10 rounded-full px-2.5 py-0.5">{dateLabel(sentAt)}</span>
+      <span className="text-xs text-slate-500 bg-white/5 border border-white/10 rounded-full px-2.5 py-0.5">{dateLabel(sentAt)}</span>
     </div>
   )
 }
@@ -188,25 +188,25 @@ function NewConversationModal({ open, onClose, onCreated }) {
     <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/50" onClick={onClose}>
       <div className="card w-[420px] p-4 space-y-3" onClick={e => e.stopPropagation()} style={{ background: 'var(--tt-bg)' }}>
         <div className="flex items-center justify-between">
-          <h3 className="font-display font-semibold text-white text-[14px]">New conversation</h3>
+          <h3 className="font-display font-semibold text-white text-md">New conversation</h3>
           <button className="btn btn-ghost !p-1.5" onClick={onClose}><X size={14} /></button>
         </div>
         <div className="flex rounded-lg overflow-hidden border border-white/10">
-          <button className={`flex-1 py-1.5 text-[12px] font-semibold transition-colors ${mode === 'search' ? 'bg-white/15 text-white' : 'text-slate-400 hover:text-slate-200'}`} onClick={() => setMode('search')}>Search contacts</button>
-          <button className={`flex-1 py-1.5 text-[12px] font-semibold border-l border-white/10 transition-colors ${mode === 'new' ? 'bg-white/15 text-white' : 'text-slate-400 hover:text-slate-200'}`} onClick={() => setMode('new')}>New contact</button>
+          <button className={`flex-1 py-1.5 text-sm font-semibold transition-colors ${mode === 'search' ? 'bg-white/15 text-white' : 'text-slate-400 hover:text-slate-200'}`} onClick={() => setMode('search')}>Search contacts</button>
+          <button className={`flex-1 py-1.5 text-sm font-semibold border-l border-white/10 transition-colors ${mode === 'new' ? 'bg-white/15 text-white' : 'text-slate-400 hover:text-slate-200'}`} onClick={() => setMode('new')}>New contact</button>
         </div>
         {mode === 'search' ? (
           <div className="space-y-2">
-            <input className="input !py-1.5 !text-[12px]" placeholder="Search name, phone, or email…" value={q} onChange={e => setQ(e.target.value)} autoFocus />
+            <input className="input !py-1.5 !text-sm" placeholder="Search name, phone, or email…" value={q} onChange={e => setQ(e.target.value)} autoFocus />
             <div className="max-h-[220px] overflow-y-auto scrollbar-thin space-y-1">
               {searching && <div className="flex justify-center py-4"><Spinner size={14} /></div>}
-              {!searching && q.trim() && !results.length && <p className="text-[11.5px] text-slate-500 text-center py-3">No matches.</p>}
+              {!searching && q.trim() && !results.length && <p className="text-xs text-slate-500 text-center py-3">No matches.</p>}
               {results.map(c => (
                 <button key={c.id} className="w-full text-left px-2.5 py-2 rounded-lg hover:bg-white/10 flex items-center gap-2" onClick={() => createFrom({ fullName: c.name, email: c.email, phone: c.phone })} disabled={submitting}>
                   <Avatar name={c.name} size={26} />
                   <div className="min-w-0 flex-1">
-                    <div className="text-[12.5px] font-medium text-white truncate">{c.name}</div>
-                    <div className="text-[11px] text-slate-500 truncate">{c.phone || c.email}</div>
+                    <div className="text-sm font-medium text-white truncate">{c.name}</div>
+                    <div className="text-xs text-slate-500 truncate">{c.phone || c.email}</div>
                   </div>
                 </button>
               ))}
@@ -214,15 +214,15 @@ function NewConversationModal({ open, onClose, onCreated }) {
           </div>
         ) : (
           <div className="space-y-2">
-            <input className="input !py-1.5 !text-[12px]" placeholder="Full name" value={fullName} onChange={e => setFullName(e.target.value)} />
-            <input className="input !py-1.5 !text-[12px]" placeholder="Phone (with country code)" value={phone} onChange={e => setPhone(e.target.value)} />
-            <input className="input !py-1.5 !text-[12px]" placeholder="Email" value={email} onChange={e => setEmail(e.target.value)} />
-            <button className="btn btn-primary w-full !py-1.5 !text-[12px]" onClick={() => createFrom({ fullName, email, phone })} disabled={submitting || (!email.trim() && !phone.trim())}>
+            <input className="input !py-1.5 !text-sm" placeholder="Full name" value={fullName} onChange={e => setFullName(e.target.value)} />
+            <input className="input !py-1.5 !text-sm" placeholder="Phone (with country code)" value={phone} onChange={e => setPhone(e.target.value)} />
+            <input className="input !py-1.5 !text-sm" placeholder="Email" value={email} onChange={e => setEmail(e.target.value)} />
+            <button className="btn btn-primary w-full !py-1.5 !text-sm" onClick={() => createFrom({ fullName, email, phone })} disabled={submitting || (!email.trim() && !phone.trim())}>
               {submitting ? <Spinner size={12} /> : <UserPlus size={12} />} Create & open
             </button>
           </div>
         )}
-        {error && <p className="text-[11.5px] text-rose-400">{error}</p>}
+        {error && <p className="text-xs text-rose-400">{error}</p>}
       </div>
     </div>
   )
@@ -489,7 +489,7 @@ export default function Inbox() {
               <button
                 key={t.id}
                 onClick={() => setStatus(t.id)}
-                className={`flex-1 py-1.5 rounded-lg text-[11.5px] font-semibold transition-colors ${
+                className={`flex-1 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
                   status === t.id ? 'bg-white/15 text-white' : 'text-slate-400 hover:text-slate-200'
                 }`}
               >
@@ -500,24 +500,24 @@ export default function Inbox() {
 
           <div className="relative">
             <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-500" />
-            <input className="input !pl-8 !py-1.5 !text-[12px]" placeholder="Search conversations…" value={q} onChange={e => setQ(e.target.value)} />
+            <input className="input !pl-8 !py-1.5 !text-sm" placeholder="Search conversations…" value={q} onChange={e => setQ(e.target.value)} />
           </div>
 
           <div className="flex items-center gap-1.5">
             <button
-              className={`btn btn-ghost !py-1.5 !px-2 !text-[11px] flex-1 ${showFilters ? '!bg-white/15' : ''}`}
+              className={`btn btn-ghost !py-1.5 !px-2 !text-xs flex-1 ${showFilters ? '!bg-white/15' : ''}`}
               onClick={() => setShowFilters(v => !v)}
             >
               <ListFilter size={11} /> Filters
             </button>
             <button
-              className={`btn btn-ghost !py-1.5 !px-2 !text-[11px] ${unreadOnly ? '!bg-white/15' : ''}`}
+              className={`btn btn-ghost !py-1.5 !px-2 !text-xs ${unreadOnly ? '!bg-white/15' : ''}`}
               onClick={() => setUnreadOnly(v => !v)}
             >
               Unread
             </button>
             <button
-              className="btn btn-ghost !py-1.5 !px-2 !text-[11px]"
+              className="btn btn-ghost !py-1.5 !px-2 !text-xs"
               onClick={markAllRead}
               disabled={markingAllRead || !displayedRows.some(r => r.unreadCount > 0)}
               title="Mark all visible conversations as read"
@@ -525,7 +525,7 @@ export default function Inbox() {
               {markingAllRead ? <Spinner size={11} /> : <CheckCheck size={11} />}
             </button>
             <button
-              className="btn btn-ghost !py-1.5 !px-2 !text-[11px]"
+              className="btn btn-ghost !py-1.5 !px-2 !text-xs"
               onClick={syncFromRespondio}
               disabled={syncing}
               title="Pull every existing conversation from Respond.io"
@@ -533,7 +533,7 @@ export default function Inbox() {
               {syncing ? <Spinner size={11} /> : <Sparkles size={11} />}
             </button>
             <button
-              className="btn btn-ghost !py-1.5 !px-2 !text-[11px]"
+              className="btn btn-ghost !py-1.5 !px-2 !text-xs"
               onClick={() => setNewConvOpen(true)}
               title="Message any respond.io contact, or create a new one"
             >
@@ -545,23 +545,23 @@ export default function Inbox() {
             <div className="space-y-1.5">
               <div className="flex items-center gap-1.5">
                 <ArrowUpDown size={11} className="text-slate-500 shrink-0" />
-                <select className="input select-strong !py-1.5 !text-[12px] flex-1" value={sort} onChange={e => setSort(e.target.value)}>
+                <select className="input select-strong !py-1.5 !text-sm flex-1" value={sort} onChange={e => setSort(e.target.value)}>
                   {SORT_OPTIONS.map(o => <option key={o.id} value={o.id}>{o.label}</option>)}
                 </select>
               </div>
-              <select className="input select-strong !py-1.5 !text-[12px]" value={studio} onChange={e => setStudio(e.target.value)} disabled={role === 'agent'}>
+              <select className="input select-strong !py-1.5 !text-sm" value={studio} onChange={e => setStudio(e.target.value)} disabled={role === 'agent'}>
                 <option value="">All studios</option>
                 {(boot?.locations || []).map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
               </select>
-              <select className="input select-strong !py-1.5 !text-[12px]" value={associate} onChange={e => setAssociate(e.target.value)} disabled={role === 'agent'}>
+              <select className="input select-strong !py-1.5 !text-sm" value={associate} onChange={e => setAssociate(e.target.value)} disabled={role === 'agent'}>
                 <option value="">All owners</option>
                 {(boot?.associates || []).map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
               </select>
-              <select className="input select-strong !py-1.5 !text-[12px]" value={channel} onChange={e => setChannel(e.target.value)}>
+              <select className="input select-strong !py-1.5 !text-sm" value={channel} onChange={e => setChannel(e.target.value)}>
                 <option value="">All channels</option>
                 {Object.entries(CHANNEL_META).map(([k, m]) => <option key={k} value={k}>{m.label}</option>)}
               </select>
-              <label className="flex items-center gap-2 text-[11.5px] text-slate-400 select-none px-0.5">
+              <label className="flex items-center gap-2 text-xs text-slate-400 select-none px-0.5">
                 <input type="checkbox" className="accent-rose-500" checked={unmatchedOnly} onChange={e => setUnmatchedOnly(e.target.checked)} />
                 No matching CRM lead only
               </label>
@@ -592,15 +592,15 @@ export default function Inbox() {
             <div className="flex items-center gap-3 px-4 py-3 border-b border-white/8">
               <Avatar name={selected.lead.fullName} size={34} />
               <div className="min-w-0 flex-1">
-                <div className="text-[13px] font-semibold text-white truncate">{selected.lead.fullName}</div>
-                <div className="text-[11px] text-slate-500 truncate">{selected.lead.phone || selected.lead.email}</div>
+                <div className="text-base font-semibold text-white truncate">{selected.lead.fullName}</div>
+                <div className="text-xs text-slate-500 truncate">{selected.lead.phone || selected.lead.email}</div>
               </div>
               {selected.assigneeId && (
-                <span className="chip bg-white/5 border border-white/10 text-slate-300 !text-[10.5px]">
+                <span className="chip bg-white/5 border border-white/10 text-slate-300 !text-xs">
                   {(boot?.associates || []).find(a => a.id === selected.assigneeId)?.name || 'Assigned'}
                 </span>
               )}
-              <span className={`chip !text-[10.5px] ${selected.status === 'closed' ? 'bg-slate-500/10 text-slate-400 border border-slate-400/20' : 'bg-emerald-500/10 text-emerald-400 border border-emerald-400/20'}`}>
+              <span className={`chip !text-xs ${selected.status === 'closed' ? 'bg-slate-500/10 text-slate-400 border border-slate-400/20' : 'bg-emerald-500/10 text-emerald-400 border border-emerald-400/20'}`}>
                 {selected.status === 'closed' ? 'Closed' : 'Open'}
               </span>
             </div>
@@ -621,7 +621,7 @@ export default function Inbox() {
             </div>
 
             {windowExpired && (
-              <div className="mx-3 mt-3 flex items-start gap-2 rounded-lg bg-amber-500/10 border border-amber-400/25 px-3 py-2 text-[11.5px] text-amber-300">
+              <div className="mx-3 mt-3 flex items-start gap-2 rounded-lg bg-amber-500/10 border border-amber-400/25 px-3 py-2 text-xs text-amber-300">
                 <Clock size={13} className="shrink-0 mt-0.5" />
                 <span>This conversation is outside the 24-hour customer care window{lastInboundAt ? ` (last reply ${timeAgo(lastInboundAt)} ago)` : ''}. You can only send an approved WhatsApp template until the contact messages again.</span>
               </div>
@@ -636,7 +636,7 @@ export default function Inbox() {
                     <button
                       key={k}
                       onClick={() => setChannelToSend(k)}
-                      className={`flex items-center gap-1 rounded-lg border px-2 py-1 text-[11px] font-semibold ${
+                      className={`flex items-center gap-1 rounded-lg border px-2 py-1 text-xs font-semibold ${
                         active ? 'border-blue-500/30 bg-blue-500/10 text-white' : 'border-white/10 text-slate-400 hover:text-slate-200'
                       }`}
                     >
@@ -649,13 +649,13 @@ export default function Inbox() {
                     <button
                       onClick={() => setSendMode('text')}
                       disabled={mustUseTemplate}
-                      className={`px-2 py-1 rounded-md text-[10.5px] font-semibold transition-colors ${!templateMode ? 'bg-white/15 text-white' : 'text-slate-400 hover:text-slate-200'} disabled:opacity-40 disabled:cursor-not-allowed`}
+                      className={`px-2 py-1 rounded-md text-xs font-semibold transition-colors ${!templateMode ? 'bg-white/15 text-white' : 'text-slate-400 hover:text-slate-200'} disabled:opacity-40 disabled:cursor-not-allowed`}
                     >
                       Message
                     </button>
                     <button
                       onClick={() => setSendMode('template')}
-                      className={`px-2 py-1 rounded-md text-[10.5px] font-semibold transition-colors flex items-center gap-1 ${templateMode ? 'bg-white/15 text-white' : 'text-slate-400 hover:text-slate-200'}`}
+                      className={`px-2 py-1 rounded-md text-xs font-semibold transition-colors flex items-center gap-1 ${templateMode ? 'bg-white/15 text-white' : 'text-slate-400 hover:text-slate-200'}`}
                     >
                       <Sparkles size={10} /> Template
                     </button>
@@ -666,15 +666,15 @@ export default function Inbox() {
               {templateMode ? (
                 <div className="space-y-1.5">
                   {mustUseTemplate && (
-                    <div className="flex items-center gap-1.5 text-[10.5px] text-slate-500"><Sparkles size={11} /> Free-form text isn't available right now — send an approved template</div>
+                    <div className="flex items-center gap-1.5 text-xs text-slate-500"><Sparkles size={11} /> Free-form text isn't available right now — send an approved template</div>
                   )}
-                  <select className="input select-strong !py-1.5 !text-[12px]" value={templateId} onChange={e => setTemplateId(e.target.value)}>
+                  <select className="input select-strong !py-1.5 !text-sm" value={templateId} onChange={e => setTemplateId(e.target.value)}>
                     {templates.map(t => <option key={t.id} value={t.id}>{t.label || t.name}</option>)}
                   </select>
                   {(selectedTemplate?.parameters || []).map((label, idx) => (
                     <input
                       key={idx}
-                      className="input !py-1.5 !text-[12px]"
+                      className="input !py-1.5 !text-sm"
                       placeholder={label || `Value ${idx + 1}`}
                       value={templateValues[idx] || ''}
                       onChange={e => setTemplateValue(idx, e.target.value)}
@@ -684,7 +684,7 @@ export default function Inbox() {
               ) : (
                 <div className="relative">
                   <textarea
-                    className="input resize-none !text-[13px]"
+                    className="input resize-none !text-base"
                     rows={2}
                     placeholder={`Type a ${CHANNEL_META[channelToSend].label} message…`}
                     value={text}
@@ -693,11 +693,11 @@ export default function Inbox() {
                 </div>
               )}
 
-              {error && <p className="text-[11.5px] text-rose-400">{error}</p>}
+              {error && <p className="text-xs text-rose-400">{error}</p>}
 
               <div className="flex items-center justify-between">
                 <div className="relative">
-                  <button className="btn btn-ghost !py-1.5 !px-2.5 !text-[11.5px]" onClick={() => setShowSnippets(v => !v)}>
+                  <button className="btn btn-ghost !py-1.5 !px-2.5 !text-xs" onClick={() => setShowSnippets(v => !v)}>
                     <BookmarkPlus size={12} /> Snippets
                   </button>
                   {showSnippets && (
@@ -705,28 +705,28 @@ export default function Inbox() {
                       <div className="fixed inset-0 z-10" onClick={() => setShowSnippets(false)} />
                       <div className="absolute bottom-full left-0 mb-2 w-[280px] card !rounded-xl p-2 z-20 shadow-2xl space-y-1 max-h-[240px] overflow-y-auto scrollbar-thin">
                         <div className="flex items-center justify-between px-1 pb-1">
-                          <span className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold">Snippets</span>
-                          <button className="btn btn-ghost !py-1 !px-1.5 !text-[10px]" onClick={syncSnippets} disabled={syncingSnippets} title="Pull Saved Replies from Respond.io">
+                          <span className="text-xs uppercase tracking-wider text-slate-500 font-semibold">Snippets</span>
+                          <button className="btn btn-ghost !py-1 !px-1.5 !text-xs" onClick={syncSnippets} disabled={syncingSnippets} title="Pull Saved Replies from Respond.io">
                             {syncingSnippets ? <Spinner size={10} /> : <RefreshCcw size={10} />} Sync
                           </button>
                         </div>
                         {snippets.map(s => (
                           <button
                             key={s.id}
-                            className="w-full text-left px-2 py-1.5 rounded-lg hover:bg-white/10 text-[11.5px] text-slate-200"
+                            className="w-full text-left px-2 py-1.5 rounded-lg hover:bg-white/10 text-xs text-slate-200"
                             onClick={() => { setText(prev => (prev ? prev + ' ' : '') + s.text); if (!mustUseTemplate) setSendMode('text'); setShowSnippets(false) }}
                           >
-                            <div className="font-semibold text-[10.5px] text-slate-400 uppercase tracking-wide">{s.label}</div>
+                            <div className="font-semibold text-xs text-slate-400 uppercase tracking-wide">{s.label}</div>
                             {s.text}
                           </button>
                         ))}
-                        {!snippets.length && <p className="text-[11px] text-slate-500 px-2 py-1">No snippets — add one below.</p>}
+                        {!snippets.length && <p className="text-xs text-slate-500 px-2 py-1">No snippets — add one below.</p>}
                         <SnippetManagerInline onAdded={loadSnippets} />
                       </div>
                     </>
                   )}
                 </div>
-                <button className="btn btn-primary !py-1.5 !px-3 !text-[12px]" onClick={send} disabled={sending}>
+                <button className="btn btn-primary !py-1.5 !px-3 !text-sm" onClick={send} disabled={sending}>
                   {sending ? <Spinner size={13} /> : <Send size={13} />} Send
                 </button>
               </div>
@@ -741,52 +741,52 @@ export default function Inbox() {
           <div className="flex flex-col items-center text-center gap-2">
             <Avatar name={selected.lead.fullName} size={56} />
             <div>
-              <div className="text-[13.5px] font-semibold text-white">{selected.lead.fullName}</div>
-              <span className={`chip !mt-1 !text-[10px] ${selected.status === 'closed' ? 'bg-slate-500/10 text-slate-400 border border-slate-400/20' : 'bg-emerald-500/10 text-emerald-400 border border-emerald-400/20'}`}>
+              <div className="text-base font-semibold text-white">{selected.lead.fullName}</div>
+              <span className={`chip !mt-1 !text-xs ${selected.status === 'closed' ? 'bg-slate-500/10 text-slate-400 border border-slate-400/20' : 'bg-emerald-500/10 text-emerald-400 border border-emerald-400/20'}`}>
                 {selected.status === 'closed' ? 'Closed' : 'Open'}
               </span>
             </div>
           </div>
 
           {selected.unmatched && (
-            <div className="rounded-xl bg-amber-500/10 border border-amber-400/20 px-2.5 py-2 text-[11px] text-amber-300 flex items-start gap-1.5">
+            <div className="rounded-xl bg-amber-500/10 border border-amber-400/20 px-2.5 py-2 text-xs text-amber-300 flex items-start gap-1.5">
               <Info size={12} className="shrink-0 mt-0.5" /> No matching CRM lead — this is a respond.io contact only.
             </div>
           )}
 
           <div className="space-y-2.5">
-            <div className="flex items-center gap-2 text-[12px] text-slate-300">
+            <div className="flex items-center gap-2 text-sm text-slate-300">
               <Phone size={13} className="text-slate-500 shrink-0" />
               <span className="truncate">{selected.lead.phone || '—'}</span>
             </div>
-            <div className="flex items-center gap-2 text-[12px] text-slate-300">
+            <div className="flex items-center gap-2 text-sm text-slate-300">
               <Mail size={13} className="text-slate-500 shrink-0" />
               <span className="truncate">{selected.lead.email || '—'}</span>
             </div>
             {!selected.unmatched && (
-              <div className="flex items-center gap-2 text-[12px] text-slate-300">
+              <div className="flex items-center gap-2 text-sm text-slate-300">
                 <Building2 size={13} className="text-slate-500 shrink-0" />
                 <span className="truncate">{(boot?.locations || []).find(l => l.id === selected.lead.locationId)?.name || 'No studio'}</span>
               </div>
             )}
-            <div className="flex items-center gap-2 text-[12px] text-slate-300">
+            <div className="flex items-center gap-2 text-sm text-slate-300">
               <Tag size={13} className="text-slate-500 shrink-0" />
               <span className="truncate">{CHANNEL_META[selected.lastMessage?.channel]?.label || 'WhatsApp'}</span>
             </div>
             {profile?.countryCode && (
-              <div className="flex items-center gap-2 text-[12px] text-slate-300">
+              <div className="flex items-center gap-2 text-sm text-slate-300">
                 <Globe2 size={13} className="text-slate-500 shrink-0" />
                 <span className="truncate">{profile.countryCode}</span>
               </div>
             )}
             {profile?.language && (
-              <div className="flex items-center gap-2 text-[12px] text-slate-300">
+              <div className="flex items-center gap-2 text-sm text-slate-300">
                 <Languages size={13} className="text-slate-500 shrink-0" />
                 <span className="truncate">{profile.language}</span>
               </div>
             )}
             {profile?.assignee && (profile.assignee.firstName || profile.assignee.email) && (
-              <div className="flex items-center gap-2 text-[12px] text-slate-300">
+              <div className="flex items-center gap-2 text-sm text-slate-300">
                 <UserRound size={13} className="text-slate-500 shrink-0" />
                 <span className="truncate">Respond.io owner: {[profile.assignee.firstName, profile.assignee.lastName].filter(Boolean).join(' ') || profile.assignee.email}</span>
               </div>
@@ -795,10 +795,10 @@ export default function Inbox() {
 
           {Array.isArray(profile?.tags) && profile.tags.length > 0 && (
             <div className="border-t border-white/8 pt-3 space-y-1.5">
-              <label className="text-[10.5px] uppercase tracking-wider text-slate-500 font-semibold block">Tags</label>
+              <label className="text-xs uppercase tracking-wider text-slate-500 font-semibold block">Tags</label>
               <div className="flex flex-wrap gap-1">
                 {profile.tags.map((t, i) => (
-                  <span key={i} className="chip bg-white/5 border border-white/10 text-slate-300 !text-[10px]">{typeof t === 'string' ? t : (t.name || t.label)}</span>
+                  <span key={i} className="chip bg-white/5 border border-white/10 text-slate-300 !text-xs">{typeof t === 'string' ? t : (t.name || t.label)}</span>
                 ))}
               </div>
             </div>
@@ -806,19 +806,19 @@ export default function Inbox() {
 
           {profile?.lifecycle && (
             <div className="border-t border-white/8 pt-3">
-              <label className="text-[10.5px] uppercase tracking-wider text-slate-500 font-semibold block mb-1">Lifecycle</label>
-              <span className="chip bg-violet-500/10 border border-violet-400/20 text-violet-300 !text-[10.5px]">{profile.lifecycle}</span>
+              <label className="text-xs uppercase tracking-wider text-slate-500 font-semibold block mb-1">Lifecycle</label>
+              <span className="chip bg-violet-500/10 border border-violet-400/20 text-violet-300 !text-xs">{profile.lifecycle}</span>
             </div>
           )}
 
           {Array.isArray(profile?.custom_fields) && profile.custom_fields.filter(f => f?.value !== undefined && f?.value !== null && f?.value !== '').length > 0 && (
             <div className="border-t border-white/8 pt-3 space-y-1.5">
-              <label className="text-[10.5px] uppercase tracking-wider text-slate-500 font-semibold block">Custom fields</label>
+              <label className="text-xs uppercase tracking-wider text-slate-500 font-semibold block">Custom fields</label>
               <div className="space-y-1">
                 {profile.custom_fields
                   .filter(f => f?.value !== undefined && f?.value !== null && f?.value !== '')
                   .map((f, i) => (
-                    <div key={f.name || i} className="flex items-center justify-between gap-2 text-[11.5px]">
+                    <div key={f.name || i} className="flex items-center justify-between gap-2 text-xs">
                       <span className="text-slate-500 truncate">{f.name}</span>
                       <span className="text-slate-300 truncate max-w-[130px] text-right">{String(f.value)}</span>
                     </div>
@@ -828,12 +828,12 @@ export default function Inbox() {
           )}
 
           <div className="border-t border-white/8 pt-3 space-y-2">
-            <label className="text-[10.5px] uppercase tracking-wider text-slate-500 font-semibold block">Assigned to</label>
+            <label className="text-xs uppercase tracking-wider text-slate-500 font-semibold block">Assigned to</label>
             {selected.unmatched ? (
-              <div className="flex items-center gap-1.5 text-[11.5px] text-slate-500"><Ban size={12} /> Link a lead to assign</div>
+              <div className="flex items-center gap-1.5 text-xs text-slate-500"><Ban size={12} /> Link a lead to assign</div>
             ) : (
               <select
-                className="input select-strong !py-1.5 !text-[11.5px] w-full"
+                className="input select-strong !py-1.5 !text-xs w-full"
                 value={selected.assigneeId || ''}
                 onChange={e => setAssignee(e.target.value || null)}
               >
@@ -844,9 +844,9 @@ export default function Inbox() {
           </div>
 
           <div className="border-t border-white/8 pt-3 space-y-2">
-            <label className="text-[10.5px] uppercase tracking-wider text-slate-500 font-semibold flex items-center gap-1.5"><Headset size={11} /> Respond.io agent</label>
+            <label className="text-xs uppercase tracking-wider text-slate-500 font-semibold flex items-center gap-1.5"><Headset size={11} /> Respond.io agent</label>
             <select
-              className="input select-strong !py-1.5 !text-[11.5px] w-full"
+              className="input select-strong !py-1.5 !text-xs w-full"
               value={selected.respondioAssignee || ''}
               onChange={e => setRespondioAgent(e.target.value || null)}
             >
@@ -856,12 +856,12 @@ export default function Inbox() {
           </div>
 
           {!selected.unmatched && (
-            <button className="btn btn-ghost !text-[11.5px] justify-center" onClick={toggleStatus}>
+            <button className="btn btn-ghost !text-xs justify-center" onClick={toggleStatus}>
               {selected.status === 'closed' ? <><Circle size={12} /> Reopen conversation</> : <><CheckCircle2 size={12} /> Close conversation</>}
             </button>
           )}
 
-          <div className="flex items-center gap-2 text-[11px] text-slate-500 pt-1">
+          <div className="flex items-center gap-2 text-xs text-slate-500 pt-1">
             <UserRound size={12} /> {messages.length} message{messages.length === 1 ? '' : 's'} in this thread
           </div>
         </div>
@@ -895,9 +895,9 @@ function SnippetManagerInline({ onAdded }) {
   }
   return (
     <div className="border-t border-white/8 pt-1.5 mt-1 space-y-1">
-      <input className="input !py-1 !text-[11px]" placeholder="Label" value={label} onChange={e => setLabel(e.target.value)} />
-      <textarea className="input !py-1 !text-[11px] resize-none" rows={2} placeholder="New snippet text" value={text} onChange={e => setText(e.target.value)} />
-      <button className="btn btn-primary w-full !py-1 !text-[11px]" onClick={add} disabled={saving || !text.trim()}>
+      <input className="input !py-1 !text-xs" placeholder="Label" value={label} onChange={e => setLabel(e.target.value)} />
+      <textarea className="input !py-1 !text-xs resize-none" rows={2} placeholder="New snippet text" value={text} onChange={e => setText(e.target.value)} />
+      <button className="btn btn-primary w-full !py-1 !text-xs" onClick={add} disabled={saving || !text.trim()}>
         {saving ? <Spinner size={11} /> : <BookmarkPlus size={11} />} Add
       </button>
     </div>

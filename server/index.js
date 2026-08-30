@@ -478,11 +478,94 @@ app.get('/api/associates', (req, res) => {
   const ids = String(req.query.locationId).split(',').filter(Boolean)
   res.json(db.associates.filter(a => ids.some(id => associateInLocation(a, id))))
 })
+// Bulk-replacing the roster used to take the client's ids verbatim. A save
+// that round-tripped rows without ids (or with regenerated ones) minted
+// fresh `asn_*` ids for people who already existed, and every lead still
+// pointing at the old id silently rendered as "Unassigned". Identity is now
+// re-established from email, then name, before a new id is ever issued, so
+// a roster save can no longer orphan lead ownership.
+function reconcileAssociateIdentity(incoming) {
+  const byEmail = new Map()
+  const byName = new Map()
+  for (const a of db.associates) {
+    const email = String(a.email || '').trim().toLowerCase()
+    const name = String(a.name || '').trim().toLowerCase()
+    if (email) byEmail.set(email, a.id)
+    if (name && !byName.has(name)) byName.set(name, a.id)
+  }
+  const used = new Set()
+  return incoming.map(raw => {
+    const email = String(raw.email || '').trim().toLowerCase()
+    const name = String(raw.name || '').trim().toLowerCase()
+    let id = raw.id && db.associates.some(a => a.id === raw.id) ? raw.id : null
+    if (!id && email && byEmail.has(email)) id = byEmail.get(email)
+    if (!id && name && byName.has(name)) id = byName.get(name)
+    if (!id || used.has(id)) id = uid('asn')
+    used.add(id)
+    return normalizeAssociate({ ...raw, id })
+  })
+}
+
 app.put('/api/associates', async (req, res) => {
-  if (Array.isArray(req.body)) db.associates = req.body.map(normalizeAssociate)
+  if (Array.isArray(req.body)) db.associates = reconcileAssociateIdentity(req.body)
   try { await saveMetaNow() }
   catch (e) { return res.status(502).json({ error: `Could not save associates: ${e.message}` }) }
   res.json(db.associates)
+})
+
+// Repairs leads whose `associateId` no longer matches any associate — the
+// damage a pre-reconciliation roster save left behind. Resolves through the
+// lead's own `associateName` first, then its email domain match, and reports
+// what it could not resolve rather than guessing.
+app.post('/api/maintenance/repair-owner-links', (req, res, next) => requireAuth(db)(req, res, next), async (req, res) => {
+  if (req.authUser.role !== 'admin') return res.status(403).json({ error: 'Only admins can repair owner links' })
+  const valid = new Set(db.associates.map(a => a.id))
+  const byName = new Map()
+  const byEmail = new Map()
+  for (const a of db.associates) {
+    const name = String(a.name || '').trim().toLowerCase()
+    const email = String(a.email || '').trim().toLowerCase()
+    if (name) byName.set(name, a.id)
+    if (email) byEmail.set(email, a.id)
+  }
+
+  let repaired = 0
+  let cleared = 0
+  let untouched = 0
+  const unresolvedNames = new Map()
+  const dryRun = req.body?.dryRun !== false
+
+  for (const lead of db.leads) {
+    if (!lead.associateId || valid.has(lead.associateId)) { untouched++; continue }
+    const name = String(lead.associateName || '').trim().toLowerCase()
+    const email = String(lead.associateEmail || '').trim().toLowerCase()
+    const resolved = (email && byEmail.get(email)) || (name && byName.get(name)) || null
+    if (resolved) {
+      repaired++
+      if (!dryRun) lead.associateId = resolved
+    } else {
+      cleared++
+      // An unresolvable orphan is worse than an unowned lead: it renders as
+      // "Unassigned" but blocks round-robin, which only fills a null owner.
+      if (!dryRun) lead.associateId = null
+      if (name) unresolvedNames.set(name, (unresolvedNames.get(name) || 0) + 1)
+    }
+  }
+
+  if (!dryRun && (repaired || cleared)) {
+    db.leads.forEach(l => markDirty(l.id))
+    try { await saveNow() }
+    catch (e) { return res.status(502).json({ error: `Could not save repaired leads: ${e.message}` }) }
+    log('maintenance', `Repaired ${repaired} owner links, cleared ${cleared} unresolvable`)
+  }
+
+  res.json({
+    dryRun,
+    repaired,
+    cleared,
+    untouched,
+    unresolvedNames: [...unresolvedNames.entries()].map(([name, count]) => ({ name, count })).slice(0, 40)
+  })
 })
 app.post('/api/associates', async (req, res) => {
   const asn = normalizeAssociate({ id: uid('asn'), active: true, order: db.associates.length, ...req.body })
@@ -2232,6 +2315,150 @@ app.post('/api/momence/sync/:leadId', async (req, res) => {
 const SETTINGS_SECTIONS = ['org', 'ui', 'business', 'cadence', 'notifications', 'ai', 'roundRobin', 'reminders', 'momence', 'gpt', 'respondio', 'mailtrap']
 
 app.get('/api/settings', (req, res) => res.json(db.settings))
+/* ------------------------------------------------------------------ *
+ * Pivot builder
+ * ------------------------------------------------------------------ */
+
+// The pivot works over a lean projection rather than the full lead records:
+// 23k enriched leads with follow-up arrays is tens of megabytes, while the
+// fields a pivot can actually group or measure by is a couple of hundred
+// bytes a row. Sending the projection once lets every control change
+// recompute instantly on the client instead of round-tripping.
+const PIVOT_FIELDS = [
+  { field: 'stage', label: 'Stage', type: 'text' },
+  { field: 'status', label: 'Outcome', type: 'text' },
+  { field: 'statusGroup', label: 'Status group', type: 'text' },
+  { field: 'sourceName', label: 'Source', type: 'text' },
+  { field: 'channel', label: 'Channel', type: 'text' },
+  { field: 'classType', label: 'Class type', type: 'text' },
+  { field: 'locationName', label: 'Studio', type: 'text' },
+  { field: 'associateName', label: 'Owner', type: 'text' },
+  { field: 'trialStatus', label: 'Trial status', type: 'text' },
+  { field: 'conversionStatus', label: 'Conversion status', type: 'text' },
+  { field: 'retentionStatus', label: 'Retention status', type: 'text' },
+  { field: 'period', label: 'Period', type: 'text' },
+  { field: 'createdAt', label: 'Created', type: 'date' },
+  { field: 'convertedAt', label: 'Converted', type: 'date' },
+  { field: 'trialDate', label: 'Trial date', type: 'date' },
+  { field: 'firstPurchaseDate', label: 'First purchase', type: 'date' },
+  { field: 'lastActivityAt', label: 'Last activity', type: 'date' },
+  { field: 'valueEstimate', label: 'Revenue', type: 'number', measure: true, currency: true },
+  { field: 'visits', label: 'Visits', type: 'number', measure: true },
+  { field: 'purchasesMade', label: 'Purchases', type: 'number', measure: true },
+  { field: 'score', label: 'Lead score', type: 'number', measure: true },
+  { field: 'missedFollowUps', label: 'Missed follow-ups', type: 'number', measure: true },
+  { field: 'leadId', label: 'Lead id', type: 'text', hidden: true }
+]
+
+app.get('/api/pivot/fields', (req, res) => res.json(PIVOT_FIELDS.filter(f => !f.hidden)))
+
+app.get('/api/pivot/dataset', (req, res) => {
+  const locById = new Map(db.locations.map(l => [l.id, l.name]))
+  const asnById = new Map(db.associates.map(a => [a.id, a.name]))
+  const scope = req.authUser?.locationIds
+
+  const rows = []
+  for (const lead of db.leads) {
+    if (scope && !scope.includes(lead.locationId)) continue
+    const followUps = Array.isArray(lead.followUps) ? lead.followUps : []
+    rows.push({
+      stage: lead.stage || '',
+      status: lead.status || '',
+      statusGroup: lead.statusGroup || '',
+      sourceName: lead.sourceName || '',
+      channel: lead.channel || '',
+      classType: lead.classType || '',
+      locationName: locById.get(lead.locationId) || '',
+      // An orphaned associateId must not silently read as a real owner, so
+      // an unresolved id is left blank and buckets under "—".
+      associateName: asnById.get(lead.associateId) || lead.associateName || '',
+      trialStatus: lead.trialStatus || '',
+      conversionStatus: lead.conversionStatus || '',
+      retentionStatus: lead.retentionStatus || '',
+      period: lead.period || '',
+      createdAt: lead.createdAt || '',
+      convertedAt: lead.convertedAt || '',
+      trialDate: lead.trialDate || lead.momenceEvidence?.trialDate || '',
+      firstPurchaseDate: lead.firstPurchaseDate || lead.momenceEvidence?.firstPurchaseDate || '',
+      lastActivityAt: lead.lastActivityAt || '',
+      valueEstimate: Number(lead.valueEstimate) || 0,
+      visits: Number(lead.visits) || 0,
+      purchasesMade: Number(lead.purchasesMade) || 0,
+      score: Number(lead.ai?.score ?? lead.score) || 0,
+      missedFollowUps: followUps.filter(f => f && f.done === false && f.date && f.date !== '-').length
+    })
+  }
+  // The payload is columnar, not a list of row objects. With 23k rows and
+  // 21 fields, repeating every key name per row was the single largest cost
+  // in the response — larger than the values themselves. Categorical and
+  // date columns are additionally dictionary-encoded, since a studio
+  // imports hundreds of leads sharing the same stage, source and day.
+  // Together these take the response from ~14MB to ~2MB.
+  const dictFields = PIVOT_FIELDS.filter(f => (f.type === 'text' || f.type === 'date') && !f.hidden).map(f => f.field)
+  const numericFields = PIVOT_FIELDS.filter(f => f.type === 'number' && !f.hidden).map(f => f.field)
+
+  const dictionaries = {}
+  const columns = {}
+
+  for (const field of dictFields) {
+    const values = []
+    const index = new Map()
+    const codes = new Array(rows.length)
+    for (let i = 0; i < rows.length; i++) {
+      const v = rows[i][field] || ''
+      let code = index.get(v)
+      if (code === undefined) { code = values.length; values.push(v); index.set(v, code) }
+      codes[i] = code
+    }
+    dictionaries[field] = values
+    columns[field] = codes
+  }
+  for (const field of numericFields) {
+    columns[field] = rows.map(r => r[field])
+  }
+
+  res.json({
+    fields: PIVOT_FIELDS.filter(f => !f.hidden),
+    dictionaries,
+    columns,
+    rowCount: rows.length,
+    generatedAt: nowIso()
+  })
+})
+
+// Saved views are per user, like lead segments. `shared: true` publishes one
+// to the whole workspace so a studio manager can hand a report to the team
+// without every agent rebuilding it.
+function pivotStore() {
+  db.settings.pivotViews = db.settings.pivotViews || {}
+  return db.settings.pivotViews
+}
+const pivotKey = (req) => String(req.authUser?.email || req.authUser?.id || 'unknown').toLowerCase()
+
+app.get('/api/pivot-views', (req, res) => {
+  const store = pivotStore()
+  const mine = store[pivotKey(req)] || []
+  const shared = Object.entries(store)
+    .filter(([owner]) => owner !== pivotKey(req))
+    .flatMap(([owner, views]) => (views || []).filter(v => v.shared).map(v => ({ ...v, owner, readOnly: true })))
+  res.json({ mine, shared })
+})
+
+app.put('/api/pivot-views', async (req, res) => {
+  if (!Array.isArray(req.body?.views)) return res.status(400).json({ error: 'views array required' })
+  const store = pivotStore()
+  store[pivotKey(req)] = req.body.views.slice(0, 60).map(v => ({
+    id: String(v.id || uid('pv')),
+    name: String(v.name || 'Untitled view').slice(0, 80),
+    shared: Boolean(v.shared),
+    spec: v.spec && typeof v.spec === 'object' ? v.spec : {},
+    updatedAt: nowIso()
+  }))
+  try { await saveMetaNow() }
+  catch (e) { return res.status(502).json({ error: `Could not save pivot views: ${e.message}` }) }
+  res.json({ mine: store[pivotKey(req)] })
+})
+
 app.get('/api/user-preferences', (req, res) => {
   const key = String(req.authUser?.email || req.authUser?.id || 'unknown').toLowerCase()
   res.json(db.settings.userPreferences?.[key] || {})

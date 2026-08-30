@@ -66,7 +66,7 @@ export default function AssociateCompareModal({ open, onClose }) {
         <div className="space-y-4">
           {/* Head-to-head pickers */}
           <div className="card !rounded-xl p-4">
-            <div className="flex items-center gap-2 text-[12px] font-bold text-slate-700 mb-3">
+            <div className="flex items-center gap-2 text-sm font-bold text-slate-700 mb-3">
               <Swords size={14} className="text-rose-400" /> Head to head
             </div>
             <div className="grid grid-cols-2 gap-3">
@@ -75,8 +75,8 @@ export default function AssociateCompareModal({ open, onClose }) {
                 { id: bIdEff, set: setBId, label: 'Associate B', accent: '#2563eb' }
               ].map(slot => (
                 <div key={slot.label}>
-                  <div className="text-[10px] uppercase tracking-wider font-semibold mb-1" style={{ color: slot.accent }}>{slot.label}</div>
-                  <select className="input !py-2 !bg-white !border-slate-200" value={slot.id} onChange={e => slot.set(e.target.value || null)}>
+                  <div className="text-xs uppercase tracking-wider font-semibold mb-1" style={{ color: slot.accent }}>{slot.label}</div>
+                  <select className="input !py-2 !bg-pure-white !border-slate-200" value={slot.id} onChange={e => slot.set(e.target.value || null)}>
                     {rows.map(r => <option key={r.associateId} value={r.associateId}>{r.name}</option>)}
                   </select>
                 </div>
@@ -94,13 +94,13 @@ export default function AssociateCompareModal({ open, onClose }) {
           {/* Metric-by-metric table */}
           {faceoff && (
             <div className="card overflow-hidden">
-              <div className="px-5 py-3 border-b border-slate-200 text-[12.5px] font-semibold text-slate-700">
+              <div className="px-5 py-3 border-b border-slate-200 text-sm font-semibold text-slate-700">
                 Metric by metric
               </div>
               <div className="overflow-x-auto scrollbar-thin">
                 <table className="w-full text-left">
                   <thead>
-                    <tr className="text-[10.5px] uppercase tracking-wider text-slate-500 border-b border-slate-200">
+                    <tr className="text-xs uppercase tracking-wider text-slate-500 border-b border-slate-200">
                       <th className="px-4 py-2.5 font-semibold text-rose-400">{A?.name}</th>
                       <th className="px-3 py-2.5 font-semibold">Metric</th>
                       <th className="px-4 py-2.5 font-semibold text-right text-blue-500">{B?.name}</th>
@@ -113,11 +113,11 @@ export default function AssociateCompareModal({ open, onClose }) {
                       const tie = s.a === s.b
                       return (
                         <tr key={s.key} className="border-b border-slate-200 hover:bg-slate-50">
-                          <td className={`px-4 py-2 text-[12.5px] mono ${winA ? 'text-white font-semibold' : 'text-slate-400'}`}>
+                          <td className={`px-4 py-2 text-sm mono ${winA ? 'text-white font-semibold' : 'text-slate-400'}`}>
                             <span className="flex items-center gap-1.5 justify-end">{s.fmt(s.a)}{winA && !tie && <CheckCircle2 size={12} className="text-emerald-400" />}</span>
                           </td>
-                          <td className="px-3 py-2 text-center text-[11.5px] text-slate-500">{s.key}</td>
-                          <td className={`px-4 py-2 text-right text-[12.5px] mono ${winB ? 'text-white font-semibold' : 'text-slate-400'}`}>
+                          <td className="px-3 py-2 text-center text-xs text-slate-500">{s.key}</td>
+                          <td className={`px-4 py-2 text-right text-sm mono ${winB ? 'text-white font-semibold' : 'text-slate-400'}`}>
                             <span className="flex items-center gap-1.5 justify-end">{s.fmt(s.b)}{winB && !tie && <CheckCircle2 size={12} className="text-emerald-400" />}</span>
                           </td>
                         </tr>
@@ -131,7 +131,7 @@ export default function AssociateCompareModal({ open, onClose }) {
 
           {/* Team-wide chart */}
           <div className="card p-4">
-            <h3 className="font-display font-semibold text-white text-[13px] mb-3">Revenue by associate (won deals)</h3>
+            <h3 className="font-display font-semibold text-white text-base mb-3">Revenue by associate (won deals)</h3>
           <div className="chart-3d h-[240px]">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={chartData} margin={{ left: -12, right: 8 }}>
@@ -169,22 +169,22 @@ function FaceoffCard({ r, accent, score, vs }) {
     { label: 'Attainment', value: `${r.attainment}%` }
   ]
   return (
-    <div className="rounded-2xl border border-slate-200 bg-white p-3.5 shadow-[0_10px_28px_rgba(15,23,42,0.06)]">
+    <div className="rounded-2xl border border-slate-200 bg-pure-white p-3.5 shadow-[0_10px_28px_rgba(15,23,42,0.06)]">
       <div className="flex items-center gap-2.5 mb-3">
         <Avatar name={r.name} color={r.color} size={34} fallback="👤" />
         <div className="flex-1 min-w-0">
-          <div className="text-[13px] font-bold text-slate-900 truncate">{r.name}</div>
-          <div className="text-[10.5px] text-slate-500">{r.conversion}% conversion · score {r.avgScore}</div>
+          <div className="text-base font-bold text-slate-900 truncate">{r.name}</div>
+          <div className="text-xs text-slate-500">{r.conversion}% conversion · score {r.avgScore}</div>
         </div>
-        {won && <span className="chip !px-2 !py-1 text-[10px] bg-blue-500/10 text-blue-500 border border-blue-500/20"><Trophy size={10} className="inline -mt-0.5 mr-1" />Leading</span>}
+        {won && <span className="chip !px-2 !py-1 text-xs bg-blue-500/10 text-blue-500 border border-blue-500/20"><Trophy size={10} className="inline -mt-0.5 mr-1" />Leading</span>}
       </div>
       <div className="grid grid-cols-2 gap-2">
         {cells.map(c => (
           <div key={c.label} className="rounded-xl bg-slate-50 border border-slate-200 px-2.5 py-2">
-            <div className="flex items-center gap-1 text-[9px] uppercase tracking-wider text-slate-500">
+            <div className="flex items-center gap-1 text-2xs uppercase tracking-wider text-slate-500">
               {c.warn && <AlertTriangle size={9} className="text-rose-400" />}{c.label}
             </div>
-            <div className="font-display text-[15px] font-bold mono" style={{ color: accent }}>{c.value}</div>
+            <div className="font-display text-md font-bold mono" style={{ color: accent }}>{c.value}</div>
           </div>
         ))}
       </div>
@@ -195,9 +195,9 @@ function FaceoffCard({ r, accent, score, vs }) {
 function SummaryCard({ icon, label, value, sub }) {
   return (
     <div className="card reference-metric-card !rounded-2xl p-3.5" style={{ '--metric-accent': '#3b82f6' }}>
-      <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-slate-500 mb-2">{icon}{label}</div>
-      <div className="font-display text-[15px] font-bold text-slate-900 truncate" title={value}>{value}</div>
-      {sub && <div className="text-[11px] text-slate-500 mt-0.5 truncate">{sub}</div>}
+      <div className="flex items-center gap-1.5 text-xs uppercase tracking-wider text-slate-500 mb-2">{icon}{label}</div>
+      <div className="font-display text-md font-bold text-slate-900 truncate" title={value}>{value}</div>
+      {sub && <div className="text-xs text-slate-500 mt-0.5 truncate">{sub}</div>}
     </div>
   )
 }

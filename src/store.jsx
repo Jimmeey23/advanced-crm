@@ -117,10 +117,17 @@ export function AppProvider({ children }) {
     return () => window.removeEventListener('keydown', h)
   }, [setSidebarCollapsedPersist])
 
-  const toast = useCallback((message, kind = 'success') => {
+  const dismissToast = useCallback((id) => setToasts(t => t.filter(x => x.id !== id)), [])
+
+  // `action` turns a toast into the undo affordance for an optimistic write:
+  // { label, onClick }. Undoable toasts linger longer — 3.5s is not enough
+  // time to notice a mistake and reach for the button.
+  const toast = useCallback((message, kind = 'success', options = {}) => {
     const id = ++toastId.current
-    setToasts(t => [...t, { id, message, kind }])
-    setTimeout(() => setToasts(t => t.filter(x => x.id !== id)), 3500)
+    const { action = null, duration = action ? 8000 : 3500 } = options
+    setToasts(t => [...t, { id, message, kind, action }])
+    setTimeout(() => setToasts(t => t.filter(x => x.id !== id)), duration)
+    return id
   }, [])
 
   const lookup = useMemo(() => {
@@ -133,7 +140,7 @@ export function AppProvider({ children }) {
   const value = {
     boot, lookup, alerts, toasts, drawerLeadId, view, viewParams, theme, setTheme, accent, setAccent,
     sidebarCollapsed, toggleSidebar,
-    refreshData, refreshAlerts, navigate, openLead, closeLead, toast, dataVersion,
+    refreshData, refreshAlerts, navigate, openLead, closeLead, toast, dismissToast, dataVersion,
     scheduleSessions, setScheduleSessions,
     role: boot?.authUser?.role || 'agent',
     locationIds: boot?.authUser?.locationIds || [],
@@ -145,19 +152,20 @@ export function AppProvider({ children }) {
 }
 
 export function Toasts() {
-  const { toasts, theme } = useApp()
-  const light = theme === 'light'
+  const { toasts, dismissToast } = useApp()
   return (
-    <div className="fixed bottom-5 right-5 z-[100] flex flex-col gap-2">
+    <div className="toast-stack" role="region" aria-label="Notifications">
       {toasts.map(t => (
-        <div key={t.id}
-          className="card px-4 py-3 text-[13px] font-medium flex items-center gap-2 animate-[fadeIn_.2s_ease]"
-          style={{
-            borderColor: t.kind === 'error' ? 'rgba(244,63,94,.5)' : 'rgba(52,211,153,.45)',
-            color: light ? (t.kind === 'error' ? '#9f1239' : '#065f46') : (t.kind === 'error' ? '#fecdd3' : '#d1fae5')
-          }}>
-          <span style={{ color: t.kind === 'error' ? '#f87171' : '#34d399' }}>{t.kind === 'error' ? '✕' : '✓'}</span>
-          {t.message}
+        <div key={t.id} className={`toast is-${t.kind}`} role="status">
+          <span className="toast-mark" aria-hidden="true">{t.kind === 'error' ? '\u2715' : '\u2713'}</span>
+          <span className="toast-message">{t.message}</span>
+          {t.action && (
+            <button
+              type="button"
+              className="toast-action"
+              onClick={() => { t.action.onClick(); dismissToast(t.id) }}
+            >{t.action.label}</button>
+          )}
         </div>
       ))}
     </div>

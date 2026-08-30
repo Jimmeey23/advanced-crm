@@ -222,7 +222,7 @@ export default function LeadDrawer() {
         <aside className="lead-drawer ld-shell relative w-full max-w-[680px] h-full flex items-center justify-center">
           <div className="flex flex-col items-center gap-3">
             <Spinner size={26} />
-            <span className="text-[12px] text-slate-500">Loading lead…</span>
+            <span className="text-sm text-slate-500">Loading lead…</span>
           </div>
         </aside>
       </div>
@@ -406,18 +406,11 @@ export default function LeadDrawer() {
                 </div>
               </div>
               <div className="ld-hero-actions">
-                <Tip content={<span className="text-[11px]">Send message</span>}>
+                <Tip content={<span className="text-xs">Send message</span>}>
                   <button className="btn btn-primary !p-2" onClick={() => setComposeOpen(true)} aria-label="Send message"><MessageCircle size={15} /></button>
                 </Tip>
-                <Tip content={<span className="text-[11px]">WhatsApp template</span>}>
+                <Tip content={<span className="text-xs">WhatsApp template</span>}>
                   <button className="btn btn-soft !p-2" onClick={() => setTemplateOpen(true)} aria-label="WhatsApp template"><Sparkles size={15} /></button>
-                </Tip>
-                <Tip content={<span className="text-[11px]">Compact / Default / Wide / Full width</span>}>
-                  <div className="ld-width-presets">
-                    {[['S', 560], ['M', 720], ['L', 960], ['XL', window.innerWidth - 24]].map(([label, w]) => (
-                      <button key={label} type="button" className={`ld-width-preset-btn ${Math.abs(drawerWidth - w) < 8 ? 'is-active' : ''}`} onClick={() => setPresetWidth(w)}>{label}</button>
-                    ))}
-                  </div>
                 </Tip>
                 <button className={`btn btn-ghost !p-2 ${pinned ? 'text-rose-400' : ''}`} onClick={togglePinned} aria-label={pinned ? 'Unpin drawer' : 'Pin drawer open'} title={pinned ? 'Pinned — click outside won\'t close it' : 'Pin drawer open'}>
                   {pinned ? <Pin size={16} className="fill-current" /> : <PinOff size={16} />}
@@ -464,7 +457,7 @@ export default function LeadDrawer() {
                   <div className="ld-owner-locked">
                     <Lock size={11} /> {owner?.name || 'Unassigned'}
                     {lead.pendingOwnerChangeRequest ? (
-                      <span className="chip !px-2 !py-0.5 text-[10px] bg-amber-500/10 border border-amber-400/25 text-amber-300 ml-auto whitespace-nowrap">Pending</span>
+                      <span className="chip !px-2 !py-0.5 text-xs bg-amber-500/10 border border-amber-400/25 text-amber-300 ml-auto whitespace-nowrap">Pending</span>
                     ) : (
                       <button type="button" className="btn btn-ghost !p-1 ml-auto" title="Request owner change" onClick={() => setOwnerRequestOpen(o => !o)}><UserCog size={12} /></button>
                     )}
@@ -495,7 +488,7 @@ export default function LeadDrawer() {
                   <option value="">Pick new owner…</option>
                   {ownerOptions.filter(a => a.id !== lead.associateId).map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
                 </select>
-                <button type="button" className="btn btn-primary !py-1.5 !text-[11.5px]" disabled={!ownerRequestPick || ownerRequestSending} onClick={sendOwnerRequest}>Send request</button>
+                <button type="button" className="btn btn-primary !py-1.5 !text-xs" disabled={!ownerRequestPick || ownerRequestSending} onClick={sendOwnerRequest}>Send request</button>
               </div>
             )}
             {role === 'admin' && lead.pendingOwnerChangeRequest && (
@@ -510,9 +503,9 @@ export default function LeadDrawer() {
             {hasCadenceIssue && (
               <div className="ld-cadence-alert">
                 <span className="ld-cadence-alert-title"><Clock size={13} /> Cadence deviation</span>
-                {overdueFu && <span className="chip !px-2 !py-0.5 text-[10px] bg-rose-500/20 text-rose-300">next follow-up overdue {Math.abs(dueIn)}d</span>}
-                {missedCount > 0 && <span className="chip !px-2 !py-0.5 text-[10px] bg-amber-500/15 text-amber-300 border border-amber-400/20">{missedCount} missed follow-up{missedCount > 1 ? 's' : ''}</span>}
-                {idleBeyond && <span className="chip !px-2 !py-0.5 text-[10px] bg-amber-500/15 text-amber-300 border border-amber-400/20">no outreach in {idleDays}d (cadence {outreachDays}d)</span>}
+                {overdueFu && <span className="chip !px-2 !py-0.5 text-xs bg-rose-500/20 text-rose-300">next follow-up overdue {Math.abs(dueIn)}d</span>}
+                {missedCount > 0 && <span className="chip !px-2 !py-0.5 text-xs bg-amber-500/15 text-amber-300 border border-amber-400/20">{missedCount} missed follow-up{missedCount > 1 ? 's' : ''}</span>}
+                {idleBeyond && <span className="chip !px-2 !py-0.5 text-xs bg-amber-500/15 text-amber-300 border border-amber-400/20">no outreach in {idleDays}d (cadence {outreachDays}d)</span>}
               </div>
             )}
           </header>
@@ -568,7 +561,7 @@ export default function LeadDrawer() {
                     <div className="ld-ai-score-row">
                       <div className="text-center">
                         <ScorePill score={lead.ai.score} size="lg" />
-                        <div className="text-[10px] text-slate-500 mt-1">intent score</div>
+                        <div className="text-xs text-slate-500 mt-1">intent score</div>
                       </div>
                       <div className="ld-ai-facts">
                         <div><TrendingUp size={12} className="text-emerald-400" /> Sentiment <b className="text-slate-200 capitalize">{lead.ai.sentiment}</b></div>
@@ -613,7 +606,7 @@ export default function LeadDrawer() {
                           <span className="chip bg-white/5 border border-white/10 text-slate-300"><Clock size={10} /> best time: {lead.gpt.bestContactTime || '—'}</span>
                           {lead.gpt.nextAction && <span className="chip lead-accent-chip"><Send size={10} /> {lead.gpt.nextAction.label}</span>}
                         </div>
-                        {lead.gpt.nextAction?.text && <p className="text-[12px] text-slate-300 leading-relaxed">{lead.gpt.nextAction.text}</p>}
+                        {lead.gpt.nextAction?.text && <p className="text-sm text-slate-300 leading-relaxed">{lead.gpt.nextAction.text}</p>}
                         {(lead.gpt.insights || []).length > 0 && (
                           <div className="ld-insight-grid">
                             {lead.gpt.insights.map((ins, i) => (
@@ -627,8 +620,8 @@ export default function LeadDrawer() {
                             <div className="space-y-1.5">
                               {lead.gpt.followupSuggestions.map((s, i) => (
                                 <button key={i} className="w-full text-left modern-card !rounded-xl px-3 py-2.5 hover:scale-[1.01] transition-transform" onClick={() => { setComposeOpen(true) }}>
-                                  <span className="chip !px-1.5 !py-0.5 text-[9.5px] uppercase" style={{ background: `${R_CHANNELS[s.channel] || '#888'}1c`, color: R_CHANNELS[s.channel] || '#fff', border: `1px solid ${(R_CHANNELS[s.channel] || '#888')}33` }}>{s.label || s.channel}</span>
-                                  <span className="block text-[11.5px] text-slate-300 mt-1 leading-relaxed">“{s.text}”</span>
+                                  <span className="chip !px-1.5 !py-0.5 text-2xs uppercase" style={{ background: `${R_CHANNELS[s.channel] || '#888'}1c`, color: R_CHANNELS[s.channel] || '#fff', border: `1px solid ${(R_CHANNELS[s.channel] || '#888')}33` }}>{s.label || s.channel}</span>
+                                  <span className="block text-xs text-slate-300 mt-1 leading-relaxed">“{s.text}”</span>
                                 </button>
                               ))}
                             </div>
@@ -638,12 +631,12 @@ export default function LeadDrawer() {
                     ) : (
                       <div className="ld-empty-cta">
                         <div className="flex-1 min-w-0">
-                          <div className="text-[12.5px] text-slate-300">Let the OpenAI model produce a richer summary, next-step and message suggestions for this lead.</div>
+                          <div className="text-sm text-slate-300">Let the OpenAI model produce a richer summary, next-step and message suggestions for this lead.</div>
                           {!boot?.integrations?.gpt && !boot?.settings?.gpt?.apiKey && (
-                            <div className="text-[11px] text-slate-500 mt-1">Add an OpenAI key in Settings → Integrations to enable.</div>
+                            <div className="text-xs text-slate-500 mt-1">Add an OpenAI key in Settings → Integrations to enable.</div>
                           )}
                         </div>
-                        <button className="btn btn-soft !py-1.5 !text-[12px] shrink-0" onClick={doEnrich} disabled={enriching}>
+                        <button className="btn btn-soft !py-1.5 !text-sm shrink-0" onClick={doEnrich} disabled={enriching}>
                           {enriching ? <Loader2 size={13} className="animate-spin" /> : <Sparkles size={13} />} Enrich
                         </button>
                       </div>
@@ -661,7 +654,7 @@ export default function LeadDrawer() {
                     </div>
                     <textarea className="input resize-none" rows={3} value={remarkDraft} onChange={e => setRemarkDraft(e.target.value)} placeholder="Notes from conversations…" />
                     <div className="flex justify-end mt-2">
-                      <button className="btn btn-soft !py-1.5 !text-[12px]" disabled={remarkDraft === (lead.remarks || '')} onClick={() => patch({ remarks: remarkDraft }, 'Remarks updated')}>Save remarks</button>
+                      <button className="btn btn-soft !py-1.5 !text-sm" disabled={remarkDraft === (lead.remarks || '')} onClick={() => patch({ remarks: remarkDraft }, 'Remarks updated')}>Save remarks</button>
                     </div>
                   </section>
                 </>
@@ -678,9 +671,9 @@ export default function LeadDrawer() {
                     {boot?.integrations?.respondio && <span className="chip ml-auto bg-white/5 border border-white/10 text-slate-400">{convCount} threads</span>}
                   </div>
                   {!boot?.integrations?.respondio ? (
-                    <div className="text-[12.5px] text-slate-400 flex items-center gap-2"><span>Connect Respond.io in Settings → Integrations to view and send messages.</span></div>
+                    <div className="text-sm text-slate-400 flex items-center gap-2"><span>Connect Respond.io in Settings → Integrations to view and send messages.</span></div>
                   ) : conv?.error ? (
-                    <p className="text-[12px] text-rose-400">{conv.error}</p>
+                    <p className="text-sm text-rose-400">{conv.error}</p>
                   ) : !conv || !conv.conversations?.length ? (
                     <div className="ld-empty-state"><Inbox size={18} /><p>No conversations found for this lead yet.</p></div>
                   ) : (
@@ -688,9 +681,9 @@ export default function LeadDrawer() {
                       {conv.conversations.map(c => (
                         <div key={c.id} className="ld-thread">
                           <div className="ld-thread-head">
-                            <span className="chip !py-0.5 !px-2 text-[9.5px] uppercase" style={{ background: `${R_CHANNELS[c.channel] || '#888'}1c`, color: R_CHANNELS[c.channel] || '#fff', border: `1px solid ${(R_CHANNELS[c.channel] || '#888')}33` }}>{c.channel}</span>
-                            <span className="text-[10.5px] text-slate-500">{c.status || ''}</span>
-                            <button className="ml-auto btn btn-ghost !p-1.5 !text-[11px]" onClick={() => setComposeOpen(true)} title="Open full composer (switch channel, use AI suggestions)"><Send size={11} /> More</button>
+                            <span className="chip !py-0.5 !px-2 text-2xs uppercase" style={{ background: `${R_CHANNELS[c.channel] || '#888'}1c`, color: R_CHANNELS[c.channel] || '#fff', border: `1px solid ${(R_CHANNELS[c.channel] || '#888')}33` }}>{c.channel}</span>
+                            <span className="text-xs text-slate-500">{c.status || ''}</span>
+                            <button className="ml-auto btn btn-ghost !p-1.5 !text-xs" onClick={() => setComposeOpen(true)} title="Open full composer (switch channel, use AI suggestions)"><Send size={11} /> More</button>
                           </div>
                           <div className="ld-thread-messages max-h-[240px] overflow-y-auto scrollbar-thin">
                             {(c.messages || []).slice().reverse().map(msg => (
@@ -699,11 +692,11 @@ export default function LeadDrawer() {
                                 {msg.content || msg.text}
                               </div>
                             ))}
-                            {!c.messages?.length && <p className="text-[11px] text-slate-600 text-center py-2">No messages in this thread.</p>}
+                            {!c.messages?.length && <p className="text-xs text-slate-600 text-center py-2">No messages in this thread.</p>}
                           </div>
                           <div className="ld-thread-reply">
                             <input
-                              className="input !py-1.5 !text-[12px] flex-1"
+                              className="input !py-1.5 !text-sm flex-1"
                               placeholder={`Reply via ${c.channel}…`}
                               value={replyDrafts[c.id] || ''}
                               onChange={e => setReplyDrafts(d => ({ ...d, [c.id]: e.target.value }))}
@@ -713,7 +706,7 @@ export default function LeadDrawer() {
                               {replySending[c.id] ? <Spinner size={12} /> : <Send size={12} />}
                             </button>
                           </div>
-                          {replyError[c.id] && <p className="text-[10.5px] text-rose-400 px-2.5 pb-2">{replyError[c.id]}</p>}
+                          {replyError[c.id] && <p className="text-xs text-rose-400 px-2.5 pb-2">{replyError[c.id]}</p>}
                         </div>
                       ))}
                     </div>
@@ -732,13 +725,13 @@ export default function LeadDrawer() {
                     {m && <span className="ld-synced-pill"><span /> Synced</span>}
                   </div>
                   {!boot?.integrations?.momence ? (
-                    <div className="text-[12.5px] text-slate-400 flex items-center gap-2"><span>Connect Momence in Settings to pull sales and class history automatically.</span></div>
+                    <div className="text-sm text-slate-400 flex items-center gap-2"><span>Connect Momence in Settings to pull sales and class history automatically.</span></div>
                   ) : !m ? (
                     <div>
                       {!candidates ? (
                         <div>
                           {syncing && (
-                            <div className="rounded-xl bg-emerald-500/10 border border-emerald-400/20 px-3 py-2 mb-2 text-[12px] text-emerald-300 flex items-center gap-2">
+                            <div className="rounded-xl bg-emerald-500/10 border border-emerald-400/20 px-3 py-2 mb-2 text-sm text-emerald-300 flex items-center gap-2">
                               <Spinner size={13} /> Enriching this profile from Momence…
                             </div>
                           )}
@@ -750,7 +743,7 @@ export default function LeadDrawer() {
                               <UserPlus size={14} /> Create member
                             </button>
                           </div>
-                          <p className="text-[11px] text-slate-500">Looks up this member on Momence by {lead.email ? 'email' : ''}{lead.email && lead.phone ? ' or ' : ''}{lead.phone ? 'phone' : ''} — no member ID needed.</p>
+                          <p className="text-xs text-slate-500">Looks up this member on Momence by {lead.email ? 'email' : ''}{lead.email && lead.phone ? ' or ' : ''}{lead.phone ? 'phone' : ''} — no member ID needed.</p>
                           {createMemberOpen && (
                             <form className="momence-create-member" onSubmit={createMomenceMember}>
                               <div className="momence-create-heading">
@@ -771,9 +764,9 @@ export default function LeadDrawer() {
                               </div>
                             </form>
                           )}
-                          {lead.memberId && <p className="text-[11.5px] text-slate-500 mt-1">Already linked to member #{lead.memberId}.</p>}
-                          {syncError && <p className="text-[11.5px] text-rose-400 mt-1">{syncError}</p>}
-                          <button className="text-[11px] text-slate-500 hover:text-slate-300 underline mt-2" onClick={() => setManualLink(v => !v)}>
+                          {lead.memberId && <p className="text-xs text-slate-500 mt-1">Already linked to member #{lead.memberId}.</p>}
+                          {syncError && <p className="text-xs text-rose-400 mt-1">{syncError}</p>}
+                          <button className="text-xs text-slate-500 hover:text-slate-300 underline mt-2" onClick={() => setManualLink(v => !v)}>
                             {manualLink ? 'Cancel manual link' : "Can't find it? Link a member ID manually"}
                           </button>
                           {manualLink && (
@@ -785,19 +778,19 @@ export default function LeadDrawer() {
                         </div>
                       ) : (
                         <div>
-                          <p className="text-[12px] text-slate-300 mb-2">Multiple Momence members match — pick the right one:</p>
+                          <p className="text-sm text-slate-300 mb-2">Multiple Momence members match — pick the right one:</p>
                           <div className="space-y-1.5">
                             {candidates.map(c => (
                               <button key={c.id} className="w-full text-left card !rounded-xl px-3 py-2 hover:bg-white/5 transition-colors flex items-center justify-between gap-2" onClick={() => doLink(c.id)} disabled={syncing}>
                                 <span>
-                                  <span className="block text-[12.5px] font-semibold text-slate-200">{c.firstName} {c.lastName}</span>
-                                  <span className="block text-[11px] text-slate-500">{c.email}{c.phoneNumber ? ` · ${c.phoneNumber}` : ''}</span>
+                                  <span className="block text-sm font-semibold text-slate-200">{c.firstName} {c.lastName}</span>
+                                  <span className="block text-xs text-slate-500">{c.email}{c.phoneNumber ? ` · ${c.phoneNumber}` : ''}</span>
                                 </span>
-                                <span className="text-[10.5px] text-slate-500 mono shrink-0">#{c.id}</span>
+                                <span className="text-xs text-slate-500 mono shrink-0">#{c.id}</span>
                               </button>
                             ))}
                           </div>
-                          <button className="text-[11px] text-slate-500 hover:text-slate-300 underline mt-2" onClick={() => setCandidates(null)}>Cancel</button>
+                          <button className="text-xs text-slate-500 hover:text-slate-300 underline mt-2" onClick={() => setCandidates(null)}>Cancel</button>
                         </div>
                       )}
                     </div>
@@ -838,7 +831,7 @@ export default function LeadDrawer() {
                         <InfoTile label="Medical history" value={momenceCustomField(m, 'medical') || '—'} />
                       </div>
                       <div className="momence-custom-fields rounded-xl bg-white/[0.03] border border-white/8 p-3 mb-3">
-                        <div className="text-[10.5px] uppercase tracking-wider text-slate-500 font-semibold mb-2">Custom fields</div>
+                        <div className="text-xs uppercase tracking-wider text-slate-500 font-semibold mb-2">Custom fields</div>
                         {m.customFields && Object.keys(m.customFields).length > 0 ? (
                           <div className="momence-custom-grid grid gap-2">
                             {Object.entries(m.customFields).map(([key, value]) => <InfoTile key={key} label={key} value={String(value ?? '') || '—'} />)}
@@ -848,7 +841,7 @@ export default function LeadDrawer() {
                       <div className="flex flex-wrap items-center gap-1.5 mb-3">
                         {m.tags && m.tags.length > 0
                           ? m.tags.map((t, i) => <span key={i} className="chip bg-emerald-400/10 text-emerald-300 border border-emerald-400/20"><Tags size={10} />{t}</span>)
-                          : <span className="text-[11.5px] text-slate-600">No tags on this member.</span>}
+                          : <span className="text-xs text-slate-600">No tags on this member.</span>}
                       </div>
 
                       <div className="momence-data-panel">
@@ -892,7 +885,7 @@ export default function LeadDrawer() {
                           </div>
                         </Tabbed>
                       </div>
-                      <p className="text-[10.5px] text-slate-600 mt-2 flex items-center gap-1"><RefreshCw size={10} /> Synced {timeAgo(lead.momenceSyncedAt)}</p>
+                      <p className="text-xs text-slate-600 mt-2 flex items-center gap-1"><RefreshCw size={10} /> Synced {timeAgo(lead.momenceSyncedAt)}</p>
                     </div>
                   )}
                 </section>
@@ -942,19 +935,19 @@ export default function LeadDrawer() {
                           <div className="ld-timeline-meta">
                             <span className="mono">{fmtDate(f.date)}</span>
                             {f.done && followUpText(f.comments) && <span className="flex items-center gap-0.5 text-emerald-400"><CheckCircle2 size={11} /> done</span>}
-                            {!f.done && f.date && f.date < todayStr && <span className="chip !px-1.5 !py-0.5 text-[9px] bg-rose-500/20 text-rose-300">overdue</span>}
+                            {!f.done && f.date && f.date < todayStr && <span className="chip !px-1.5 !py-0.5 text-2xs bg-rose-500/20 text-rose-300">overdue</span>}
                           </div>
                           {followUpText(f.comments) && <p className="ld-timeline-text">{followUpText(f.comments)}</p>}
                         </div>
                       ))}
-                      {!realFollowUps.length && <p className="text-[12px] text-slate-500 mb-3">No follow-ups logged yet.</p>}
+                      {!realFollowUps.length && <p className="text-sm text-slate-500 mb-3">No follow-ups logged yet.</p>}
                     </div>
                     <form onSubmit={addFollowUp} className="ld-followup-form">
                       <div className="flex gap-2">
                         <input className="input !py-1.5" type="date" name="date" defaultValue={new Date().toISOString().slice(0, 10)} />
                         <input className="input !py-1.5" name="comments" ref={commentsRef} placeholder="Add a follow-up note…" />
                       </div>
-                      <button className="btn btn-primary !py-1.5 !text-[12px] w-full" type="submit"><CalendarPlus size={14} /> Log follow-up</button>
+                      <button className="btn btn-primary !py-1.5 !text-sm w-full" type="submit"><CalendarPlus size={14} /> Log follow-up</button>
                     </form>
                     {lead.ai?.followupSuggestions?.length > 0 && (
                       <details className="drawer-suggestion-fold mt-3">
@@ -962,8 +955,8 @@ export default function LeadDrawer() {
                         <div className="space-y-1.5">
                           {lead.ai.followupSuggestions.map((s, i) => (
                             <button key={i} className="w-full text-left card !rounded-xl px-2.5 py-2 hover:bg-white/5 transition-colors" onClick={() => fillSuggestion(s)}>
-                              <span className="chip !px-1.5 !py-0.5 text-[9.5px] uppercase bg-white/5 border border-white/10 text-slate-400">{s.label}</span>
-                              <span className="block text-[11.5px] text-slate-300 mt-1 leading-relaxed">“{s.text}”</span>
+                              <span className="chip !px-1.5 !py-0.5 text-2xs uppercase bg-white/5 border border-white/10 text-slate-400">{s.label}</span>
+                              <span className="block text-xs text-slate-300 mt-1 leading-relaxed">“{s.text}”</span>
                             </button>
                           ))}
                         </div>
@@ -1004,7 +997,7 @@ function EditableHeaderField({ value, placeholder, onSave, as: Tag = 'span', cla
     return (
       <input
         autoFocus
-        className="input !text-[12px] !py-0.5 !px-1.5 !w-auto inline-editable-field-input"
+        className="input !text-sm !py-0.5 !px-1.5 !w-auto inline-editable-field-input"
         value={draft}
         onClick={e => e.stopPropagation()}
         onChange={e => setDraft(e.target.value)}
@@ -1057,9 +1050,9 @@ function ActivityChart({ attended, cancelled, other }) {
 function InfoTile({ label, value, sub }) {
   return (
     <div className="rounded-xl bg-white/[0.035] border border-white/8 px-3 py-2 min-w-0">
-      <div className="text-[9.5px] uppercase tracking-wider text-slate-500 font-semibold truncate">{label}</div>
-      <div className="text-[12.5px] text-slate-200 font-semibold truncate mt-0.5">{value || '—'}</div>
-      {sub && <div className="text-[11px] text-slate-500 truncate mt-0.5">{sub}</div>}
+      <div className="text-2xs uppercase tracking-wider text-slate-500 font-semibold truncate">{label}</div>
+      <div className="text-sm text-slate-200 font-semibold truncate mt-0.5">{value || '—'}</div>
+      {sub && <div className="text-xs text-slate-500 truncate mt-0.5">{sub}</div>}
     </div>
   )
 }
@@ -1069,16 +1062,16 @@ function Row({ icon, title, sub, right, meta }) {
     <div className="momence-table-row">
       <span className="w-6 h-6 rounded-lg bg-white/5 flex items-center justify-center shrink-0">{icon}</span>
       <div className="flex-1 min-w-0">
-        <div className="text-[12.5px] font-semibold text-slate-200 truncate">{title}</div>
-        <div className="text-[11px] text-slate-500 truncate">{sub}{meta ? ` · ${meta}` : ''}</div>
+        <div className="text-sm font-semibold text-slate-200 truncate">{title}</div>
+        <div className="text-xs text-slate-500 truncate">{sub}{meta ? ` · ${meta}` : ''}</div>
       </div>
-      <span className="text-[11.5px] text-slate-300 shrink-0 mono">{right}</span>
+      <span className="text-xs text-slate-300 shrink-0 mono">{right}</span>
     </div>
   )
 }
 
 function EmptyNote({ text }) {
-  return <p className="text-[12px] text-slate-500 py-2">{text}</p>
+  return <p className="text-sm text-slate-500 py-2">{text}</p>
 }
 
 function humanMomenceError(message) {

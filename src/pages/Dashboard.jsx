@@ -18,6 +18,7 @@ import AssociateCompareModal from '../components/AssociateCompareModal.jsx'
 import AssociateScorecardModal from '../components/AssociateScorecardModal.jsx'
 import PerformanceModal from '../components/PerformanceModal.jsx'
 import MetricCard from '../components/MetricCard.jsx'
+import { series as chartSeries } from '../chartPalette.js'
 import ComposeModal from '../components/ComposeModal.jsx'
 import RespondioTemplateModal from '../components/RespondioTemplateModal.jsx'
 
@@ -29,7 +30,6 @@ const QUICK_ACTIONS = [
 ]
 
 const DASH_COLORS = ['var(--accent)', 'var(--dashboard-secondary)', 'var(--dashboard-warning)']
-const DONUT_COLORS = DASH_COLORS
 
 function momPct(series) {
   if (series.length < 2) return null
@@ -66,7 +66,9 @@ const CURRENT_MONTH = new Date().toISOString().slice(0, 7)
 const EMPTY_DASH_FILTERS = { studio: '', associate: '', month: CURRENT_MONTH }
 
 export default function Dashboard() {
-  const { openLead, refreshData, boot, dataVersion } = useApp()
+  const { openLead, refreshData, boot, dataVersion, theme } = useApp()
+  // Fixed-order categorical slots, stepped for the active theme.
+  const donutColors = chartSeries(theme === 'light' ? 'light' : 'dark')
   const [filters, setFilters] = React.useState(EMPTY_DASH_FILTERS)
   const [panelOpen, setPanelOpen] = React.useState(false)
   const setF = (k) => (e) => setFilters(f => ({ ...f, [k]: e.target.value }))
@@ -164,8 +166,8 @@ export default function Dashboard() {
     return (
       <div className="p-6">
         <div className="card p-6 text-center space-y-3">
-          <p className="text-slate-300 text-[13px]">Couldn't reach the API{e1?.message ? `: ${e1.message}` : '.'}</p>
-          <button className="btn btn-ghost !py-1.5 text-[12px]" onClick={reload}>Retry</button>
+          <p className="text-slate-300 text-base">Couldn't reach the API{e1?.message ? `: ${e1.message}` : '.'}</p>
+          <button className="btn btn-ghost !py-1.5 text-sm" onClick={reload}>Retry</button>
         </div>
       </div>
     )
@@ -176,7 +178,7 @@ export default function Dashboard() {
       {/* filter toggle */}
       <div className="flex items-center gap-2">
         <button className={`btn ${panelOpen ? 'btn-soft' : 'btn-ghost'} !py-2`} onClick={() => setPanelOpen(o => !o)}>
-          <SlidersHorizontal size={14} /> Filters {hasFilters && <span className="chip !px-1.5 !py-0.5 !text-[10px] bg-rose-500/20 text-rose-300">!</span>}
+          <SlidersHorizontal size={14} /> Filters {hasFilters && <span className="chip !px-1.5 !py-0.5 !text-xs bg-rose-500/20 text-rose-300">!</span>}
         </button>
         {hasFilters && <button className="btn btn-ghost !py-2" onClick={clearFilters}><X size={14} /> Reset to this month</button>}
       </div>
@@ -184,21 +186,21 @@ export default function Dashboard() {
       {panelOpen && (
         <div className="card p-4 grid grid-cols-2 md:grid-cols-3 gap-3" style={{ animation: 'fadeIn .15s ease' }}>
           <div>
-            <label className="text-[10.5px] uppercase tracking-wider text-slate-500 font-semibold mb-1 block">Studio</label>
+            <label className="text-xs uppercase tracking-wider text-slate-500 font-semibold mb-1 block">Studio</label>
             <select className="input !py-1.5" value={filters.studio} onChange={setF('studio')}>
               <option value="">All studios</option>
               {(boot?.locations || []).map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
             </select>
           </div>
           <div>
-            <label className="text-[10.5px] uppercase tracking-wider text-slate-500 font-semibold mb-1 block">Associate</label>
+            <label className="text-xs uppercase tracking-wider text-slate-500 font-semibold mb-1 block">Associate</label>
             <select className="input !py-1.5" value={filters.associate} onChange={setF('associate')}>
               <option value="">All associates</option>
               {(boot?.associates || []).filter(a => a.active !== false).map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
             </select>
           </div>
           <div>
-            <label className="text-[10.5px] uppercase tracking-wider text-slate-500 font-semibold mb-1 block">Month</label>
+            <label className="text-xs uppercase tracking-wider text-slate-500 font-semibold mb-1 block">Month</label>
             <input className="input !py-1.5" type="month" value={filters.month} onChange={setF('month')} />
           </div>
         </div>
@@ -232,8 +234,8 @@ export default function Dashboard() {
         <div className="card p-5 xl:col-span-2 lead-performance-panel">
           <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
             <div>
-              <h3 className="font-display font-semibold text-white text-[15px]">Lead volume & wins</h3>
-              <p className="text-[11.5px] text-slate-500 mt-0.5">{leadChartCumulative ? 'Cumulative pipeline movement' : `Last ${leadChartRange} months`}</p>
+              <h3 className="font-display font-semibold text-white text-md">Lead volume & wins</h3>
+              <p className="text-xs text-slate-500 mt-0.5">{leadChartCumulative ? 'Cumulative pipeline movement' : `Last ${leadChartRange} months`}</p>
             </div>
             <div className="lead-control-stack">
               <div className="lead-chart-controls">
@@ -291,8 +293,8 @@ export default function Dashboard() {
         <div className="card p-5 dashboard-chart-card">
           <div className="flex items-start justify-between gap-3 mb-3">
             <div>
-              <h3 className="font-display font-semibold text-white text-[15px] mb-1">Leads by source</h3>
-              <p className="text-[11.5px] text-slate-500">Where leads are coming from</p>
+              <h3 className="font-display font-semibold text-white text-md mb-1">Leads by source</h3>
+              <p className="text-xs text-slate-500">Where leads are coming from</p>
             </div>
             <div className="chart-mini-controls">
               {[
@@ -308,7 +310,7 @@ export default function Dashboard() {
             <ResponsiveContainer width="100%" height="100%">
               <PieChart>
                 <Pie data={srcData} dataKey="chartValue" nameKey="source" innerRadius={52} outerRadius={78} paddingAngle={2} strokeWidth={0}>
-                  {srcData.map((_, i) => <Cell key={i} fill={DONUT_COLORS[i % DONUT_COLORS.length]} />)}
+                  {srcData.map((_, i) => <Cell key={i} fill={donutColors[Math.min(i, donutColors.length - 1)]} />)}
                 </Pie>
                 <Tooltip contentStyle={tooltipStyle()} />
               </PieChart>
@@ -322,11 +324,11 @@ export default function Dashboard() {
           </div>
           <div className="space-y-1.5 mt-1">
             {srcData.slice(0, 5).map((s, i) => (
-              <div key={s.source} className="flex items-center gap-2 text-[12px]">
-                <span className="w-2 h-2 rounded-full shrink-0" style={{ background: DONUT_COLORS[i % DONUT_COLORS.length] }} />
+              <div key={s.source} className="flex items-center gap-2 text-sm">
+                <span className="w-2 h-2 rounded-full shrink-0" style={{ background: donutColors[Math.min(i, donutColors.length - 1)] }} />
                 <span className="text-slate-300 flex-1 truncate">{s.source}</span>
                 <span className="mono text-slate-400">{s.count}</span>
-                <span className="text-emerald-400 text-[10.5px] mono">{s.won} won</span>
+                <span className="text-emerald-400 text-xs mono">{s.won} won</span>
                 <span className="source-rate-badge">{s.rate}%</span>
               </div>
             ))}
@@ -341,9 +343,9 @@ export default function Dashboard() {
             <div>
               <div className="flex items-center gap-2 mb-1">
                 <Sparkles size={15} style={{ color: 'var(--accent)' }} />
-                <h3 className="font-display font-semibold text-white text-[15px]">AI recommended actions</h3>
+                <h3 className="font-display font-semibold text-white text-md">AI recommended actions</h3>
               </div>
-              <p className="text-[11.5px] text-slate-500">Highest-intent leads that need attention</p>
+              <p className="text-xs text-slate-500">Highest-intent leads that need attention</p>
             </div>
             <span className="ai-actions-count">{hot.length}</span>
           </div>
@@ -354,10 +356,10 @@ export default function Dashboard() {
                   <span className="ai-action-mark">{initials(l.fullName)}</span>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
-                      <span className="text-[13px] font-semibold text-white truncate">{l.fullName}</span>
+                      <span className="text-base font-semibold text-white truncate">{l.fullName}</span>
                       <span className={`ai-risk-chip ${riskClass(l.ai.risk)}`}>{l.ai.risk}</span>
                     </div>
-                    <div className="text-[11.5px] text-slate-400 truncate mt-0.5">{l.ai.nextAction?.text}</div>
+                    <div className="text-xs text-slate-400 truncate mt-0.5">{l.ai.nextAction?.text}</div>
                   </div>
                   <span className="ai-action-score"><strong>{l.ai.score}</strong><small>score</small></span>
                 </button>
@@ -378,28 +380,28 @@ export default function Dashboard() {
 
         <div className="card p-5">
           <div className="flex items-center justify-between mb-1">
-            <h3 className="font-display font-semibold text-white text-[15px]">Leads by source</h3>
+            <h3 className="font-display font-semibold text-white text-md">Leads by source</h3>
             <div className="flex rounded-lg overflow-hidden border border-white/10 shrink-0">
               <button type="button"
-                className={`dashboard-segment px-2.5 py-1 text-[11px] font-semibold transition-colors ${sourceView === 'top' ? 'is-active' : ''}`}
+                className={`dashboard-segment px-2.5 py-1 text-xs font-semibold transition-colors ${sourceView === 'top' ? 'is-active' : ''}`}
                 onClick={() => setSourceView('top')}>Top</button>
               <button type="button"
-                className={`dashboard-segment px-2.5 py-1 text-[11px] font-semibold transition-colors border-l border-white/10 ${sourceView === 'bottom' ? 'is-active' : ''}`}
+                className={`dashboard-segment px-2.5 py-1 text-xs font-semibold transition-colors border-l border-white/10 ${sourceView === 'bottom' ? 'is-active' : ''}`}
                 onClick={() => setSourceView('bottom')}>Bottom</button>
             </div>
           </div>
-          <p className="text-[11.5px] text-slate-500 mb-4">{sourceView === 'top' ? 'Highest-volume sources & their conversions' : 'Lowest-volume sources & their conversions'}</p>
+          <p className="text-xs text-slate-500 mb-4">{sourceView === 'top' ? 'Highest-volume sources & their conversions' : 'Lowest-volume sources & their conversions'}</p>
           <div className="space-y-2">
             {shownSources.map((s, i) => {
               const rate = s.count ? Math.round((s.won / s.count) * 100) : 0
               return (
                 <div key={s.source} className="source-rank-row">
                   <div className="flex items-center gap-2.5">
-                    <span className="dashboard-rank w-5 h-5 rounded-md flex items-center justify-center text-[10px] font-bold shrink-0">{i + 1}</span>
-                    <span className="text-[12.5px] font-medium text-white flex-1 truncate">{s.source}</span>
-                    <span className="mono text-slate-400 text-[12px]">{s.count}</span>
-                    <span className="dashboard-secondary-text text-[10.5px] mono shrink-0">{s.won} won</span>
-                    <span className="text-[10.5px] mono text-slate-500 shrink-0 w-8 text-right">{rate}%</span>
+                    <span className="dashboard-rank w-5 h-5 rounded-md flex items-center justify-center text-xs font-bold shrink-0">{i + 1}</span>
+                    <span className="text-sm font-medium text-white flex-1 truncate">{s.source}</span>
+                    <span className="mono text-slate-400 text-sm">{s.count}</span>
+                    <span className="dashboard-secondary-text text-xs mono shrink-0">{s.won} won</span>
+                    <span className="text-xs mono text-slate-500 shrink-0 w-8 text-right">{rate}%</span>
                   </div>
                   <div className="mt-1.5 h-1.5 rounded-full bg-white/5 overflow-hidden">
                     <div className="h-full rounded-full" style={{ width: `${Math.max(4, (s.count / shownMax) * 100)}%`, background: sourceView === 'top' ? 'var(--dashboard-secondary)' : 'var(--accent)' }} />
@@ -407,28 +409,28 @@ export default function Dashboard() {
                 </div>
               )
             })}
-            {!shownSources.length && <p className="text-[11.5px] text-slate-500">No data</p>}
+            {!shownSources.length && <p className="text-xs text-slate-500">No data</p>}
           </div>
         </div>
 
         <div className="card p-5">
           <div className="flex items-center gap-2 mb-1">
             <ShieldAlert size={15} style={{ color: 'var(--dashboard-warning)' }} />
-            <h3 className="font-display font-semibold text-white text-[15px]">Priority alerts</h3>
+            <h3 className="font-display font-semibold text-white text-md">Priority alerts</h3>
           </div>
-          <p className="text-[11.5px] text-slate-500 mb-3">Follow-ups, idle high-value leads & unassigned</p>
+          <p className="text-xs text-slate-500 mb-3">Follow-ups, idle high-value leads & unassigned</p>
           <div className="space-y-2 max-h-[280px] overflow-y-auto scrollbar-thin pr-1">
             {alerts.slice(0, 8).map(a => (
               <button key={a.id} className="w-full text-left card !rounded-xl p-3 flex items-center gap-3 hover:bg-white/5 transition-colors" onClick={() => openLead(a.leadId)}>
                 <span className={`w-2 h-2 rounded-full shrink-0 ${a.level === 'high' ? 'bg-rose-400' : 'bg-amber-400'}`} />
                 <div className="flex-1 min-w-0">
-                  <div className="text-[12.5px] font-semibold text-white truncate">{a.leadName}</div>
-                  <div className="text-[11.5px] text-slate-400 truncate">{a.title} — {a.detail}</div>
+                  <div className="text-sm font-semibold text-white truncate">{a.leadName}</div>
+                  <div className="text-xs text-slate-400 truncate">{a.title} — {a.detail}</div>
                 </div>
                 <ChevronRight size={14} className="text-slate-600" />
               </button>
             ))}
-            {!alerts.length && <p className="text-[12.5px] text-slate-500">No priority alerts.</p>}
+            {!alerts.length && <p className="text-sm text-slate-500">No priority alerts.</p>}
           </div>
         </div>
       </div>
@@ -438,11 +440,11 @@ export default function Dashboard() {
         <div className="flex flex-wrap items-center gap-3 mb-4">
           <div className="flex items-center gap-2">
             <BarChart3 size={15} style={{ color: 'var(--dashboard-secondary)' }} />
-            <h3 className="font-display font-semibold text-white text-[15px]">Lead performance</h3>
+            <h3 className="font-display font-semibold text-white text-md">Lead performance</h3>
           </div>
           <div className="flex rounded-lg overflow-hidden border border-white/10">
-            <button className={`dashboard-segment px-3 py-1.5 text-[12px] font-semibold transition-colors ${perfRange === 'week' ? 'is-active' : ''}`} onClick={() => setPerfRange('week')}>Weekly</button>
-            <button className={`dashboard-segment px-3 py-1.5 text-[12px] font-semibold transition-colors border-l border-white/10 ${perfRange === 'month' ? 'is-active' : ''}`} onClick={() => setPerfRange('month')}>Monthly</button>
+            <button className={`dashboard-segment px-3 py-1.5 text-sm font-semibold transition-colors ${perfRange === 'week' ? 'is-active' : ''}`} onClick={() => setPerfRange('week')}>Weekly</button>
+            <button className={`dashboard-segment px-3 py-1.5 text-sm font-semibold transition-colors border-l border-white/10 ${perfRange === 'month' ? 'is-active' : ''}`} onClick={() => setPerfRange('month')}>Monthly</button>
           </div>
           <div className="lead-series-controls ml-auto">
             {[['newLeads', 'New'], ['won', 'Won'], ['missed', 'Missed FU']].map(([key, label], i) => (
@@ -451,8 +453,8 @@ export default function Dashboard() {
               </button>
             ))}
           </div>
-          <button className="btn btn-soft !py-1.5 !text-[12px]" onClick={() => setCompareOpen(true)}><Award size={14} /> Associate faceoff</button>
-          <button className="btn btn-ghost !py-1.5 !text-[12px]" onClick={() => setPerfOpen(true)}><BarChart3 size={13} /> Full details</button>
+          <button className="btn btn-soft !py-1.5 !text-sm" onClick={() => setCompareOpen(true)}><Award size={14} /> Associate faceoff</button>
+          <button className="btn btn-ghost !py-1.5 !text-sm" onClick={() => setPerfOpen(true)}><BarChart3 size={13} /> Full details</button>
         </div>
         <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
           <div className="lg:col-span-3">
@@ -562,10 +564,10 @@ function PerfStat({ label, value, color, sub }) {
   return (
     <div className="perf-stat-card px-3.5 py-3 flex items-center justify-between">
       <div>
-        <div className="text-[11px] text-slate-400">{label}</div>
-        {sub && <div className="text-[10.5px] text-slate-600 mt-0.5">{sub}</div>}
+        <div className="text-xs text-slate-400">{label}</div>
+        {sub && <div className="text-xs text-slate-600 mt-0.5">{sub}</div>}
       </div>
-      <div className="font-display text-[17px] font-bold mono" style={{ color }}>{value}</div>
+      <div className="font-display text-lg font-bold mono" style={{ color }}>{value}</div>
     </div>
   )
 }

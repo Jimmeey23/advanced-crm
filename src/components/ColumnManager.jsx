@@ -75,8 +75,8 @@ export default function ColumnManager({ columns, setColumns }) {
           <div className="relative card modal-panel column-manager-modal w-full max-w-[520px] shadow-2xl overflow-hidden" style={{ animation: 'fadeIn .12s ease' }}>
             <div className="modal-header flex items-start justify-between px-5 pt-5 pb-3 !mb-0">
               <div>
-                <div className="font-display font-semibold text-white text-[15px]">Manage columns</div>
-                <p className="text-[11.5px] text-slate-500 mt-0.5">Show, hide, reorder, format, and add lead table columns.</p>
+                <div className="font-display font-semibold text-white text-md">Manage columns</div>
+                <p className="text-xs text-slate-500 mt-0.5">Show, hide, reorder, format, and add lead table columns.</p>
               </div>
               <button className="btn btn-ghost modal-close !p-1.5" onClick={() => setOpen(false)}><X size={14} /></button>
             </div>
@@ -89,8 +89,8 @@ export default function ColumnManager({ columns, setColumns }) {
             <div className="p-4 border-t border-white/8 space-y-2 bg-white/[0.02]">
               {!adding && (
                 <div className="flex gap-2">
-                  <button className="btn btn-ghost flex-1 !py-1.5 !text-[12px]" onClick={() => setAdding('formula')}><Sigma size={13} /> Formula column</button>
-                  <button className="btn btn-ghost flex-1 !py-1.5 !text-[12px]" onClick={() => setAdding('lookup')}><Link2 size={13} /> Related column</button>
+                  <button className="btn btn-ghost flex-1 !py-1.5 !text-sm" onClick={() => setAdding('formula')}><Sigma size={13} /> Formula column</button>
+                  <button className="btn btn-ghost flex-1 !py-1.5 !text-sm" onClick={() => setAdding('lookup')}><Link2 size={13} /> Related column</button>
                 </div>
               )}
               {adding === 'formula' && <FormulaForm onAdd={addFormula} onCancel={() => setAdding(null)} />}
@@ -114,9 +114,9 @@ function ColumnRow({ col, idx, last, move, toggleHidden, removeCol, patchCol }) 
           <button className="text-slate-500 hover:text-white disabled:opacity-30" disabled={idx === 0} onClick={() => move(idx, -1)}><ArrowUp size={11} /></button>
           <button className="text-slate-500 hover:text-white disabled:opacity-30" disabled={last} onClick={() => move(idx, 1)}><ArrowDown size={11} /></button>
         </div>
-        <span className="flex-1 text-[12.5px] text-slate-200 truncate">{col.label}</span>
-        {col.kind === 'formula' && <span className="chip !px-1.5 !py-0.5 text-[9px] bg-fuchsia-500/15 text-fuchsia-300">fx</span>}
-        {col.kind === 'lookup' && <span className="chip !px-1.5 !py-0.5 text-[9px] bg-cyan-500/15 text-cyan-300">rel</span>}
+        <span className="flex-1 text-sm text-slate-200 truncate">{col.label}</span>
+        {col.kind === 'formula' && <span className="chip !px-1.5 !py-0.5 text-2xs bg-fuchsia-500/15 text-fuchsia-300">fx</span>}
+        {col.kind === 'lookup' && <span className="chip !px-1.5 !py-0.5 text-2xs bg-cyan-500/15 text-cyan-300">rel</span>}
         <button className="btn btn-ghost !p-1.5" onClick={() => setEditing(e => !e)} title="Format"><Settings2 size={12} /></button>
         <button className="btn btn-ghost !p-1.5" onClick={() => toggleHidden(idx)} title={col.hidden ? 'Show' : 'Hide'}>
           {col.hidden ? <EyeOff size={12} className="text-slate-500" /> : <Eye size={12} className="text-emerald-400" />}
@@ -125,15 +125,15 @@ function ColumnRow({ col, idx, last, move, toggleHidden, removeCol, patchCol }) 
       </div>
       {editing && (
         <div className="mt-2 pt-2 border-t border-white/6 flex flex-wrap items-center gap-2">
-          <select className="input !w-auto !py-1 !text-[11.5px]" value={col.type} onChange={e => patchCol(idx, { type: e.target.value })}>
+          <select className="input !w-auto !py-1 !text-xs" value={col.type} onChange={e => patchCol(idx, { type: e.target.value })}>
             {TYPES.map(t => <option key={t.id} value={t.id}>{t.label}</option>)}
           </select>
           {(col.type === 'number' || col.type === 'currency' || col.type === 'percent') && (
-            <input className="input !w-[70px] !py-1 !text-[11.5px]" type="number" min={0} max={4} placeholder="decimals"
+            <input className="input !w-[70px] !py-1 !text-xs" type="number" min={0} max={4} placeholder="decimals"
               value={col.decimals ?? 0} onChange={e => patchCol(idx, { decimals: Number(e.target.value) })} />
           )}
           {col.type === 'number' && (
-            <input className="input !w-[80px] !py-1 !text-[11.5px]" placeholder="unit" value={col.unit || ''} onChange={e => patchCol(idx, { unit: e.target.value })} />
+            <input className="input !w-[80px] !py-1 !text-xs" placeholder="unit" value={col.unit || ''} onChange={e => patchCol(idx, { unit: e.target.value })} />
           )}
         </div>
       )}
@@ -147,15 +147,15 @@ function FormulaForm({ onAdd, onCancel }) {
   const [type, setType] = useState('number')
   return (
     <div className="space-y-2">
-      <input className="input !py-1.5 !text-[12px]" placeholder="Column name (e.g. Commission)" value={label} onChange={e => setLabel(e.target.value)} />
-      <input className="input !py-1.5 !text-[12px] mono" placeholder="Formula (e.g. valueEstimate * 0.1)" value={formula} onChange={e => setFormula(e.target.value)} />
-      <div className="text-[10.5px] text-slate-500">Fields: fullName, phone, email, source, owner, location, score, risk, valueEstimate, classType, missedCount, lastOutreachDays, created, remarks, stage, status</div>
+      <input className="input !py-1.5 !text-sm" placeholder="Column name (e.g. Commission)" value={label} onChange={e => setLabel(e.target.value)} />
+      <input className="input !py-1.5 !text-sm mono" placeholder="Formula (e.g. valueEstimate * 0.1)" value={formula} onChange={e => setFormula(e.target.value)} />
+      <div className="text-xs text-slate-500">Fields: fullName, phone, email, source, owner, location, score, risk, valueEstimate, classType, missedCount, lastOutreachDays, created, remarks, stage, status</div>
       <div className="flex items-center gap-2">
-        <select className="input !w-auto !py-1.5 !text-[12px]" value={type} onChange={e => setType(e.target.value)}>
+        <select className="input !w-auto !py-1.5 !text-sm" value={type} onChange={e => setType(e.target.value)}>
           {TYPES.map(t => <option key={t.id} value={t.id}>{t.label}</option>)}
         </select>
-        <button className="btn btn-primary !py-1.5 !text-[12px] ml-auto" disabled={!label || !formula} onClick={() => onAdd(label, formula, type)}><Plus size={13} /> Add</button>
-        <button className="btn btn-ghost !py-1.5 !text-[12px]" onClick={onCancel}>Cancel</button>
+        <button className="btn btn-primary !py-1.5 !text-sm ml-auto" disabled={!label || !formula} onClick={() => onAdd(label, formula, type)}><Plus size={13} /> Add</button>
+        <button className="btn btn-ghost !py-1.5 !text-sm" onClick={onCancel}>Cancel</button>
       </div>
     </div>
   )
@@ -171,22 +171,22 @@ function LookupForm({ onAdd, onCancel }) {
     : [{ id: 'name', label: 'Name' }, { id: 'city', label: 'City' }, { id: 'active', label: 'Active' }]
   return (
     <div className="space-y-2">
-      <input className="input !py-1.5 !text-[12px]" placeholder="Column name (e.g. Owner target)" value={label} onChange={e => setLabel(e.target.value)} />
+      <input className="input !py-1.5 !text-sm" placeholder="Column name (e.g. Owner target)" value={label} onChange={e => setLabel(e.target.value)} />
       <div className="flex items-center gap-2">
-        <select className="input !w-auto !py-1.5 !text-[12px]" value={relatedTable} onChange={e => { setRelatedTable(e.target.value); setRelatedField('name') }}>
+        <select className="input !w-auto !py-1.5 !text-sm" value={relatedTable} onChange={e => { setRelatedTable(e.target.value); setRelatedField('name') }}>
           <option value="associate">Associate</option>
           <option value="location">Location</option>
         </select>
-        <select className="input !w-auto !py-1.5 !text-[12px]" value={relatedField} onChange={e => setRelatedField(e.target.value)}>
+        <select className="input !w-auto !py-1.5 !text-sm" value={relatedField} onChange={e => setRelatedField(e.target.value)}>
           {fieldsFor.map(f => <option key={f.id} value={f.id}>{f.label}</option>)}
         </select>
       </div>
       <div className="flex items-center gap-2">
-        <select className="input !w-auto !py-1.5 !text-[12px]" value={type} onChange={e => setType(e.target.value)}>
+        <select className="input !w-auto !py-1.5 !text-sm" value={type} onChange={e => setType(e.target.value)}>
           {TYPES.map(t => <option key={t.id} value={t.id}>{t.label}</option>)}
         </select>
-        <button className="btn btn-primary !py-1.5 !text-[12px] ml-auto" disabled={!label} onClick={() => onAdd(label, relatedTable, relatedField, type)}><Plus size={13} /> Add</button>
-        <button className="btn btn-ghost !py-1.5 !text-[12px]" onClick={onCancel}>Cancel</button>
+        <button className="btn btn-primary !py-1.5 !text-sm ml-auto" disabled={!label} onClick={() => onAdd(label, relatedTable, relatedField, type)}><Plus size={13} /> Add</button>
+        <button className="btn btn-ghost !py-1.5 !text-sm" onClick={onCancel}>Cancel</button>
       </div>
     </div>
   )

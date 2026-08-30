@@ -1,27 +1,48 @@
 import React from 'react'
 import { useApp } from '../store.jsx'
 
-export default function Logo({ size = 36, className = '' }) {
-  const { theme } = useApp()
-  const dark = theme !== 'light'
+// The mark matches the browser-tab favicon: a filled tile carrying "57"
+// under a barre — the one piece of studio equipment the whole brand is
+// built around. A filled tile holds its weight at 28px in the collapsed
+// sidebar, which the previous hairline circle did not.
+export default function Logo({ size = 36, className = '', animate = false }) {
+  const app = useApp?.()
+  const dark = (app?.theme ?? 'light') !== 'light'
+  const id = React.useId().replace(/:/g, '')
 
   return (
     <span
-      className={`logo-badge ${className} ${dark ? 'is-dark' : 'is-light'}`}
+      className={`logo-badge ${className} ${dark ? 'is-dark' : 'is-light'} ${animate ? 'is-animating' : ''}`}
       style={{ width: size, height: size }}
       aria-label="Physique 57"
     >
       <svg viewBox="0 0 48 48" width={size} height={size} aria-hidden="true" className="logo-mark">
         <defs>
-          <linearGradient id="p57-logo-grad" x1="0%" y1="0%" x2="100%" y2="100%">
-            <stop offset="0%" stopColor={dark ? '#ff6b81' : '#0f172a'} />
-            <stop offset="55%" stopColor={dark ? '#f97316' : '#334155'} />
-            <stop offset="100%" stopColor={dark ? '#fbbf24' : '#64748b'} />
+          <linearGradient id={`tile-${id}`} x1="0%" y1="0%" x2="100%" y2="100%">
+            {dark ? (
+              <><stop offset="0%" stopColor="#fb7185" /><stop offset="52%" stopColor="#e11d48" /><stop offset="100%" stopColor="#9f1239" /></>
+            ) : (
+              <><stop offset="0%" stopColor="#2b2f39" /><stop offset="55%" stopColor="#16181d" /><stop offset="100%" stopColor="#0a0c0f" /></>
+            )}
           </linearGradient>
         </defs>
-        <circle cx="24" cy="24" r="19" fill="none" stroke="url(#p57-logo-grad)" strokeWidth="2.6" opacity=".7" />
-        <path d="M16 30.5V17.2h8.2c4.4 0 7.1 2.1 7.1 5.4 0 3.4-2.7 5.9-7.1 5.9h-3.8v2h-4.4Zm4.4-5.3h3.5c2 0 3.1-.8 3.1-2.3 0-1.3-1.1-2.1-3.1-2.1h-3.5v4.4Z" fill="url(#p57-logo-grad)" />
-        <path d="M31.6 31c0-1.6 1.3-2.9 2.9-2.9s2.9 1.3 2.9 2.9-1.3 2.9-2.9 2.9-2.9-1.3-2.9-2.9Z" fill="url(#p57-logo-grad)" opacity=".95" />
+
+        <rect x="1" y="1" width="46" height="46" rx="13" fill={`url(#tile-${id})`} />
+        {/* The barre: one confident stroke the numerals hang from. */}
+        <path
+          className="logo-barre"
+          d="M9 20.5c5-6.5 25-6.5 30 0"
+          fill="none"
+          stroke={dark ? 'rgba(255,255,255,.92)' : '#fb7185'}
+          strokeWidth="2.8"
+          strokeLinecap="round"
+        />
+        <text
+          x="24" y="38" textAnchor="middle"
+          fontFamily="'Bricolage Grotesque', system-ui, sans-serif"
+          fontSize="19" fontWeight="800" letterSpacing="-0.5"
+          fill="#fff"
+        >57</text>
       </svg>
     </span>
   )

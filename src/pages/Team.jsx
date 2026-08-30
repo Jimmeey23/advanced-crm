@@ -37,8 +37,8 @@ export default function Team() {
     <div className="p-6 space-y-6 max-w-[1200px]">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="font-display font-bold text-white text-[18px]">Studio locations</h2>
-          <p className="text-[12.5px] text-slate-500 mt-0.5">Manage locations and the sales teams that cover them</p>
+          <h2 className="font-display font-bold text-white text-lg">Studio locations</h2>
+          <p className="text-sm text-slate-500 mt-0.5">Manage locations and the sales teams that cover them</p>
         </div>
         <div className="flex items-center gap-2">
           <button className="btn btn-soft" onClick={() => setFaceoffOpen(true)}><Swords size={15} /> Associate faceoff</button>
@@ -57,8 +57,8 @@ export default function Team() {
             <div key={loc.id} className={`card card-hover p-5 ${loc.active === false ? 'opacity-60' : ''}`}>
               <div className="flex items-start justify-between mb-3">
                 <div>
-                  <h3 className="font-display font-semibold text-white text-[14.5px]">{loc.name}</h3>
-                  <p className="text-[11.5px] text-slate-500 flex items-center gap-1 mt-1"><MapPin size={11} /> {loc.city}, {loc.country}</p>
+                  <h3 className="font-display font-semibold text-white text-md">{loc.name}</h3>
+                  <p className="text-xs text-slate-500 flex items-center gap-1 mt-1"><MapPin size={11} /> {loc.city}, {loc.country}</p>
                 </div>
                 <div className="flex items-center gap-1">
                   {loc.active === false && <span className="chip bg-amber-500/10 border border-amber-400/20 text-amber-300">Inactive</span>}
@@ -82,23 +82,23 @@ export default function Team() {
                     <button key={a.id} type="button" disabled={role === 'agent'} className={`w-full text-left flex items-center gap-2.5 rounded-xl bg-white/[0.03] border border-white/6 px-3 py-2 hover:bg-white/[0.06] transition-colors ${a.active === false ? 'opacity-55' : ''} ${role === 'agent' ? '!cursor-default' : ''}`} onClick={() => { if (role !== 'agent') setEditAsn(a) }}>
                       <Avatar name={a.name} color={a.color} photoUrl={a.photoUrl} photoZoom={a.photoZoom} photoPosX={a.photoPosX} photoPosY={a.photoPosY} size={26} fallback="👤" />
                       <div className="flex-1 min-w-0">
-                        <div className="text-[12.5px] font-semibold text-slate-200 truncate">{a.name}</div>
-                        <div className="text-[10.5px] text-slate-500">{a.role}{a.active === false ? ' · inactive' : ''}</div>
+                        <div className="text-sm font-semibold text-slate-200 truncate">{a.name}</div>
+                        <div className="text-xs text-slate-500">{a.role}{a.active === false ? ' · inactive' : ''}</div>
                       </div>
                       <div className="text-right">
-                        <div className="text-[11.5px] text-emerald-400 mono">{money(stats?.revenue || 0)}</div>
-                        <div className="text-[10px] text-slate-500">{stats?.won || 0} won</div>
+                        <div className="text-xs text-emerald-400 mono">{money(stats?.revenue || 0)}</div>
+                        <div className="text-xs text-slate-500">{stats?.won || 0} won</div>
                       </div>
                     </button>
                   )
                 })}
-                {!locTeam.length && <p className="text-[11.5px] text-slate-600">No associates yet.</p>}
+                {!locTeam.length && <p className="text-xs text-slate-600">No associates yet.</p>}
               </div>
 
               {role !== 'agent' && (
                 <div className="grid grid-cols-2 gap-2 mt-3">
-                  <button className="btn btn-ghost !py-1.5 !text-[12px]" onClick={() => setManageTeamLocation(loc)}><UserCog size={13} /> Manage team</button>
-                  <button className="btn btn-ghost !py-1.5 !text-[12px]" onClick={() => setAsnModal({ open: true, locationId: loc.id })}><Plus size={13} /> New associate</button>
+                  <button className="btn btn-ghost !py-1.5 !text-sm" onClick={() => setManageTeamLocation(loc)}><UserCog size={13} /> Manage team</button>
+                  <button className="btn btn-ghost !py-1.5 !text-sm" onClick={() => setAsnModal({ open: true, locationId: loc.id })}><Plus size={13} /> New associate</button>
                 </div>
               )}
             </div>
@@ -149,7 +149,7 @@ function LocationTeamModal({ location, associates, onClose, onSaved }) {
         <span className="location-team-check">{selected.has(associate.id) ? 'Assigned' : 'Add'}</span>
       </button>)}
     </div>
-    {error && <p className="text-[12px] text-rose-400 mt-3">{error}</p>}
+    {error && <p className="text-sm text-rose-400 mt-3">{error}</p>}
     <div className="flex justify-end gap-2 pt-4"><button className="btn btn-ghost" onClick={onClose}>Cancel</button><button className="btn btn-primary" disabled={saving} onClick={saveAssignments}>{saving ? 'Saving…' : 'Save assignments'}</button></div>
   </Modal>
 }
@@ -157,8 +157,8 @@ function LocationTeamModal({ location, associates, onClose, onSaved }) {
 function MiniStat({ icon, label, value, color }) {
   return (
     <div className="rounded-xl bg-black/20 border border-white/8 px-2 py-2 text-center">
-      <div className="flex items-center justify-center gap-1 text-[10px] uppercase tracking-wider text-slate-500 mb-1" style={{ color }}>{icon}{label}</div>
-      <div className="font-display text-[17px] font-bold text-white mono">{value}</div>
+      <div className="flex items-center justify-center gap-1 text-xs uppercase tracking-wider text-slate-500 mb-1" style={{ color }}>{icon}{label}</div>
+      <div className="font-display text-lg font-bold text-white mono">{value}</div>
     </div>
   )
 }
@@ -193,8 +193,8 @@ function LocationModal({ modal, onClose, onSaved }) {
           <div><label className="label">Country</label><input className="input" value={form.country} onChange={e => setForm({ ...form, country: e.target.value })} /></div>
         </div>
         <div><label className="label">Address</label><input className="input" value={form.address} onChange={e => setForm({ ...form, address: e.target.value })} /></div>
-        {err && <p className="text-[12px] text-rose-400">{err}</p>}
-        <div className="flex justify-end gap-2 pt-1">
+        {err && <p className="text-sm text-rose-400">{err}</p>}
+        <div className="modal-footer">
           <button type="button" className="btn btn-ghost" onClick={onClose}>Cancel</button>
           <button className="btn btn-primary" disabled={saving}>{saving ? 'Saving…' : modal.location ? 'Save changes' : 'Add location'}</button>
         </div>
@@ -236,7 +236,7 @@ function AssociateModal({ modal, onClose, onSaved }) {
           <div><label className="label">Role</label><select className="input" value={form.role} onChange={e => setForm({ ...form, role: e.target.value })}><option>Sales Associate</option><option>Studio Manager</option><option>Lead Generator</option></select></div>
           <div><label className="label">Primary studio</label><select className="input" value={form.locationId} onChange={e => setForm({ ...form, locationId: e.target.value, locationIds: [e.target.value, ...(form.locationIds || []).filter(id => id !== e.target.value)] })}>{(boot?.locations || []).map(l => <option key={l.id} value={l.id}>{l.name}</option>)}</select></div>
         </div>
-        <div><label className="label">Studio coverage</label><div className="grid grid-cols-2 gap-2 rounded-lg border border-white/10 p-2">{(boot?.locations || []).map(location => <label key={location.id} className="flex items-center gap-2 text-[11px] text-slate-300"><input type="checkbox" checked={(form.locationIds || []).includes(location.id)} onChange={() => { const selected = form.locationIds || []; const locationIds = selected.includes(location.id) ? selected.filter(id => id !== location.id) : [...selected, location.id]; setForm({ ...form, locationIds, locationId: locationIds[0] || '' }) }} />{location.name}</label>)}</div></div>
+        <div><label className="label">Studio coverage</label><div className="grid grid-cols-2 gap-2 rounded-lg border border-white/10 p-2">{(boot?.locations || []).map(location => <label key={location.id} className="flex items-center gap-2 text-xs text-slate-300"><input type="checkbox" checked={(form.locationIds || []).includes(location.id)} onChange={() => { const selected = form.locationIds || []; const locationIds = selected.includes(location.id) ? selected.filter(id => id !== location.id) : [...selected, location.id]; setForm({ ...form, locationIds, locationId: locationIds[0] || '' }) }} />{location.name}</label>)}</div></div>
         <div className="grid grid-cols-3 gap-3">
           <div><label className="label">Email</label><input className="input" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} /></div>
           <div><label className="label">Revenue target</label><input className="input" type="number" min="0" value={form.revenueTargetMonthly} onChange={e => setForm({ ...form, revenueTargetMonthly: Number(e.target.value) })} /></div>
@@ -245,8 +245,8 @@ function AssociateModal({ modal, onClose, onSaved }) {
         <div><label className="label">Avatar color</label>
           <div className="flex gap-2">{colors.map(c => <button key={c} type="button" onClick={() => setForm({ ...form, color: c })} className={`w-7 h-7 rounded-full transition-transform ${form.color === c ? 'ring-2 ring-white scale-110' : 'opacity-70'}`} style={{ background: c }} />)}</div>
         </div>
-        {err && <p className="text-[12px] text-rose-400">{err}</p>}
-        <div className="flex justify-end gap-2 pt-1">
+        {err && <p className="text-sm text-rose-400">{err}</p>}
+        <div className="modal-footer">
           <button type="button" className="btn btn-ghost" onClick={onClose}>Cancel</button>
           <button className="btn btn-primary" disabled={saving}>{saving ? 'Saving…' : 'Add associate'}</button>
         </div>
@@ -294,7 +294,7 @@ function EditAssociateModal({ associate, onClose, onSaved }) {
           <div><label className="label">Role</label><select className="input" value={form.role || 'Sales Associate'} onChange={e => setForm({ ...form, role: e.target.value })}><option>Sales Associate</option><option>Studio Manager</option><option>Lead Generator</option></select></div>
           <div><label className="label">Primary studio</label><select className="input" value={form.locationId || ''} onChange={e => setForm({ ...form, locationId: e.target.value, locationIds: [e.target.value, ...(form.locationIds || []).filter(id => id !== e.target.value)] })}>{(boot?.locations || []).filter(l => l.active !== false).map(l => <option key={l.id} value={l.id}>{l.name}</option>)}</select></div>
         </div>
-        <div><label className="label">Studio coverage</label><div className="grid grid-cols-2 gap-2 rounded-lg border border-white/10 p-2">{(boot?.locations || []).filter(l => l.active !== false).map(location => <label key={location.id} className="flex items-center gap-2 text-[11px] text-slate-300"><input type="checkbox" checked={(form.locationIds || []).includes(location.id)} onChange={() => toggleLocation(location.id)} />{location.name}</label>)}</div></div>
+        <div><label className="label">Studio coverage</label><div className="grid grid-cols-2 gap-2 rounded-lg border border-white/10 p-2">{(boot?.locations || []).filter(l => l.active !== false).map(location => <label key={location.id} className="flex items-center gap-2 text-xs text-slate-300"><input type="checkbox" checked={(form.locationIds || []).includes(location.id)} onChange={() => toggleLocation(location.id)} />{location.name}</label>)}</div></div>
         <div className="grid grid-cols-3 gap-3">
           <div><label className="label">Revenue target</label><input className="input" type="number" min="0" value={form.revenueTargetMonthly || 0} onChange={e => setForm({ ...form, revenueTargetMonthly: Number(e.target.value) })} /></div>
           <div><label className="label">Conversion target %</label><input className="input" type="number" min="0" max="100" value={form.conversionTargetPct || 0} onChange={e => setForm({ ...form, conversionTargetPct: Number(e.target.value) })} /></div>
@@ -310,23 +310,23 @@ function EditAssociateModal({ associate, onClose, onSaved }) {
         {form.photoUrl && (
           <div className="space-y-2.5 pt-1">
             <div>
-              <div className="flex items-center justify-between"><label className="label !mb-0">Zoom</label><span className="text-[11px] text-slate-500">{form.photoZoom}%</span></div>
+              <div className="flex items-center justify-between"><label className="label !mb-0">Zoom</label><span className="text-xs text-slate-500">{form.photoZoom}%</span></div>
               <input type="range" min={100} max={250} step={1} value={form.photoZoom} onChange={e => setForm({ ...form, photoZoom: Number(e.target.value) })} className="w-full" />
             </div>
             <div>
-              <div className="flex items-center justify-between"><label className="label !mb-0">Horizontal position</label><span className="text-[11px] text-slate-500">{form.photoPosX}%</span></div>
+              <div className="flex items-center justify-between"><label className="label !mb-0">Horizontal position</label><span className="text-xs text-slate-500">{form.photoPosX}%</span></div>
               <input type="range" min={0} max={100} step={1} value={form.photoPosX} onChange={e => setForm({ ...form, photoPosX: Number(e.target.value) })} className="w-full" />
             </div>
             <div>
-              <div className="flex items-center justify-between"><label className="label !mb-0">Vertical position</label><span className="text-[11px] text-slate-500">{form.photoPosY}%</span></div>
+              <div className="flex items-center justify-between"><label className="label !mb-0">Vertical position</label><span className="text-xs text-slate-500">{form.photoPosY}%</span></div>
               <input type="range" min={0} max={100} step={1} value={form.photoPosY} onChange={e => setForm({ ...form, photoPosY: Number(e.target.value) })} className="w-full" />
             </div>
-            <button type="button" className="btn btn-ghost !py-1.5 !text-[11.5px]" onClick={() => setForm({ ...form, photoZoom: 100, photoPosX: 50, photoPosY: 50 })}>Reset crop</button>
+            <button type="button" className="btn btn-ghost !py-1.5 !text-xs" onClick={() => setForm({ ...form, photoZoom: 100, photoPosX: 50, photoPosY: 50 })}>Reset crop</button>
           </div>
         )}
-        <p className="text-[11px] text-slate-500">A file under <code>public/avatars/</code> (e.g. <code>/avatars/jane.jpg</code>) or any hosted image URL. Leave blank to use initials.</p>
-        {err && <p className="text-[12px] text-rose-400">{err}</p>}
-        <div className="flex justify-end gap-2 pt-1">
+        <p className="text-xs text-slate-500">A file under <code>public/avatars/</code> (e.g. <code>/avatars/jane.jpg</code>) or any hosted image URL. Leave blank to use initials.</p>
+        {err && <p className="text-sm text-rose-400">{err}</p>}
+        <div className="modal-footer">
           <button type="button" className="btn btn-ghost" onClick={onClose}>Cancel</button>
           <button className="btn btn-primary" disabled={saving}>{saving ? 'Saving…' : 'Save'}</button>
         </div>

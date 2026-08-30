@@ -140,8 +140,8 @@ export default function ComposeModal({ open, onClose, lead, defaultChannel = 'wh
         <div className="flex items-center gap-2.5 mb-4">
           <Avatar name={lead.fullName} size={30} />
           <div className="min-w-0 flex-1">
-            <div className="text-[13px] font-semibold text-white truncate">{lead.fullName}</div>
-            <div className="text-[11px] text-slate-500 truncate">{lead.phone || lead.email}</div>
+            <div className="text-base font-semibold text-white truncate">{lead.fullName}</div>
+            <div className="text-xs text-slate-500 truncate">{lead.phone || lead.email}</div>
           </div>
         </div>
       )}
@@ -154,8 +154,8 @@ export default function ComposeModal({ open, onClose, lead, defaultChannel = 'wh
             <button
               key={c.id}
               onClick={() => setChannel(c.id)}
-              className={`flex-1 flex items-center justify-center gap-1.5 rounded-xl border px-2 py-2 text-[12px] font-semibold transition-colors ${
-                active ? 'border-blue-500/20 bg-blue-500/10 text-slate-900' : 'border-slate-200 bg-white text-slate-500 hover:text-slate-700'
+              className={`flex-1 flex items-center justify-center gap-1.5 rounded-xl border px-2 py-2 text-sm font-semibold transition-colors ${
+                active ? 'border-blue-500/20 bg-blue-500/10 text-slate-900' : 'border-slate-200 bg-pure-white text-slate-500 hover:text-slate-700'
               }`}
             >
               <Icon size={13} style={{ color: active ? c.color : undefined }} /> {c.label}
@@ -167,30 +167,30 @@ export default function ComposeModal({ open, onClose, lead, defaultChannel = 'wh
       {isWhatsApp ? (
         <div className="space-y-2.5">
           <div>
-            <label className="text-[10.5px] uppercase tracking-wider text-slate-500 font-semibold mb-1 block">Template</label>
+            <label className="text-xs uppercase tracking-wider text-slate-500 font-semibold mb-1 block">Template</label>
             <select className="input select-strong" value={templateId} onChange={e => setTemplateId(e.target.value)}>
               {templates.map(t => <option key={t.id} value={t.id}>{t.label || t.name}</option>)}
             </select>
-            <div className="text-[11px] text-slate-500 mt-1 flex items-center gap-1.5 flex-wrap">
+            <div className="text-xs text-slate-500 mt-1 flex items-center gap-1.5 flex-wrap">
               <Sparkles size={11} />
               {apiTemplates?.length ? 'Live approved templates from your Respond.io WhatsApp channel' : 'Manually configured in Settings > Integrations'}
             </div>
-            {templateLoadError && !apiTemplates?.length && <p className="text-[11px] text-amber-500 mt-1">{templateLoadError}</p>}
+            {templateLoadError && !apiTemplates?.length && <p className="text-xs text-amber-500 mt-1">{templateLoadError}</p>}
           </div>
 
           <div className="space-y-2">
             {(selectedTemplate?.parameters || []).map((label, idx) => (
               <div key={idx}>
-                <label className="text-[10.5px] uppercase tracking-wider text-slate-500 font-semibold mb-1 block">Parameter {idx + 1}{label ? ` — ${label}` : ''}</label>
+                <label className="text-xs uppercase tracking-wider text-slate-500 font-semibold mb-1 block">Parameter {idx + 1}{label ? ` — ${label}` : ''}</label>
                 <input className="input !bg-white/[0.06]" value={templateValues[idx] || ''} onChange={e => setTemplateValue(idx, e.target.value)} placeholder={label || `Value ${idx + 1}`} />
               </div>
             ))}
-            {!selectedTemplate?.parameters?.length && <p className="text-[12px] text-slate-500">This template has no parameters.</p>}
+            {!selectedTemplate?.parameters?.length && <p className="text-sm text-slate-500">This template has no parameters.</p>}
           </div>
 
-          {error && <p className="text-[12px] text-rose-400">{error}</p>}
+          {error && <p className="text-sm text-rose-400">{error}</p>}
 
-          <div className="flex justify-end gap-2 pt-1">
+          <div className="modal-footer">
             <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
             <button className="btn btn-primary" onClick={sendTemplate} disabled={sending || !selectedTemplate}>
               {sending ? <Spinner size={14} /> : <Send size={14} />} Send template
@@ -209,10 +209,10 @@ export default function ComposeModal({ open, onClose, lead, defaultChannel = 'wh
 
           {suggestions.length > 0 && (
             <div className="rounded-xl bg-blue-500/[0.06] border border-blue-500/15 p-2.5">
-              <div className="text-[10.5px] uppercase tracking-wider text-blue-500 font-bold mb-1.5 flex items-center gap-1"><Sparkles size={10} /> AI suggested messages</div>
+              <div className="text-xs uppercase tracking-wider text-blue-500 font-bold mb-1.5 flex items-center gap-1"><Sparkles size={10} /> AI suggested messages</div>
               <div className="space-y-1.5">
                 {suggestions.slice(0, 2).map((s, i) => (
-                  <button key={i} className="w-full text-left text-[11.5px] text-slate-700 bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 hover:bg-slate-50 transition-colors" onClick={() => setMessage(s.text)}>
+                  <button key={i} className="w-full text-left text-xs text-slate-700 bg-pure-white border border-slate-200 rounded-lg px-2.5 py-1.5 hover:bg-slate-50 transition-colors" onClick={() => setMessage(s.text)}>
                     “{s.text}”
                   </button>
                 ))}
@@ -220,14 +220,14 @@ export default function ComposeModal({ open, onClose, lead, defaultChannel = 'wh
             </div>
           )}
 
-          <label className="flex items-center gap-2 text-[12px] text-slate-700 select-none">
+          <label className="flex items-center gap-2 text-sm text-slate-700 select-none">
             <input type="checkbox" className="accent-rose-500" checked={log} onChange={e => setLog(e.target.checked)} />
             Log this message as a completed follow-up
           </label>
 
-          {error && <p className="text-[12px] text-rose-400">{error}</p>}
+          {error && <p className="text-sm text-rose-400">{error}</p>}
 
-          <div className="flex justify-end gap-2 pt-1">
+          <div className="modal-footer">
             <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
             <button className="btn btn-primary" onClick={send} disabled={sending || !message.trim()}>
               {sending ? <Spinner size={14} /> : <Send size={14} />} Send {meta?.label}

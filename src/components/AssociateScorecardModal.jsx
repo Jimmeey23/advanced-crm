@@ -27,7 +27,7 @@ export default function AssociateScorecardModal({ associateId, onClose, openLead
   return (
     <Modal open={!!associateId} onClose={onClose} width={1040}>
       {loading && <div className="py-14 text-center text-slate-500">Loading scorecard…</div>}
-      {error && <div className="py-14 text-center text-rose-400 text-[13px]">{error.message}</div>}
+      {error && <div className="py-14 text-center text-rose-400 text-base">{error.message}</div>}
       {!loading && data && (
         <div className="associate-scorecard">
           <section className="associate-scorecard-hero">
@@ -61,7 +61,7 @@ export default function AssociateScorecardModal({ associateId, onClose, openLead
 
           <div className="associate-scorecard-grid">
             <div className="associate-scorecard-section associate-scorecard-chart">
-              <h3 className="font-display font-semibold text-white text-[13px] mb-2">6-month trend</h3>
+              <h3 className="font-display font-semibold text-white text-base mb-2">6-month trend</h3>
               <div className="h-[160px]">
                 <ResponsiveContainer width="100%" height="100%">
                   <LineChart data={data.history} margin={{ top: 5, right: 5, left: -20, bottom: 0 }}>
@@ -81,7 +81,7 @@ export default function AssociateScorecardModal({ associateId, onClose, openLead
 
           <div className="associate-scorecard-grid">
             <div className="associate-scorecard-section associate-scorecard-chart">
-              <h3 className="font-display font-semibold text-white text-[13px] mb-2">Monthly revenue</h3>
+              <h3 className="font-display font-semibold text-white text-base mb-2">Monthly revenue</h3>
               <div className="h-[160px]">
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={data.history} margin={{ top: 5, right: 5, left: -10, bottom: 0 }}>
@@ -95,7 +95,7 @@ export default function AssociateScorecardModal({ associateId, onClose, openLead
               </div>
             </div>
             <div className="associate-scorecard-section overflow-hidden">
-              <div className="px-4 py-2.5 border-b border-white/8 text-[12px] font-semibold text-slate-200 flex items-center gap-2"><CalendarCheck2 size={13} className="text-amber-400" /> Follow-up health</div>
+              <div className="px-4 py-2.5 border-b border-white/8 text-sm font-semibold text-slate-200 flex items-center gap-2"><CalendarCheck2 size={13} className="text-amber-400" /> Follow-up health</div>
               <div className="p-4 grid grid-cols-2 gap-3">
                 <StatCard icon={<CalendarCheck2 size={13} />} label="Completion" value={`${data.followUpHealth.completionRate}%`} color="#fbbf24" />
                 <StatCard icon={<AlertTriangle size={13} />} label="Overdue" value={data.followUpHealth.overdueCount} color="#f43f5e" />
@@ -112,7 +112,7 @@ export default function AssociateScorecardModal({ associateId, onClose, openLead
 
           <div className="associate-scorecard-grid">
             <ActivityList title="Recent new leads" items={data.recentNew} openLead={openLead} onClose={onClose}
-              render={l => <><span className="truncate">{l.fullName}</span><span className="chip !px-1.5 !py-0.5 text-[9px] bg-white/5 border border-white/10 text-slate-400 shrink-0">{l.stage}</span></>} />
+              render={l => <><span className="truncate">{l.fullName}</span><span className="chip !px-1.5 !py-0.5 text-2xs bg-white/5 border border-white/10 text-slate-400 shrink-0">{l.stage}</span></>} />
             <ActivityList title="Recent wins" items={data.recentWon} openLead={openLead} onClose={onClose}
               render={l => <><span className="truncate">{l.fullName}</span><span className="mono text-emerald-400 shrink-0">{money(l.revenue)}</span></>} />
           </div>
@@ -168,9 +168,9 @@ function PerformanceComparison({ data }) {
 function MiniStat({ label, value, sub, color }) {
   return (
     <div className="associate-scorecard-mini-stat">
-      <div className="text-[9px] uppercase tracking-wider text-slate-500">{label}</div>
-      <div className="font-display text-[16px] font-bold mono" style={{ color }}>{value}</div>
-      {sub && <div className="text-[10px] text-slate-500">{sub}</div>}
+      <div className="text-2xs uppercase tracking-wider text-slate-500">{label}</div>
+      <div className="font-display text-lg font-bold mono" style={{ color }}>{value}</div>
+      {sub && <div className="text-xs text-slate-500">{sub}</div>}
     </div>
   )
 }
@@ -178,9 +178,9 @@ function MiniStat({ label, value, sub, color }) {
 function StatCard({ icon, label, value, sub, color }) {
   return (
     <div className="associate-scorecard-stat">
-      <div className="flex items-center gap-1.5 text-[9.5px] uppercase tracking-wider text-slate-500 mb-1.5" style={{ color }}>{icon}{label}</div>
-      <div className="font-display text-[16px] font-bold text-white mono">{value}</div>
-      {sub && <div className="text-[10px] text-slate-500 mt-0.5">{sub}</div>}
+      <div className="flex items-center gap-1.5 text-2xs uppercase tracking-wider text-slate-500 mb-1.5" style={{ color }}>{icon}{label}</div>
+      <div className="font-display text-lg font-bold text-white mono">{value}</div>
+      {sub && <div className="text-xs text-slate-500 mt-0.5">{sub}</div>}
     </div>
   )
 }
@@ -189,16 +189,16 @@ function BreakdownTable({ title, rows, labelKey, countOnly }) {
   const maxCount = Math.max(1, ...(rows || []).map(row => row.count || 0))
   return (
     <div className="associate-scorecard-section overflow-hidden">
-      <div className="px-4 py-2.5 border-b border-white/8 text-[12px] font-semibold text-slate-200">{title}</div>
+      <div className="px-4 py-2.5 border-b border-white/8 text-sm font-semibold text-slate-200">{title}</div>
       <div className="max-h-[180px] overflow-y-auto scrollbar-thin">
         {rows?.length ? rows.map(r => (
-          <div key={r[labelKey]} className="associate-breakdown-row flex items-center gap-2 px-4 py-1.5 text-[12px] border-b border-white/5 last:border-0">
+          <div key={r[labelKey]} className="associate-breakdown-row flex items-center gap-2 px-4 py-1.5 text-sm border-b border-white/5 last:border-0">
             <i style={{ width: `${Math.max(3, (r.count / maxCount) * 100)}%` }} />
             <span className="text-slate-300 flex-1 truncate">{r[labelKey]}</span>
             <span className="mono text-slate-400">{r.count}</span>
-            {!countOnly && <span className="mono text-emerald-400 text-[10.5px] shrink-0 w-10 text-right">{r.wonRate}%</span>}
+            {!countOnly && <span className="mono text-emerald-400 text-xs shrink-0 w-10 text-right">{r.wonRate}%</span>}
           </div>
-        )) : <p className="text-[11.5px] text-slate-500 px-4 py-3">No data.</p>}
+        )) : <p className="text-xs text-slate-500 px-4 py-3">No data.</p>}
       </div>
     </div>
   )
@@ -207,14 +207,14 @@ function BreakdownTable({ title, rows, labelKey, countOnly }) {
 function ActivityList({ title, items, openLead, onClose, render }) {
   return (
     <div className="associate-scorecard-section overflow-hidden">
-      <div className="px-4 py-2.5 border-b border-white/8 text-[12px] font-semibold text-slate-200">{title}</div>
+      <div className="px-4 py-2.5 border-b border-white/8 text-sm font-semibold text-slate-200">{title}</div>
       <div className="max-h-[200px] overflow-y-auto scrollbar-thin">
         {items?.length ? items.map(l => (
-          <button key={l.id} className="w-full text-left flex items-center gap-2 px-4 py-2 text-[12px] hover:bg-white/[0.04] transition-colors border-b border-white/5 last:border-0"
+          <button key={l.id} className="w-full text-left flex items-center gap-2 px-4 py-2 text-sm hover:bg-white/[0.04] transition-colors border-b border-white/5 last:border-0"
             onClick={() => { onClose(); openLead(l.id) }}>
             {render(l)}
           </button>
-        )) : <p className="text-[11.5px] text-slate-500 px-4 py-3">None yet.</p>}
+        )) : <p className="text-xs text-slate-500 px-4 py-3">None yet.</p>}
       </div>
     </div>
   )

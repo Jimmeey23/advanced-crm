@@ -73,7 +73,7 @@ export default function MetricCard({
               <span className="mcard-icon flex items-center justify-center w-[24px] h-[24px] rounded-full shrink-0" style={{ background: color }}>
                 {Icon ? <Icon size={12} strokeWidth={2.5} color="#ffffff" /> : null}
               </span>
-              <span className="mcard-title font-bold text-[12.5px] tracking-tight truncate">{title}</span>
+              <span className="mcard-title font-bold text-sm tracking-tight truncate">{title}</span>
             </div>
             <InfoTip text={description || defaultSummary(title, value)} />
           </div>
@@ -103,14 +103,14 @@ export default function MetricCard({
 
           <div className="relative z-10 flex justify-between items-start mb-2.5 shrink-0">
             <div className="flex items-center gap-1.5 min-w-0">
-              <span className="mcard-back-title text-[11.5px] font-bold uppercase tracking-widest truncate">{title}</span>
+              <span className="mcard-back-title text-xs font-bold uppercase tracking-widest truncate">{title}</span>
             </div>
             <button className="mcard-x w-[22px] h-[22px] shrink-0 flex items-center justify-center rounded-full transition-colors">
               <X size={13} strokeWidth={2.5} />
             </button>
           </div>
 
-          <div className="mcard-desc relative z-10 text-[11px] font-medium mb-2.5 line-clamp-2 shrink-0 leading-relaxed">
+          <div className="mcard-desc relative z-10 text-xs font-medium mb-2.5 line-clamp-2 shrink-0 leading-relaxed">
             {description || defaultSummary(title, value)}
           </div>
 
@@ -176,8 +176,8 @@ function TrendBox({ label, pct }) {
   if (pct === undefined || pct === null || Number.isNaN(pct)) {
     return (
       <div className="mcard-trendbox flex-1 flex flex-col rounded-[10px] py-1.5 px-2.5 items-center justify-center">
-        <div className="mcard-trendbox-label text-[9.5px] font-bold uppercase tracking-widest">{label}</div>
-        <div className="mcard-trendbox-empty text-[13px] font-extrabold mt-[1px]">—</div>
+        <div className="mcard-trendbox-label text-2xs font-bold uppercase tracking-widest">{label}</div>
+        <div className="mcard-trendbox-empty text-base font-extrabold mt-[1px]">—</div>
       </div>
     )
   }
@@ -185,8 +185,8 @@ function TrendBox({ label, pct }) {
   const rounded = Math.round(Math.abs(pct))
   return (
     <div className="mcard-trendbox flex-1 flex flex-col rounded-[10px] py-1.5 px-2.5 items-center justify-center transition-colors">
-      <div className="mcard-trendbox-label text-[9.5px] font-bold uppercase tracking-widest">{label}</div>
-      <div className={`mt-[1px] text-[13px] font-extrabold flex items-center justify-center gap-[1px] ${up ? 'mcard-trendbox-up' : 'mcard-trendbox-down'}`}>
+      <div className="mcard-trendbox-label text-2xs font-bold uppercase tracking-widest">{label}</div>
+      <div className={`mt-[1px] text-base font-extrabold flex items-center justify-center gap-[1px] ${up ? 'mcard-trendbox-up' : 'mcard-trendbox-down'}`}>
         {up ? <ArrowUpRight size={14} strokeWidth={2.5} /> : <ArrowDownRight size={14} strokeWidth={2.5} />}
         {up ? '+' : '-'}{rounded}%
       </div>
