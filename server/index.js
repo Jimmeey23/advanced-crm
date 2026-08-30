@@ -1904,12 +1904,17 @@ app.post('/api/stripe/payment-links', async (req, res) => {
       verifiedItems = [{ priceId: price.id, quantity: 1, name: product.name, amount, currency, recurring: null }]
     }
     const hasRecurring = verifiedItems.some(item => item.recurring)
+    let selectedPromotionCode = null
+    if (req.body?.promotionMode === 'auto' && req.body?.promotionCodeId) {
+      selectedPromotionCode = await stripeRequest(`/promotion_codes/${encodeURIComponent(req.body.promotionCodeId)}`)
+      if (!selectedPromotionCode?.active || !selectedPromotionCode?.code) throw new Error('The selected Stripe promotion code is no longer active.')
+    }
     const body = {
       'metadata[leadId]': metadata.leadId,
       'metadata[locationId]': metadata.locationId,
       'metadata[classType]': metadata.classType,
       'metadata[leadName]': metadata.leadName,
-      allow_promotion_codes: req.body?.promotionMode === 'customer' ? 'true' : undefined,
+      allow_promotion_codes: ['customer', 'auto'].includes(req.body?.promotionMode) ? 'true' : undefined,
       billing_address_collection: ['billing', 'shipping'].includes(req.body?.addressCollection) ? 'required' : undefined,
       'phone_number_collection[enabled]': req.body?.collectPhone ? 'true' : 'false',
       'tax_id_collection[enabled]': req.body?.collectTaxId ? 'true' : 'false',
@@ -1928,7 +1933,6 @@ app.post('/api/stripe/payment-links', async (req, res) => {
         body[`line_items[${index}][adjustable_quantity][maximum]`] = '99'
       }
     })
-    if (req.body?.promotionMode === 'auto' && req.body?.promotionCodeId) body['discounts[0][promotion_code]'] = String(req.body.promotionCodeId)
     if (req.body?.addressCollection === 'shipping') {
       const countries = Array.isArray(req.body?.shippingCountries) && req.body.shippingCountries.length ? req.body.shippingCountries : ['IN']
       countries.slice(0, 20).forEach((country, index) => { body[`shipping_address_collection[allowed_countries][${index}]`] = String(country).toUpperCase() })
@@ -1962,6 +1966,7 @@ app.post('/api/stripe/payment-links', async (req, res) => {
     const paymentLink = await stripeRequest('/payment_links', { method: 'POST', body })
     const shareUrl = new URL(paymentLink.url)
     if (lead.email) shareUrl.searchParams.set('prefilled_email', lead.email)
+    if (selectedPromotionCode?.code) shareUrl.searchParams.set('prefilled_promo_code', selectedPromotionCode.code)
     const subtotal = verifiedItems.reduce((sum, item) => sum + item.amount * item.quantity, 0)
     const record = paymentRecordFromLead(lead, {
       amount: subtotal,
@@ -1972,7 +1977,7 @@ app.post('/api/stripe/payment-links', async (req, res) => {
       items: verifiedItems,
       description: req.body?.description || '',
     }, 'open')
-    record.options = { promotionMode: req.body?.promotionMode || 'none', promotionCodeId: req.body?.promotionCodeId || null, addressCollection: req.body?.addressCollection || 'none', collectPhone: Boolean(req.body?.collectPhone), collectTaxId: Boolean(req.body?.collectTaxId), automaticTax: Boolean(req.body?.automaticTax), customFields }
+    record.options = { promotionMode: req.body?.promotionMode || 'none', promotionCodeId: req.body?.promotionCodeId || null, promotionCode: selectedPromotionCode?.code || null, addressCollection: req.body?.addressCollection || 'none', collectPhone: Boolean(req.body?.collectPhone), collectTaxId: Boolean(req.body?.collectTaxId), automaticTax: Boolean(req.body?.automaticTax), customFields }
     db.payments.unshift(record)
     lead.payments = [...(lead.payments || []), record.id]
     markDirty(lead.id)
