@@ -7,7 +7,7 @@ import {
   Users, TrendingUp, XCircle, Wallet, Clock, AlertTriangle, Flag,
   Trophy, PhoneOff, FlaskConical, CircleDot, PanelTop, Check, Pencil,
   MoreVertical, Tags, UserPlus, CalendarPlus, CreditCard, Eye, Lock, Keyboard,
-  Pin, PinOff, Calendar, Copy, ExternalLink, RefreshCw
+  Pin, PinOff, Calendar, Copy, ExternalLink, RefreshCw, IndianRupee, Plus, Minus, Trash
 } from 'lucide-react'
 import { useApp } from '../store.jsx'
 import { useFetch } from '../hooks.js'
@@ -193,6 +193,14 @@ export default function Leads({ initialSearch = '' }) {
   const [quickActionPaymentMethodId, setQuickActionPaymentMethodId] = useState('')
   const [quickActionPurchaseMembershipId, setQuickActionPurchaseMembershipId] = useState('')
   const [quickActionStripeItems, setQuickActionStripeItems] = useState([])
+  const [quickActionStripeOptions, setQuickActionStripeOptions] = useState({
+    promotionMode: 'none', promotionCodeId: '', addressCollection: 'none', shippingCountries: ['IN'],
+    collectPhone: false, collectTaxId: false, automaticTax: false, adjustableQuantity: false,
+    createCustomer: true, invoiceCreation: false, requireTerms: false, submitType: 'auto',
+    customFields: [], afterCompletion: 'hosted', redirectUrl: '', thankYouMessage: 'Thank you. Your payment was successful.',
+    limitPayments: true, completedSessionsLimit: 1, inactiveMessage: 'This payment link is no longer available.',
+    customTextSubmit: '', customTextAfterSubmit: ''
+  })
   const [focusLeadIds, setFocusLeadIds] = useState([])
   const [selected, setSelected] = useState(() => new Set())
   const [selectAllMatching, setSelectAllMatching] = useState(false)
@@ -223,8 +231,10 @@ export default function Leads({ initialSearch = '' }) {
     try { return JSON.parse(localStorage.getItem('p57_leads_col_widths') || '{}') } catch (e) { return {} }
   })
   const [aiAlertOpen, setAiAlertOpen] = useState(false)
+  const [aiAlertPosition, setAiAlertPosition] = useState(null)
   const [manualFlagOverrides, setManualFlagOverrides] = useState({})
   const tableJumpRef = useRef(null)
+  const aiAlertRef = useRef(null)
   const remotePrefsHydrated = useRef(false)
   useEffect(() => {
     if (!boot || remotePrefsHydrated.current) return
@@ -244,10 +254,28 @@ export default function Leads({ initialSearch = '' }) {
   useEffect(() => {
     if (!aiAlertOpen) return
     const closeOnKey = event => { if (event.key === 'Escape') setAiAlertOpen(false) }
-    const closeOutside = event => { if (!event.target.closest?.('.ai-alert-compact')) setAiAlertOpen(false) }
+    const closeOutside = event => { if (!event.target.closest?.('.ai-alert-compact, .ai-alert-panel')) setAiAlertOpen(false) }
+    const positionPanel = () => {
+      const rect = aiAlertRef.current?.getBoundingClientRect()
+      if (!rect) return
+      const width = Math.min(420, window.innerWidth - 24)
+      setAiAlertPosition({
+        top: Math.max(12, Math.min(rect.bottom + 10, window.innerHeight - 260)),
+        left: Math.max(12, Math.min(rect.right - width, window.innerWidth - width - 12)),
+        width
+      })
+    }
+    positionPanel()
     document.addEventListener('keydown', closeOnKey)
     document.addEventListener('mousedown', closeOutside, true)
-    return () => { document.removeEventListener('keydown', closeOnKey); document.removeEventListener('mousedown', closeOutside, true) }
+    window.addEventListener('resize', positionPanel)
+    window.addEventListener('scroll', positionPanel, true)
+    return () => {
+      document.removeEventListener('keydown', closeOnKey)
+      document.removeEventListener('mousedown', closeOutside, true)
+      window.removeEventListener('resize', positionPanel)
+      window.removeEventListener('scroll', positionPanel, true)
+    }
   }, [aiAlertOpen])
   const setColumns = (updater) => setColumnsRaw(prev => {
     const next = typeof updater === 'function' ? updater(prev) : updater
@@ -374,6 +402,7 @@ export default function Leads({ initialSearch = '' }) {
     setQuickActionPaymentMethodId('')
     setQuickActionPurchaseMembershipId('')
     setQuickActionStripeItems([])
+    setQuickActionStripeOptions({ promotionMode: 'none', promotionCodeId: '', addressCollection: 'none', shippingCountries: ['IN'], collectPhone: false, collectTaxId: false, automaticTax: false, adjustableQuantity: false, createCustomer: true, invoiceCreation: false, requireTerms: false, submitType: 'auto', customFields: [], afterCompletion: 'hosted', redirectUrl: '', thankYouMessage: 'Thank you. Your payment was successful.', limitPayments: true, completedSessionsLimit: 1, inactiveMessage: 'This payment link is no longer available.', customTextSubmit: '', customTextAfterSubmit: '' })
   }
 
   const submitQuickAction = async () => {
@@ -386,11 +415,13 @@ export default function Leads({ initialSearch = '' }) {
           items: quickActionStripeItems,
           amount: quickActionStripeItems.length ? undefined : Number(quickActionAmount),
           name: quickActionName || `Payment for ${quickActionLead.fullName}`,
-          description: `Created for ${quickActionLead.fullName} in Physique 57 CRM`
+          description: `Created for ${quickActionLead.fullName} in Physique 57 CRM`,
+          ...quickActionStripeOptions
         })
         setQuickActionUrl(result.payment.checkoutUrl)
         setQuickActionStatus(result.payment.status)
         toast('Stripe payment link created')
+        refreshData()
         return
       }
       let memberId = quickActionLead.memberId || quickActionLead.momence?.memberId
@@ -668,15 +699,15 @@ export default function Leads({ initialSearch = '' }) {
 
         <div className="leads-toolbar-group leads-toolbar-view">
           {(missedLeads.length > 0 || outreachLeads.length > 0) && (
-            <div className={`ai-alert-compact ${aiAlertOpen ? 'is-open' : ''}`}>
+            <div ref={aiAlertRef} className={`ai-alert-compact ${aiAlertOpen ? 'is-open' : ''}`}>
               <button className="ai-alert-trigger" onClick={() => setAiAlertOpen(v => !v)} title="AI missed follow-up and outreach detection" aria-expanded={aiAlertOpen}>
                 <span className="ai-alert-pulse" />
                 <Sparkles size={14} />
                 <span>AI alerts</span>
                 <span className="ai-alert-count">{missedLeads.length + outreachLeads.length}</span>
               </button>
-              {aiAlertOpen && (
-                <div className="ai-alert-panel">
+              {aiAlertOpen && aiAlertPosition && createPortal(
+                <div className="ai-alert-panel ai-alert-panel-portal" style={aiAlertPosition}>
                   <div className="ai-alert-panel-head">
                     <span className="ai-alert-panel-icon"><Sparkles size={13} /></span>
                     <div>
@@ -702,7 +733,8 @@ export default function Leads({ initialSearch = '' }) {
                     <button className="btn btn-ghost !py-1.5 !text-[12px]" onClick={jumpToTable}>View in table</button>
                     <button className="btn btn-ghost !py-1.5 !text-[12px]" onClick={() => setAiAlertOpen(false)}>Close</button>
                   </div>
-                </div>
+                </div>,
+                document.body
               )}
             </div>
           )}
@@ -852,6 +884,7 @@ export default function Leads({ initialSearch = '' }) {
         purchaseMembershipId={quickActionPurchaseMembershipId}
         paymentMethodId={quickActionPaymentMethodId}
         stripeItems={quickActionStripeItems}
+        stripeOptions={quickActionStripeOptions}
         onClose={() => setQuickActionLead(null)}
         onSubmit={submitQuickAction}
         setClassType={setQuickActionClass}
@@ -862,12 +895,13 @@ export default function Leads({ initialSearch = '' }) {
         setPurchaseMembershipId={setQuickActionPurchaseMembershipId}
         setPaymentMethodId={setQuickActionPaymentMethodId}
         setStripeItems={setQuickActionStripeItems}
+        setStripeOptions={setQuickActionStripeOptions}
       />
     </div>
   )
 }
 
-function QuickActionModal({ lead, mode, classType, amount, name, sessionId, membershipId, purchaseMembershipId, paymentMethodId, stripeItems, url, status, onClose, onSubmit, setClassType, setAmount, setName, setSessionId, setMembershipId, setPurchaseMembershipId, setPaymentMethodId, setStripeItems }) {
+function QuickActionModal({ lead, mode, classType, amount, name, sessionId, membershipId, purchaseMembershipId, paymentMethodId, stripeItems, stripeOptions, url, status, onClose, onSubmit, setClassType, setAmount, setName, setSessionId, setMembershipId, setPurchaseMembershipId, setPaymentMethodId, setStripeItems, setStripeOptions }) {
   const isPay = mode === 'stripe'
   const [sessions, setSessions] = useState([])
   const [activeMemberships, setActiveMemberships] = useState([])
@@ -875,6 +909,7 @@ function QuickActionModal({ lead, mode, classType, amount, name, sessionId, memb
   const [paymentMethods, setPaymentMethods] = useState([])
   const [loadingOptions, setLoadingOptions] = useState(false)
   const [payments, setPayments] = useState([])
+  const [promotionCodes, setPromotionCodes] = useState([])
   const [refreshingPayment, setRefreshingPayment] = useState('')
   const locationId = lead?.locationId
   const memberId = lead?.memberId || lead?.momence?.memberId
@@ -886,6 +921,7 @@ function QuickActionModal({ lead, mode, classType, amount, name, sessionId, memb
     setLoadingOptions(true)
     const requests = isPay ? [
       api.get('/api/stripe/catalog').then(data => alive && setCatalog(data.products || [])),
+      api.get('/api/stripe/promotion-codes').then(data => alive && setPromotionCodes(data.promotionCodes || [])),
       api.get(`/api/stripe/payments?${buildQuery({ leadId: lead.id })}`).then(data => alive && setPayments(data.payments || []))
     ] : [
       api.get(`/api/momence/host-memberships?${buildQuery({ locationId })}`).then(data => alive && setCatalog((data.memberships || []).filter(m => m.disabled !== true && m.isDeleted !== true))),
@@ -902,6 +938,14 @@ function QuickActionModal({ lead, mode, classType, amount, name, sessionId, memb
   const toggleStripeItem = product => setStripeItems(current => current.some(item => item.priceId === product.priceId)
     ? current.filter(item => item.priceId !== product.priceId)
     : [...current, { priceId: product.priceId, quantity: 1, recurring: Boolean(product.recurring) }])
+  const updateStripeQuantity = (priceId, quantity) => setStripeItems(current => current.map(item => item.priceId === priceId ? { ...item, quantity: Math.max(1, Math.min(99, quantity)) } : item))
+  const setStripeOption = (key, value) => setStripeOptions(current => ({ ...current, [key]: value }))
+  const selectedProducts = stripeItems.map(item => ({ ...catalog.find(product => product.priceId === item.priceId), ...item })).filter(item => item.priceId)
+  const subtotal = selectedProducts.length ? selectedProducts.reduce((sum, item) => sum + Number(item.amount || 0) * Number(item.quantity || 1), 0) : Number(amount || 0)
+  const selectedPromotion = promotionCodes.find(code => code.id === stripeOptions?.promotionCodeId)
+  const discount = stripeOptions?.promotionMode === 'auto' && selectedPromotion
+    ? Math.min(subtotal, selectedPromotion.percentOff != null ? subtotal * Number(selectedPromotion.percentOff) / 100 : Number(selectedPromotion.amountOff || 0)) : 0
+  const total = Math.max(0, subtotal - discount)
   const refreshPayment = async paymentId => {
     setRefreshingPayment(paymentId)
     try {
@@ -909,28 +953,61 @@ function QuickActionModal({ lead, mode, classType, amount, name, sessionId, memb
       setPayments(current => current.map(payment => payment.id === paymentId ? result.payment : payment))
     } finally { setRefreshingPayment('') }
   }
-  return <Modal open={!!lead} onClose={onClose} width={760}>
+  return <Modal open={!!lead} onClose={onClose} width={isPay ? 1080 : 760}>
     <ModalHeader title={isPay ? 'Create Stripe payment link' : 'Book a Studio Session'} subtitle={lead ? `${lead.fullName} · ${lead.email || lead.phone || 'No contact details'}` : ''} onClose={onClose} />
     <div className="quick-sale-modal space-y-3">
       <section className="quick-sale-section"><span>Your location</span><strong>{lead?.center || 'Lead studio'}</strong></section>
       <section className="quick-sale-section"><span>Customer</span><div className="quick-sale-customer"><strong>{lead?.fullName}</strong><small>{lead?.email || lead?.phone || 'Contact details required'}</small><em>{isPay ? 'Stripe Checkout' : (memberId ? `Momence #${memberId}` : 'Will be converted to a Momence member before checkout')}</em></div></section>
-      {isPay && <>
-        <section className="quick-sale-section stripe-product-picker">
-          <span>Stripe products</span>
-          {loadingOptions ? <div className="stripe-payment-empty"><Spinner size={16} /> Loading active prices…</div> : catalog.length ? <div className="stripe-product-grid">{catalog.map(product => {
-            const selected = stripeItems.some(item => item.priceId === product.priceId)
-            return <button type="button" key={product.priceId} className={`stripe-product-option ${selected ? 'is-selected' : ''}`} onClick={() => toggleStripeItem(product)}>
-              <i>{selected ? <Check size={13} /> : null}</i><strong>{product.name}</strong><small>{product.description || (product.recurring ? `Billed every ${product.recurring.interval}` : 'One-time payment')}</small><b>{money(product.amount)}{product.recurring ? ` / ${product.recurring.interval}` : ''}</b>
-            </button>
-          })}</div> : <div className="stripe-payment-empty">No active Stripe prices found. Use a custom payment below.</div>}
-        </section>
-        <section className="quick-sale-section stripe-custom-payment">
-          <span>Custom payment</span>
-          <div><label><small>Payment title</small><input className="input" value={name} onChange={e => setName(e.target.value)} placeholder={`Payment for ${lead?.fullName || 'lead'}`} /></label><label><small>Amount (INR)</small><input className="input" type="number" min="1" step="1" value={amount} onChange={e => setAmount(e.target.value)} placeholder="Enter amount" disabled={stripeItems.length > 0} /></label></div>
-          {stripeItems.length > 0 && <small className="stripe-helper">Custom amount is disabled while Stripe products are selected.</small>}
-        </section>
-        {!!payments.length && <section className="quick-sale-section stripe-payment-history"><span>Payment history</span><div className="stripe-payment-list">{payments.map(payment => <div key={payment.id}><span className={`stripe-payment-status is-${payment.status}`}>{payment.status}</span><div><strong>{payment.items?.length ? `${payment.items.length} Stripe item${payment.items.length > 1 ? 's' : ''}` : payment.metadata?.leadName || 'Custom payment'}</strong><small>{new Date(payment.createdAt).toLocaleString('en-IN')} · {money(payment.amount || 0)}</small></div><button type="button" className="btn btn-ghost !p-1.5" onClick={() => refreshPayment(payment.id)} aria-label="Refresh payment status">{refreshingPayment === payment.id ? <Spinner size={13} /> : <RefreshCw size={13} />}</button>{payment.checkoutUrl && <a className="btn btn-ghost !p-1.5" href={payment.checkoutUrl} target="_blank" rel="noreferrer" aria-label="Open payment link"><ExternalLink size={13} /></a>}</div>)}</div></section>}
-      </>}
+      {isPay && <div className="stripe-builder-layout">
+        <div className="stripe-builder-main">
+          <section className="quick-sale-section stripe-product-picker">
+            <span>Products and pricing</span>
+            {loadingOptions ? <div className="stripe-payment-empty"><Spinner size={16} /> Loading Stripe catalogue…</div> : catalog.length ? <div className="stripe-product-grid">{catalog.map(product => {
+              const selected = stripeItems.some(item => item.priceId === product.priceId)
+              return <button type="button" key={product.priceId} className={`stripe-product-option ${selected ? 'is-selected' : ''}`} onClick={() => toggleStripeItem(product)}>
+                <i>{selected ? <Check size={13} /> : null}</i><strong>{product.name}</strong><small>{product.description || (product.recurring ? `Billed every ${product.recurring.interval}` : 'One-time payment')}</small><b>{money(product.amount)}{product.recurring ? ` / ${product.recurring.interval}` : ''}</b>
+              </button>
+            })}</div> : <div className="stripe-payment-empty">No active prices found. Create a custom one-time payment below.</div>}
+            {!!selectedProducts.length && <div className="stripe-selected-cart">{selectedProducts.map(product => <div key={product.priceId}><div><strong>{product.name}</strong><small>{money(product.amount)} each</small></div><div className="stripe-quantity"><button type="button" onClick={() => updateStripeQuantity(product.priceId, product.quantity - 1)}><Minus size={12} /></button><span>{product.quantity}</span><button type="button" onClick={() => updateStripeQuantity(product.priceId, product.quantity + 1)}><Plus size={12} /></button></div><b>{money(product.amount * product.quantity)}</b><button type="button" className="stripe-remove" onClick={() => toggleStripeItem(product)}><Trash size={13} /></button></div>)}</div>}
+          </section>
+          <section className="quick-sale-section stripe-custom-payment">
+            <span>Custom payment</span>
+            <div><label><small>Payment title</small><input className="input" value={name} onChange={e => setName(e.target.value)} placeholder={`Payment for ${lead?.fullName || 'lead'}`} /></label><label><small>Amount (INR)</small><input className="input" type="number" min="1" step="1" value={amount} onChange={e => setAmount(e.target.value)} placeholder="Enter amount" disabled={stripeItems.length > 0} /></label></div>
+            {stripeItems.length > 0 && <small className="stripe-helper">Remove selected products to create a custom-priced link.</small>}
+          </section>
+
+          <details className="stripe-option-group" open><summary><span>Checkout options</span><small>Customer details, tax and receipts</small></summary><div className="stripe-option-content">
+            <StripeToggle label="Allow customers to adjust quantity" description="Show quantity controls on Stripe Checkout." checked={stripeOptions.adjustableQuantity} onChange={value => setStripeOption('adjustableQuantity', value)} />
+            <StripeToggle label="Collect phone number" description="Add a required phone field at checkout." checked={stripeOptions.collectPhone} onChange={value => setStripeOption('collectPhone', value)} />
+            <StripeToggle label="Collect tax ID" description="Allow eligible business customers to enter a tax ID." checked={stripeOptions.collectTaxId} onChange={value => setStripeOption('collectTaxId', value)} />
+            <StripeToggle label="Automatic tax" description="Let Stripe calculate tax from the customer's address." checked={stripeOptions.automaticTax} onChange={value => setStripeOption('automaticTax', value)} />
+            <StripeToggle label="Create a Stripe customer" description="Save customer details for one-time payments." checked={stripeOptions.createCustomer} onChange={value => setStripeOption('createCustomer', value)} />
+            <StripeToggle label="Create paid invoice" description="Generate an invoice after a one-time payment." checked={stripeOptions.invoiceCreation} onChange={value => setStripeOption('invoiceCreation', value)} />
+            <StripeToggle label="Require terms acceptance" description="Require agreement to the Terms of Service." checked={stripeOptions.requireTerms} onChange={value => setStripeOption('requireTerms', value)} />
+            <label className="stripe-control-field"><span>Address collection</span><select className="input" value={stripeOptions.addressCollection} onChange={e => setStripeOption('addressCollection', e.target.value)}><option value="none">Do not collect</option><option value="billing">Billing address</option><option value="shipping">Billing and shipping address</option></select></label>
+            <label className="stripe-control-field"><span>Button label</span><select className="input" value={stripeOptions.submitType} onChange={e => setStripeOption('submitType', e.target.value)}><option value="auto">Automatic</option><option value="pay">Pay</option><option value="book">Book</option><option value="donate">Donate</option><option value="subscribe">Subscribe</option></select></label>
+          </div></details>
+
+          <details className="stripe-option-group"><summary><span>Custom fields</span><small>Collect up to 3 additional details</small></summary><div className="stripe-option-content is-stacked">
+            {(stripeOptions.customFields || []).map((field, index) => <div className="stripe-custom-field" key={index}><input className="input" placeholder="Field label" value={field.label} onChange={e => setStripeOption('customFields', stripeOptions.customFields.map((item, i) => i === index ? { ...item, label: e.target.value } : item))} /><select className="input" value={field.type} onChange={e => setStripeOption('customFields', stripeOptions.customFields.map((item, i) => i === index ? { ...item, type: e.target.value } : item))}><option value="text">Text</option><option value="numeric">Number</option><option value="dropdown">Dropdown</option></select>{field.type === 'dropdown' && <input className="input" placeholder="Options, comma separated" value={field.options || ''} onChange={e => setStripeOption('customFields', stripeOptions.customFields.map((item, i) => i === index ? { ...item, options: e.target.value } : item))} />}<label><input type="checkbox" checked={field.required} onChange={e => setStripeOption('customFields', stripeOptions.customFields.map((item, i) => i === index ? { ...item, required: e.target.checked } : item))} /> Required</label><button type="button" className="stripe-remove" onClick={() => setStripeOption('customFields', stripeOptions.customFields.filter((_, i) => i !== index))}><Trash size={13} /></button></div>)}
+            {(stripeOptions.customFields || []).length < 3 && <button type="button" className="btn btn-soft stripe-add-field" onClick={() => setStripeOption('customFields', [...(stripeOptions.customFields || []), { key: `custom_${Date.now()}`, label: '', type: 'text', required: false, options: '' }])}><Plus size={13} /> Add custom field</button>}
+          </div></details>
+
+          <details className="stripe-option-group"><summary><span>After payment</span><small>Confirmation, redirect and link limits</small></summary><div className="stripe-option-content is-stacked">
+            <div className="stripe-segmented"><button type="button" className={stripeOptions.afterCompletion === 'hosted' ? 'is-active' : ''} onClick={() => setStripeOption('afterCompletion', 'hosted')}>Stripe confirmation</button><button type="button" className={stripeOptions.afterCompletion === 'redirect' ? 'is-active' : ''} onClick={() => setStripeOption('afterCompletion', 'redirect')}>Redirect page</button></div>
+            {stripeOptions.afterCompletion === 'redirect' ? <label className="stripe-control-field"><span>Redirect URL</span><input className="input" type="url" value={stripeOptions.redirectUrl} onChange={e => setStripeOption('redirectUrl', e.target.value)} placeholder="https://your-site.com/thank-you" /></label> : <label className="stripe-control-field"><span>Thank-you message</span><textarea className="input" rows="2" value={stripeOptions.thankYouMessage} onChange={e => setStripeOption('thankYouMessage', e.target.value)} /></label>}
+            <StripeToggle label="Limit completed payments" description="Deactivate this link after the chosen number of successful checkouts." checked={stripeOptions.limitPayments} onChange={value => setStripeOption('limitPayments', value)} />
+            {stripeOptions.limitPayments && <div className="stripe-inline-fields"><label><span>Payment limit</span><input className="input" type="number" min="1" value={stripeOptions.completedSessionsLimit} onChange={e => setStripeOption('completedSessionsLimit', e.target.value)} /></label><label><span>Inactive link message</span><input className="input" value={stripeOptions.inactiveMessage} onChange={e => setStripeOption('inactiveMessage', e.target.value)} /></label></div>}
+          </div></details>
+
+          {!!payments.length && <section className="quick-sale-section stripe-payment-history"><span>Payment history</span><div className="stripe-payment-list">{payments.map(payment => <div key={payment.id}><span className={`stripe-payment-status is-${payment.status}`}>{payment.status}</span><div><strong>{payment.items?.length ? `${payment.items.length} Stripe item${payment.items.length > 1 ? 's' : ''}` : payment.metadata?.leadName || 'Custom payment'}</strong><small>{new Date(payment.createdAt).toLocaleString('en-IN')} · {money(payment.amount || 0)}</small></div><button type="button" className="btn btn-ghost !p-1.5" onClick={() => refreshPayment(payment.id)} aria-label="Refresh payment status">{refreshingPayment === payment.id ? <Spinner size={13} /> : <RefreshCw size={13} />}</button>{payment.checkoutUrl && <a className="btn btn-ghost !p-1.5" href={payment.checkoutUrl} target="_blank" rel="noreferrer" aria-label="Open payment link"><ExternalLink size={13} /></a>}</div>)}</div></section>}
+        </div>
+        <aside className="stripe-builder-summary">
+          <div className="stripe-summary-card"><span>Order summary</span>{selectedProducts.length ? selectedProducts.map(product => <div className="stripe-summary-line" key={product.priceId}><small>{product.name} × {product.quantity}</small><b>{money(product.amount * product.quantity)}</b></div>) : <div className="stripe-summary-line"><small>{name || 'Custom payment'}</small><b>{money(subtotal)}</b></div>}<div className="stripe-summary-line"><small>Subtotal</small><b>{money(subtotal)}</b></div>{discount > 0 && <div className="stripe-summary-line is-discount"><small>{selectedPromotion?.code}</small><b>−{money(discount)}</b></div>}<div className="stripe-summary-total"><span>Total</span><strong>{money(total)}</strong></div></div>
+          <div className="stripe-summary-card"><span>Promotion codes</span><div className="stripe-promo-modes"><label><input type="radio" name="promo-mode" checked={stripeOptions.promotionMode === 'none'} onChange={() => setStripeOption('promotionMode', 'none')} /> No discounts</label><label><input type="radio" name="promo-mode" checked={stripeOptions.promotionMode === 'customer'} onChange={() => setStripeOption('promotionMode', 'customer')} /> Let customers enter a code</label><label><input type="radio" name="promo-mode" checked={stripeOptions.promotionMode === 'auto'} onChange={() => setStripeOption('promotionMode', 'auto')} /> Auto-apply dashboard code</label></div>{stripeOptions.promotionMode === 'auto' && <label className="stripe-control-field"><span>Dashboard promotion code</span><select className="input" value={stripeOptions.promotionCodeId} onChange={e => setStripeOption('promotionCodeId', e.target.value)}><option value="">Select active code</option>{promotionCodes.map(code => <option key={code.id} value={code.id}>{code.code} · {code.percentOff != null ? `${code.percentOff}% off` : `${money(code.amountOff || 0)} off`}</option>)}</select></label>}<small className="stripe-summary-note">Codes and eligibility come directly from your Stripe Dashboard.</small></div>
+          <div className="stripe-summary-card stripe-customer-preview"><span>Customer</span><strong>{lead?.fullName}</strong><small>{lead?.email || 'Email collected at checkout'}</small><em>Payment methods are controlled by your Stripe Dashboard.</em></div>
+        </aside>
+      </div>}
       {!isPay && <>
         <label className="block"><span className="text-[11px] text-slate-500">Studio Session</span><select className="input mt-1" value={sessionId} onChange={e => { setSessionId(e.target.value); setMembershipId('') }} disabled={loadingOptions}><option value="">{loadingOptions ? 'Loading classes…' : 'Choose a class'}</option>{sessions.map(s => <option key={s.id} value={s.id}>{new Date(s.startsAt).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })} · {s.name} · {s.inPersonLocation?.name || 'Studio'}</option>)}</select></label>
         <label className="block"><span className="text-[11px] text-slate-500">Active membership</span><select className="input mt-1" value={membershipId} onChange={e => { setMembershipId(e.target.value); setPurchaseMembershipId('') }} disabled={!sessionId}><option value="">{sessionId ? (activeMemberships.length ? 'Choose active membership' : 'No active membership — choose POS below') : 'Select a class first'}</option>{activeMemberships.map(m => <option key={m.bookingMembershipId || m.id} value={m.bookingMembershipId || m.id}>{m.name || m.membership?.name || 'Active membership'}{m.classesLeft != null ? ` · ${m.classesLeft} classes left` : ''}</option>)}</select></label>
@@ -938,9 +1015,13 @@ function QuickActionModal({ lead, mode, classType, amount, name, sessionId, memb
       {!isPay && !membershipId && <><section className="quick-sale-section quick-sale-cart"><span>Cart</span><div className="quick-sale-item"><b>Membership</b><select className="input" value={purchaseMembershipId} onChange={e => setPurchaseMembershipId(e.target.value)}><option value="">Select featured membership</option>{catalog.map(m => { const price = Number(m.price ?? m.priceInCurrency ?? m.defaultPrice ?? 0); return <option key={m.id} value={m.id}>{m.name} · ₹{price.toLocaleString('en-IN')}</option> })}</select>{selectedCatalogItem && <div><strong>{selectedCatalogItem.name}</strong><small>Featured Momence membership</small><b>₹{selectedPrice.toLocaleString('en-IN')}</b></div>}</div></section><div className="quick-sale-summary"><section className="quick-sale-section"><span>Discounts</span><small>Discount eligibility is validated by Momence during checkout.</small></section><section className="quick-sale-section"><span>Totals</span><div><small>Selected item</small><strong>₹{selectedPrice.toLocaleString('en-IN')}</strong></div><div><small>Total submitted to Momence POS</small><strong>₹{selectedPrice.toLocaleString('en-IN')}</strong></div></section></div><section className="quick-sale-section"><span>Payment</span><div className="quick-sale-payment-tabs"><button type="button" className="active">Other</button></div><select className="input" value={paymentMethodId} onChange={e => setPaymentMethodId(e.target.value)}><option value="">Select payment method</option>{paymentMethods.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}</select></section></>}
       {url && <div className="rounded-xl border border-emerald-400/25 bg-emerald-500/10 p-3 text-[12px]"><strong className="block text-emerald-400">Payment link created</strong><a className="break-all text-slate-300 underline" href={url} target="_blank" rel="noreferrer">{url}</a></div>}
       {status && !url && <div className="rounded-xl border border-emerald-400/25 bg-emerald-500/10 p-3 text-[12px] text-emerald-400">{isPay ? 'Checkout' : 'Booking'} status: {status}</div>}
-      <div className="flex justify-end gap-2"><button className="btn btn-ghost" onClick={onClose}>Cancel</button>{url && <button className="btn btn-soft" onClick={() => navigator.clipboard?.writeText(url)}><Copy size={13} /> Copy link</button>}<button className="btn btn-primary" disabled={isPay ? (!stripeItems.length && !(Number(amount) > 0)) : (!sessionId || (!membershipId && (!purchaseMembershipId || !paymentMethodId)))} onClick={onSubmit}>{isPay ? 'Create payment link' : purchaseMembershipId ? 'Confirm purchase & book' : 'Book member'}</button></div>
+      <div className="flex justify-end gap-2"><button className="btn btn-ghost" onClick={onClose}>Cancel</button>{url && <button className="btn btn-soft" onClick={() => navigator.clipboard?.writeText(url)}><Copy size={13} /> Copy link</button>}<button className="btn btn-primary" disabled={isPay ? ((!stripeItems.length && !(Number(amount) > 0)) || (stripeOptions.promotionMode === 'auto' && !stripeOptions.promotionCodeId) || (stripeOptions.afterCompletion === 'redirect' && !stripeOptions.redirectUrl)) : (!sessionId || (!membershipId && (!purchaseMembershipId || !paymentMethodId)))} onClick={onSubmit}>{isPay ? 'Create payment link' : purchaseMembershipId ? 'Confirm purchase & book' : 'Book member'}</button></div>
     </div>
   </Modal>
+}
+
+function StripeToggle({ label, description, checked, onChange }) {
+  return <label className="stripe-toggle-row"><span><strong>{label}</strong><small>{description}</small></span><input type="checkbox" checked={Boolean(checked)} onChange={event => onChange(event.target.checked)} /><i aria-hidden="true" /></label>
 }
 
 function groupKey(l, by, lookup) {
@@ -1368,6 +1449,7 @@ function TableGrid({ items, boot, lookup, openLead, openQuickAction, changeStage
                   <div className="min-w-0">
                     <div className="lead-name truncate flex items-center gap-1.5">
                       {properName(l.fullName)}
+                      {l.stripePayment && <Tip content={l.stripePayment.status === 'paid' ? `Payment captured${l.stripePayment.paidAt ? ` · ${new Date(l.stripePayment.paidAt).toLocaleDateString('en-IN')}` : ''}` : `Payment link · ${l.stripePayment.status}`}><button type="button" className={`lead-payment-indicator ${l.stripePayment.status === 'paid' ? 'is-paid' : 'is-pending'}`} onClick={event => { event.stopPropagation(); openQuickAction(l, 'stripe') }} aria-label={`Stripe payment ${l.stripePayment.status}`}><IndianRupee size={11} /></button></Tip>}
                       {[...rowManualFlags, ...(l.flags || [])].map(f => (
                         <span key={f.id} title={f.name} className="chip !px-1.5 !py-0 text-[9px]" style={{ background: `${f.color}22`, color: f.color, border: `1px solid ${f.color}44` }}>{f.label}</span>
                       ))}

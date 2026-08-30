@@ -184,17 +184,20 @@ function applyStripeEvent(event) {
   const session = event?.data?.object
   if (!session?.id || !String(event.type || '').startsWith('checkout.session.')) return
   ensurePaymentsShape()
-  const payment = db.payments.find(item => item.checkoutSessionId === session.id)
+  const paymentLinkId = typeof session.payment_link === 'string' ? session.payment_link : session.payment_link?.id
+  const payment = db.payments.find(item => item.checkoutSessionId === session.id || (paymentLinkId && item.paymentLinkId === paymentLinkId))
   if (!payment) return
   payment.status = event.type === 'checkout.session.expired' ? 'expired' : (session.payment_status || session.status || payment.status)
   payment.paymentIntentId = typeof session.payment_intent === 'string' ? session.payment_intent : session.payment_intent?.id || payment.paymentIntentId || null
   payment.customerId = typeof session.customer === 'string' ? session.customer : session.customer?.id || payment.customerId || null
   payment.paidAt = payment.status === 'paid' ? (payment.paidAt || nowIso()) : payment.paidAt || null
   payment.updatedAt = nowIso()
+  payment.checkoutSessionId = session.id
   const lead = leadById(payment.leadId)
   if (lead) markDirty(lead.id)
   save()
   log('payment', `${payment.leadName} payment ${payment.status}`, payment.leadId)
+  broadcastChange('stripe-payment', { leadId: payment.leadId, status: payment.status })
 }
 
 async function stripeRequest(path, { method = 'GET', body } = {}) {
@@ -205,7 +208,7 @@ async function stripeRequest(path, { method = 'GET', body } = {}) {
       Authorization: `Bearer ${STRIPE_SECRET_KEY}`,
       'Content-Type': 'application/x-www-form-urlencoded'
     },
-    body: body ? new URLSearchParams(body).toString() : undefined
+    body: body ? new URLSearchParams(Object.entries(body).filter(([, value]) => value !== undefined && value !== null && value !== '')).toString() : undefined
   })
   const text = await res.text()
   const data = text ? JSON.parse(text) : {}
@@ -227,6 +230,7 @@ function paymentRecordFromLead(lead, payload, status = 'open') {
     provider: 'stripe',
     status,
     checkoutSessionId: payload.checkoutSessionId || null,
+    paymentLinkId: payload.paymentLinkId || null,
     checkoutUrl: payload.checkoutUrl || null,
     items: payload.items || [],
     description: payload.description || '',
@@ -235,6 +239,28 @@ function paymentRecordFromLead(lead, payload, status = 'open') {
     updatedAt: now,
     metadata: payload.metadata || {}
   }
+}
+
+function stripePaymentSummary(lead) {
+  ensurePaymentsShape()
+  const payments = db.payments.filter(payment => String(payment.leadId) === String(lead.id))
+    .sort((a, b) => String(b.updatedAt || b.createdAt).localeCompare(String(a.updatedAt || a.createdAt)))
+  if (!payments.length) return null
+  const paid = payments.find(payment => payment.status === 'paid')
+  const latest = paid || payments[0]
+  return {
+    status: paid ? 'paid' : latest.status,
+    count: payments.length,
+    latestId: latest.id,
+    amount: latest.amount,
+    currency: latest.currency,
+    checkoutUrl: latest.checkoutUrl,
+    paidAt: paid?.paidAt || null
+  }
+}
+
+function withStripePayment(lead) {
+  return { ...lead, stripePayment: stripePaymentSummary(lead) }
 }
 
 function safePatch(lead, body) {
@@ -553,7 +579,7 @@ app.get('/api/leads', (req, res) => {
   const sliced = list.slice(page * pageSize, page * pageSize + pageSize)
 
   res.json({
-    items: enrichAll(sliced, db),
+    items: enrichAll(sliced, db).map(withStripePayment),
     total,
     page,
     pageSize
@@ -594,7 +620,7 @@ function withOwnerRequest(payload, leadId) {
 app.get('/api/leads/:id', (req, res) => {
   const lead = leadById(req.params.id)
   if (!canSeeLead(req, lead)) return res.status(404).json({ error: 'Lead not found' })
-  res.json(withOwnerRequest(enrichLead(lead, db), lead.id))
+  res.json(withOwnerRequest(withStripePayment(enrichLead(lead, db)), lead.id))
 })
 
 app.post('/api/leads/:id/owner-change-request', (req, res) => {
@@ -1848,50 +1874,134 @@ app.post('/api/stripe/payment-links', async (req, res) => {
       classType: String(lead.classType || ''),
       leadName: String(lead.fullName || '')
     }
+    let verifiedItems = []
+    if (requestedItems.length) {
+      verifiedItems = await Promise.all(requestedItems.map(async item => {
+        const price = await stripeRequest(`/prices/${encodeURIComponent(item.priceId)}?expand%5B%5D=product`)
+        if (!price.active || price.product?.active === false) throw new Error('One of the selected Stripe prices is no longer active.')
+        return {
+          priceId: price.id,
+          quantity: Math.max(1, Math.min(99, Number(item.quantity) || 1)),
+          name: typeof price.product === 'string' ? (price.nickname || price.id) : (price.product?.name || price.nickname || price.id),
+          amount: Number(price.unit_amount || 0) / 100,
+          currency: price.currency,
+          recurring: price.recurring || null
+        }
+      }))
+      if (new Set(verifiedItems.map(item => item.currency)).size > 1) throw new Error('Selected products must use the same currency.')
+    } else {
+      const currency = String(req.body?.currency || 'inr').toLowerCase()
+      const product = await stripeRequest('/products', { method: 'POST', body: {
+        name: req.body?.name || `Payment for ${lead.fullName}`,
+        description: req.body?.description || 'Custom payment created in Physique 57 CRM',
+        'metadata[leadId]': metadata.leadId
+      } })
+      const price = await stripeRequest('/prices', { method: 'POST', body: {
+        currency,
+        unit_amount: String(Math.round(amount * 100)),
+        product: product.id
+      } })
+      verifiedItems = [{ priceId: price.id, quantity: 1, name: product.name, amount, currency, recurring: null }]
+    }
+    const hasRecurring = verifiedItems.some(item => item.recurring)
     const body = {
-      mode: requestedItems.some(item => item.recurring) ? 'subscription' : 'payment',
-      success_url: req.body?.successUrl || `${req.headers.origin || `${req.protocol}://${req.get('host')}`}/?stripe_session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: req.body?.cancelUrl || `${req.headers.origin || `${req.protocol}://${req.get('host')}`}/`,
-      customer_email: lead.email || undefined,
       'metadata[leadId]': metadata.leadId,
       'metadata[locationId]': metadata.locationId,
       'metadata[classType]': metadata.classType,
-      'metadata[leadName]': metadata.leadName
+      'metadata[leadName]': metadata.leadName,
+      allow_promotion_codes: req.body?.promotionMode === 'customer' ? 'true' : undefined,
+      billing_address_collection: ['billing', 'shipping'].includes(req.body?.addressCollection) ? 'required' : undefined,
+      'phone_number_collection[enabled]': req.body?.collectPhone ? 'true' : 'false',
+      'tax_id_collection[enabled]': req.body?.collectTaxId ? 'true' : 'false',
+      'automatic_tax[enabled]': req.body?.automaticTax ? 'true' : 'false',
+      customer_creation: !hasRecurring && req.body?.createCustomer ? 'always' : undefined,
+      'invoice_creation[enabled]': !hasRecurring && req.body?.invoiceCreation ? 'true' : undefined,
+      'consent_collection[terms_of_service]': req.body?.requireTerms ? 'required' : undefined,
+      submit_type: req.body?.submitType || 'auto'
     }
-    if (requestedItems.length) {
-      requestedItems.forEach((item, index) => {
-        body[`line_items[${index}][price]`] = String(item.priceId)
-        body[`line_items[${index}][quantity]`] = String(Math.max(1, Math.min(99, Number(item.quantity) || 1)))
-      })
-    } else {
-      Object.assign(body, {
-        'line_items[0][quantity]': '1',
-        'line_items[0][price_data][currency]': String(req.body?.currency || 'inr').toLowerCase(),
-        'line_items[0][price_data][unit_amount]': String(Math.round(amount * 100)),
-        'line_items[0][price_data][product_data][name]': req.body?.name || `Payment for ${lead.fullName}`,
-        'line_items[0][price_data][product_data][description]': req.body?.description || 'Custom payment created in Physique 57 CRM'
-      })
-    }
-    if (body.mode === 'payment') {
-      body['payment_intent_data[metadata][leadId]'] = metadata.leadId
-      body['payment_intent_data[metadata][locationId]'] = metadata.locationId
-      body['payment_intent_data[metadata][classType]'] = metadata.classType
-      body['payment_intent_data[metadata][leadName]'] = metadata.leadName
-    } else {
-      body['subscription_data[metadata][leadId]'] = metadata.leadId
-      body['subscription_data[metadata][locationId]'] = metadata.locationId
-    }
-    const session = await stripeRequest('/checkout/sessions', {
-      method: 'POST',
-      body
+    verifiedItems.forEach((item, index) => {
+      body[`line_items[${index}][price]`] = item.priceId
+      body[`line_items[${index}][quantity]`] = String(item.quantity)
+      if (req.body?.adjustableQuantity) {
+        body[`line_items[${index}][adjustable_quantity][enabled]`] = 'true'
+        body[`line_items[${index}][adjustable_quantity][minimum]`] = '1'
+        body[`line_items[${index}][adjustable_quantity][maximum]`] = '99'
+      }
     })
-    const record = paymentRecordFromLead(lead, { amount: session.amount_total ? session.amount_total / 100 : amount, currency: session.currency || req.body?.currency || 'inr', checkoutSessionId: session.id, checkoutUrl: session.url, metadata, items: requestedItems, description: req.body?.description || '' }, session.payment_status || session.status || 'open')
+    if (req.body?.promotionMode === 'auto' && req.body?.promotionCodeId) body['discounts[0][promotion_code]'] = String(req.body.promotionCodeId)
+    if (req.body?.addressCollection === 'shipping') {
+      const countries = Array.isArray(req.body?.shippingCountries) && req.body.shippingCountries.length ? req.body.shippingCountries : ['IN']
+      countries.slice(0, 20).forEach((country, index) => { body[`shipping_address_collection[allowed_countries][${index}]`] = String(country).toUpperCase() })
+    }
+    const customFields = Array.isArray(req.body?.customFields) ? req.body.customFields.filter(field => field?.label).slice(0, 3) : []
+    customFields.forEach((field, index) => {
+      const type = ['text', 'numeric', 'dropdown'].includes(field.type) ? field.type : 'text'
+      body[`custom_fields[${index}][key]`] = String(field.key || `custom_${index + 1}`).replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 200)
+      body[`custom_fields[${index}][label][type]`] = 'custom'
+      body[`custom_fields[${index}][label][custom]`] = String(field.label).slice(0, 50)
+      body[`custom_fields[${index}][type]`] = type
+      body[`custom_fields[${index}][optional]`] = field.required ? 'false' : 'true'
+      if (type === 'dropdown') String(field.options || '').split(',').map(value => value.trim()).filter(Boolean).slice(0, 200).forEach((value, optionIndex) => {
+        body[`custom_fields[${index}][dropdown][options][${optionIndex}][label]`] = value
+        body[`custom_fields[${index}][dropdown][options][${optionIndex}][value]`] = value.toLowerCase().replace(/[^a-z0-9]+/g, '_').slice(0, 100)
+      })
+    })
+    if (req.body?.limitPayments) {
+      body['restrictions[completed_sessions][limit]'] = String(Math.max(1, Math.min(1000000, Number(req.body?.completedSessionsLimit) || 1)))
+      if (req.body?.inactiveMessage) body['inactive_message'] = String(req.body.inactiveMessage).slice(0, 1200)
+    }
+    if (req.body?.afterCompletion === 'redirect' && req.body?.redirectUrl) {
+      body['after_completion[type]'] = 'redirect'
+      body['after_completion[redirect][url]'] = String(req.body.redirectUrl)
+    } else {
+      body['after_completion[type]'] = 'hosted_confirmation'
+      if (req.body?.thankYouMessage) body['after_completion[hosted_confirmation][custom_message]'] = String(req.body.thankYouMessage).slice(0, 1200)
+    }
+    if (req.body?.customTextSubmit) body['custom_text[submit][message]'] = String(req.body.customTextSubmit).slice(0, 1200)
+    if (req.body?.customTextAfterSubmit) body['custom_text[after_submit][message]'] = String(req.body.customTextAfterSubmit).slice(0, 1200)
+    const paymentLink = await stripeRequest('/payment_links', { method: 'POST', body })
+    const shareUrl = new URL(paymentLink.url)
+    if (lead.email) shareUrl.searchParams.set('prefilled_email', lead.email)
+    const subtotal = verifiedItems.reduce((sum, item) => sum + item.amount * item.quantity, 0)
+    const record = paymentRecordFromLead(lead, {
+      amount: subtotal,
+      currency: paymentLink.currency || verifiedItems[0]?.currency || req.body?.currency || 'inr',
+      paymentLinkId: paymentLink.id,
+      checkoutUrl: shareUrl.toString(),
+      metadata,
+      items: verifiedItems,
+      description: req.body?.description || '',
+    }, 'open')
+    record.options = { promotionMode: req.body?.promotionMode || 'none', promotionCodeId: req.body?.promotionCodeId || null, addressCollection: req.body?.addressCollection || 'none', collectPhone: Boolean(req.body?.collectPhone), collectTaxId: Boolean(req.body?.collectTaxId), automaticTax: Boolean(req.body?.automaticTax), customFields }
     db.payments.unshift(record)
     lead.payments = [...(lead.payments || []), record.id]
     markDirty(lead.id)
     save()
     res.json({ ok: true, payment: record })
   } catch (e) { res.status(502).json({ error: e.message }) }
+})
+
+app.get('/api/stripe/promotion-codes', async (req, res) => {
+  try {
+    const result = await stripeRequest('/promotion_codes?active=true&limit=100')
+    const promotionCodes = await Promise.all((result.data || []).filter(item => item.active).map(async item => {
+      let coupon = item.coupon || item.promotion?.coupon || {}
+      if (typeof coupon === 'string') coupon = await stripeRequest(`/coupons/${encodeURIComponent(coupon)}`)
+      return {
+        id: item.id,
+        code: item.code,
+        couponName: coupon.name || '',
+        percentOff: coupon.percent_off ?? null,
+        amountOff: coupon.amount_off != null ? Number(coupon.amount_off) / 100 : null,
+        currency: coupon.currency || null,
+        duration: coupon.duration || null,
+        minimumAmount: item.restrictions?.minimum_amount != null ? Number(item.restrictions.minimum_amount) / 100 : null,
+        minimumCurrency: item.restrictions?.minimum_amount_currency || null,
+        firstTimeOnly: Boolean(item.restrictions?.first_time_transaction)
+      }
+    }))
+    res.json({ configured: true, promotionCodes })
+  } catch (e) { res.status(502).json({ configured: Boolean(STRIPE_SECRET_KEY), error: e.message, promotionCodes: [] }) }
 })
 
 app.get('/api/stripe/catalog', async (req, res) => {
@@ -1932,6 +2042,22 @@ app.get('/api/stripe/payment-links/:paymentId', async (req, res) => {
       payment.updatedAt = nowIso()
       save()
       return res.json({ ok: true, payment: { ...payment, stripe: session } })
+    }
+    if (payment.paymentLinkId) {
+      const sessions = await stripeRequest(`/checkout/sessions?payment_link=${encodeURIComponent(payment.paymentLinkId)}&limit=20`)
+      const session = (sessions.data || []).find(item => item.payment_status === 'paid') || sessions.data?.[0]
+      if (session) {
+        payment.status = session.payment_status || session.status || payment.status
+        payment.checkoutSessionId = session.id
+        payment.paymentIntentId = typeof session.payment_intent === 'string' ? session.payment_intent : session.payment_intent?.id || payment.paymentIntentId || null
+        payment.customerId = typeof session.customer === 'string' ? session.customer : session.customer?.id || payment.customerId || null
+        payment.paidAt = payment.status === 'paid' ? (payment.paidAt || nowIso()) : payment.paidAt || null
+        payment.updatedAt = nowIso()
+        const lead = leadById(payment.leadId)
+        if (lead) markDirty(lead.id)
+        save()
+      }
+      return res.json({ ok: true, payment, stripe: session || null })
     }
     res.json({ ok: true, payment })
   } catch (e) { res.status(502).json({ error: e.message }) }
