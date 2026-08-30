@@ -89,7 +89,12 @@ function Sidebar() {
 
       {!sidebarCollapsed && (
         <div className="px-4 pb-5 space-y-2.5">
-          <div className="card !rounded-xl p-3">
+          <button
+            type="button"
+            onClick={() => navigate('settings', { tab: 'alerts', section: 'settings-round-robin' })}
+            title="Open Round-robin settings"
+            className="card !rounded-xl p-3 w-full text-left hover:bg-white/5 transition-colors"
+          >
             <div className="flex items-center gap-2 text-[11px] font-semibold text-slate-300 mb-1.5">
               <Zap size={13} className={rrEnabled ? 'text-amber-400' : 'text-slate-500'} />
               Round-robin assignment
@@ -98,14 +103,19 @@ function Sidebar() {
               <span className={`w-1.5 h-1.5 rounded-full ${rrEnabled ? 'bg-emerald-400' : 'bg-slate-500'}`} />
               <span className="text-[11.5px] text-slate-400">{rrEnabled ? 'Auto-assigning new leads' : 'Manual assignment'}</span>
             </div>
-          </div>
-          <div className="card !rounded-xl p-3 flex items-center gap-3">
+          </button>
+          <button
+            type="button"
+            onClick={() => navigate('momence-schedule')}
+            title="Open Momence class schedule"
+            className="card !rounded-xl p-3 flex items-center gap-3 w-full text-left hover:bg-white/5 transition-colors"
+          >
             {momenceOn ? <Link2 size={15} className="text-emerald-400" /> : <ShieldCheck size={15} className="text-slate-500" />}
             <div>
               <div className="text-[11.5px] font-semibold text-slate-300">{momenceOn ? 'Momence connected' : 'Momence not linked'}</div>
               <div className="text-[10.5px] text-slate-500">Sales & class history sync</div>
             </div>
-          </div>
+          </button>
         </div>
       )}
 
@@ -194,11 +204,6 @@ function Topbar({ onAdd }) {
       <button className="btn btn-primary" onClick={onAdd}>
         <Plus size={15} /> Add Lead
       </button>
-
-      <div className="hidden xl:flex items-center gap-2 chip bg-white/5 border border-white/10 text-slate-300">
-        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-        {boot?.locations?.length || 0} studios · {boot?.associates?.length || 0} associates
-      </div>
     </header>
   )
 }
@@ -235,47 +240,80 @@ function MarqueeBanner() {
   const pageMetrics = {
     dashboard: loaded([
       { label: 'Total leads', value: analytics.totalLeads }, { label: 'Open pipeline', value: analytics.openLeads },
+      { label: 'New this month', value: analytics.newThisMonth },
       { label: 'Conversion', value: analytics.conversionRate !== undefined ? `${analytics.conversionRate}%` : undefined },
+      { label: 'Trials completed', value: analytics.trialCompleted },
+      { label: 'Trial rate', value: analytics.trialRate !== undefined ? `${analytics.trialRate}%` : undefined },
       { label: 'Revenue this month', value: analytics.revenueThisMonth !== undefined ? money(analytics.revenueThisMonth) : undefined },
+      { label: 'Avg deal', value: analytics.avgDealValue !== undefined ? money(analytics.avgDealValue) : undefined },
+      { label: 'Top source', value: analytics.topSource?.label ? `${analytics.topSource.label} · ${analytics.topSource.count}` : undefined },
       { label: 'Priority alerts', value: highPriority }
     ]),
     performance: loaded([
       { label: 'Won deals', value: analytics.won }, { label: 'Conversion', value: analytics.conversionRate !== undefined ? `${analytics.conversionRate}%` : undefined },
+      { label: 'MoM growth', value: analytics.wonDeltaPct !== undefined ? `${analytics.wonDeltaPct >= 0 ? '+' : ''}${analytics.wonDeltaPct}%` : undefined },
       { label: 'Average deal', value: analytics.avgDealValue !== undefined ? money(analytics.avgDealValue) : undefined },
       { label: 'Monthly revenue', value: analytics.revenueThisMonth !== undefined ? money(analytics.revenueThisMonth) : undefined },
+      { label: 'Top owner', value: analytics.topOwner?.label ? `${analytics.topOwner.label} · ${analytics.topOwner.count}` : undefined },
       { label: 'Reporting months', value: 12 }, { label: 'Studios measured', value: boot?.locations?.length }
     ]),
     'studio-weekly': loaded([
       { label: 'Active studios', value: boot?.locations?.filter(location => location.active !== false).length },
       { label: 'Sales associates', value: boot?.associates?.filter(associate => associate.active !== false).length },
-      { label: 'Hot leads', value: analytics.hotLeads }, { label: 'High priority', value: highPriority }
+      { label: 'Open pipeline', value: analytics.openLeads },
+      { label: 'Hot leads', value: analytics.hotLeads },
+      { label: 'Conversion', value: analytics.conversionRate !== undefined ? `${analytics.conversionRate}%` : undefined },
+      { label: 'Unassigned', value: analytics.unassigned },
+      { label: 'High priority', value: highPriority }
     ]),
     'studio-monthly': loaded([
       { label: 'New this month', value: analytics.newThisMonth }, { label: 'Won this month', value: analytics.wonThisMonth },
+      { label: 'Conversion', value: analytics.conversionRate !== undefined ? `${analytics.conversionRate}%` : undefined },
+      { label: 'Avg deal', value: analytics.avgDealValue !== undefined ? money(analytics.avgDealValue) : undefined },
       { label: 'Monthly revenue', value: analytics.revenueThisMonth !== undefined ? money(analytics.revenueThisMonth) : undefined },
       { label: 'Monthly target', value: analytics.monthlyTarget }, { label: 'Studios reporting', value: boot?.locations?.length }
     ]),
     pipeline: loaded([
       { label: 'Open opportunities', value: analytics.openLeads }, { label: 'Hot opportunities', value: analytics.hotLeads },
-      { label: 'Trials booked', value: analytics.trialBooked }, { label: 'Unassigned', value: analytics.unassigned },
+      { label: 'Trials booked', value: analytics.trialBooked }, { label: 'Trials completed', value: analytics.trialCompleted },
+      { label: 'Conversion', value: analytics.conversionRate !== undefined ? `${analytics.conversionRate}%` : undefined },
+      { label: 'Avg deal', value: analytics.avgDealValue !== undefined ? money(analytics.avgDealValue) : undefined },
+      { label: 'Top stage', value: analytics.topStage?.label ? `${analytics.topStage.label} · ${analytics.topStage.count}` : undefined },
+      { label: 'Unassigned', value: analytics.unassigned },
       { label: 'Pipeline stages', value: boot?.stages?.length }
     ]),
     leads: loaded([
-      { label: 'Lead database', value: analytics.totalLeads }, { label: 'Open leads', value: analytics.openLeads },
-      { label: 'Hot leads', value: analytics.hotLeads }, { label: 'Unassigned leads', value: analytics.unassigned },
-      { label: 'Lead sources', value: boot?.sources?.length }
+      { label: 'Leads received', value: analytics.newThisMonth },
+      { label: 'Open pipeline', value: analytics.openLeads },
+      { label: 'Hot leads', value: analytics.hotLeads },
+      { label: 'Top source', value: analytics.topSource?.label ? `${analytics.topSource.label} · ${analytics.topSource.count}` : undefined },
+      { label: 'Top stage', value: analytics.topStage?.label ? `${analytics.topStage.label} · ${analytics.topStage.count}` : undefined },
+      { label: 'Converted', value: analytics.wonThisMonth },
+      { label: 'Conversion rate', value: analytics.conversionRate !== undefined ? `${analytics.conversionRate}%` : undefined },
+      { label: 'Trials completed', value: analytics.trialCompleted },
+      { label: 'Trial rate', value: analytics.trialRate !== undefined ? `${analytics.trialRate}%` : undefined },
+      { label: 'Avg deal', value: analytics.avgDealValue !== undefined ? money(analytics.avgDealValue) : undefined },
+      { label: 'MoM conversion growth', value: analytics.wonDeltaPct !== undefined ? `${analytics.wonDeltaPct >= 0 ? '+' : ''}${analytics.wonDeltaPct}%` : undefined },
+      { label: 'Top owner', value: analytics.topOwner?.label ? `${analytics.topOwner.label} · ${analytics.topOwner.count}` : undefined },
+      { label: 'Unassigned', value: analytics.unassigned }
     ]),
     import: loaded([
       { label: 'Import destinations', value: boot?.locations?.length }, { label: 'Available sources', value: boot?.sources?.length },
-      { label: 'Pipeline stages', value: boot?.stages?.length }, { label: 'Assignable owners', value: boot?.associates?.length }
+      { label: 'Pipeline stages', value: boot?.stages?.length }, { label: 'Assignable owners', value: boot?.associates?.length },
+      { label: 'Active studios', value: boot?.locations?.filter(location => location.active !== false).length }
     ]),
     team: loaded([
       { label: 'Studio locations', value: boot?.locations?.length }, { label: 'Team members', value: boot?.associates?.length },
-      { label: 'Monthly team target', value: analytics.monthlyTarget }, { label: 'Open assignments', value: analytics.openLeads }
+      { label: 'Hot leads', value: analytics.hotLeads },
+      { label: 'Conversion', value: analytics.conversionRate !== undefined ? `${analytics.conversionRate}%` : undefined },
+      { label: 'Monthly team target', value: analytics.monthlyTarget }, { label: 'Open assignments', value: analytics.openLeads },
+      { label: 'Unassigned', value: analytics.unassigned }
     ]),
     settings: loaded([
       { label: 'Pipeline stages', value: boot?.stages?.length }, { label: 'Lead sources', value: boot?.sources?.length },
-      { label: 'Outreach channels', value: boot?.channels?.length }, { label: 'Connected services', value: integrationCount }
+      { label: 'Outreach channels', value: boot?.channels?.length }, { label: 'Connected services', value: integrationCount },
+      { label: 'Active studios', value: boot?.locations?.filter(location => location.active !== false).length },
+      { label: 'Team members', value: boot?.associates?.length }
     ])
   }
   const items = pageMetrics[view]?.length ? pageMetrics[view] : [{ label: 'Active alerts', value: alerts.length }, { label: 'High priority', value: highPriority }]
@@ -351,7 +389,7 @@ function Shell() {
     case 'momence-schedule': return <MomenceSchedule />
     case 'import': return <Import />
     case 'team': return <Team />
-    case 'settings': return <SettingsPage />
+    case 'settings': return <SettingsPage jumpTo={viewParams} />
     default: return <Dashboard />
   }
 }

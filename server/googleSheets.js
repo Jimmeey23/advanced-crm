@@ -343,8 +343,11 @@ async function runSyncInner(db, { createLeadFrom, updateLeadFromPayload, findDup
       alreadyImported++
       skipped++
     } else {
+      // Google Sheets leads keep whatever owner the sheet's own associate
+      // column resolved to — including unassigned. Round-robin must never
+      // override that; it's for leads created without an explicit owner
+      // from a source that doesn't carry one (e.g. the Add Lead form).
       const lead = createLeadFrom(buildLeadPayloadFromResolved(resolved, db, 'Google Sheets', record))
-      if (!lead.associateId && db.settings.roundRobin?.enabled) assignLead(db, lead)
       db.leads.push(lead)
       markDirty(lead.id)
       created++

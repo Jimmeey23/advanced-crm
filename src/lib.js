@@ -1,8 +1,37 @@
+// Default views (dashboard, pipeline, leads table) scope to the current
+// calendar month unless the user explicitly widens the range.
+export const currentMonthRange = () => {
+  const now = new Date()
+  const y = now.getFullYear(), m = now.getMonth()
+  const pad = n => String(n).padStart(2, '0')
+  const from = `${y}-${pad(m + 1)}-01`
+  const lastDay = new Date(y, m + 1, 0).getDate()
+  const to = `${y}-${pad(m + 1)}-${pad(lastDay)}`
+  return { dateFrom: from, dateTo: to }
+}
+
 export const fmtDate = (iso) => {
   if (!iso || iso === '-' || iso === 'null') return '—'
   const d = new Date(iso.includes('T') ? iso : iso + 'T00:00:00')
   if (isNaN(d.getTime())) return '—'
   return d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
+}
+
+export const fmtDateCompact = (iso) => {
+  if (!iso || iso === '-' || iso === 'null') return '—'
+  const d = new Date(iso.includes('T') ? iso : iso + 'T00:00:00')
+  if (isNaN(d.getTime())) return '—'
+  const now = new Date()
+  const isToday = d.toDateString() === now.toDateString()
+  const yesterday = new Date(now); yesterday.setDate(yesterday.getDate() - 1)
+  const tomorrow = new Date(now); tomorrow.setDate(tomorrow.getDate() + 1)
+  if (d.toDateString() === yesterday.toDateString()) return 'Yesterday'
+  if (d.toDateString() === tomorrow.toDateString()) return 'Tomorrow'
+  if (isToday) return 'Today'
+  if (d.getFullYear() === now.getFullYear()) {
+    return d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })
+  }
+  return d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: '2-digit' })
 }
 
 export const fmtDateTime = (iso) => {

@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react'
-import { Bell, AlertTriangle, CalendarClock, UserPlus, Flame, Snowflake, RadioTower, Flag, ChevronRight } from 'lucide-react'
+import { Bell, AlertTriangle, CalendarClock, UserPlus, Flame, Snowflake, RadioTower, Flag, ChevronRight, UserCog } from 'lucide-react'
 import { useApp } from '../store.jsx'
 
 const KIND_META = {
@@ -10,7 +10,8 @@ const KIND_META = {
   high_value: { icon: Flame, color: '#f97316', label: 'High value' },
   stale: { icon: Snowflake, color: '#94a3b8', label: 'Cold lead' },
   overdue: { icon: AlertTriangle, color: '#f87171', label: 'Overdue' },
-  custom_rule: { icon: Flag, color: '#f59e0b', label: 'Custom rule' }
+  custom_rule: { icon: Flag, color: '#f59e0b', label: 'Custom rule' },
+  owner_change_request: { icon: UserCog, color: '#a78bfa', label: 'Owner request' }
 }
 
 export default function AlertsDropdown() {
@@ -21,8 +22,10 @@ export default function AlertsDropdown() {
 
   useEffect(() => {
     const h = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false) }
+    const key = (e) => { if (e.key === 'Escape') setOpen(false) }
     document.addEventListener('mousedown', h)
-    return () => document.removeEventListener('mousedown', h)
+    document.addEventListener('keydown', key)
+    return () => { document.removeEventListener('mousedown', h); document.removeEventListener('keydown', key) }
   }, [])
 
   return (

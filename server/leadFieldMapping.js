@@ -189,7 +189,15 @@ export function extractFollowUps(record) {
 // `record` (optional, the raw pre-alias record) is scanned for the
 // "Follow Up N ..." column pairs described above.
 export function buildLeadPayloadFromResolved(resolved, db, fallbackSourceName, record) {
-  const associateId = resolved.associateId && db.associates.some(a => a.id === resolved.associateId) ? resolved.associateId : undefined
+  // Sheets almost never carry the associate's internal id — they carry the
+  // associate's name (owner/sales_rep column). Without resolving that name
+  // to a real associateId, the sheet's chosen owner was silently dropped
+  // and the lead fell through to round-robin instead of staying with
+  // whoever the sheet says owns it.
+  const associateName = resolved.associateName ? String(resolved.associateName).trim().toLowerCase() : ''
+  const associateId = resolved.associateId && db.associates.some(a => a.id === resolved.associateId)
+    ? resolved.associateId
+    : (associateName ? db.associates.find(a => String(a.name || '').trim().toLowerCase() === associateName)?.id : undefined)
   const locationId = resolved.locationId && db.locations.some(l => l.id === resolved.locationId) ? resolved.locationId : undefined
   return {
     fullName: resolved.fullName ? String(resolved.fullName).trim() : '',

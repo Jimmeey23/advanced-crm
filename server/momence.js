@@ -174,7 +174,7 @@ export async function getSessions(db, filters = {}) {
   const markets = locationMarket ? [locationMarket] : ['mumbai', 'blr'].filter(market => isConfigured(db, market))
   const results = await Promise.allSettled(markets.map(market => paginate(db, '/api/v2/host/sessions', {
     pageSize: 200, market,
-    extra: { sortBy: 'startsAt', sortOrder: 'ASC', includeCancelled: true, startAfter: filters.startAfter, startBefore: filters.startBefore, locationId: filters.locationId }
+    extra: { sortBy: 'startsAt', sortOrder: 'ASC', includeCancelled: true, startAfter: filters.startAfter, startBefore: filters.startBefore, locationId: filters.locationId ? resolveHomeLocationId(filters.locationId, db) : undefined }
   })))
   const sessions = results.flatMap(result => result.status === 'fulfilled' ? result.value : [])
   if (!sessions.length && results.some(result => result.status === 'rejected')) throw results.find(result => result.status === 'rejected').reason
@@ -310,7 +310,7 @@ export async function runHostReport(db, reportType, { market = 'mumbai', startDa
   const started = await request(db, '/api/v2/host/reports', { method: 'POST', market, body: { parameters } })
   const runId = started?.id
   if (!runId) throw new Error(`Momence ${reportType} report did not return a report ID.`)
-  for (let attempt = 0; attempt < 180; attempt++) {
+  for (let attempt = 0; attempt < 60; attempt++) {
     const result = await request(db, `/api/v2/host/reports/${runId}`, { market })
     const status = String(result?.status || '').toLowerCase()
     if (['failed', 'error', 'cancelled'].includes(status)) throw new Error(`Momence ${reportType} report ${runId} ${status}.`)
@@ -365,13 +365,18 @@ const matchesLead = (row, lead) => {
   return Boolean(idMatch || emailMatch)
 }
 const saleType = row => String(firstValue(row, ['saleType', 'itemType', 'type', 'productType', 'category', 'paymentCategory', 'membershipType']) || firstValue(row?.item, ['itemType', 'type']) || '').toLowerCase()
+// A $0 "membership" row is how Momence records a free trial pack — it's a
+// real, non-voided membership sale by every other field, so without an
+// amount check it reads as the member's first purchase. First *paid*
+// purchase is what "first purchase date" is supposed to mean.
+const saleAmount = row => Number(firstValue(row, ['totalInCurrency', 'total', 'amount', 'price', 'netAmount']) ?? 0)
 const isQualifiedMembershipSale = row => {
   const type = saleType(row)
   const voided = asBool(firstValue(row, ['voided', 'isVoided', 'cancelled', 'isCancelled']))
   const refundedAmount = Number(firstValue(row, ['refunded']) ?? 0)
   const refunded = asBool(firstValue(row, ['fullyRefunded', 'isRefunded'])) || refundedAmount > 0 || String(firstValue(row, ['status', 'paymentStatus']) || '').toLowerCase().includes('refund')
   const failed = String(firstValue(row, ['paymentStatus']) || '').toLowerCase() === 'failed'
-  return /membership|subscription|pack/.test(type) && !voided && !refunded && !failed
+  return /membership|subscription|pack/.test(type) && !voided && !refunded && !failed && saleAmount(row) > 0
 }
 
 // Trial completion is proven by the member's own attended-class history, not
@@ -644,6 +649,38 @@ export async function getMemberSessions(db, memberId, market = 'mumbai') {
   return safePaginate(db, `/api/v2/host/members/${memberId}/sessions`, { market, extra: { includeCancelled: true } }, [])
 }
 
+// Fast path for a single member's sales — a couple of bounded, non-polling
+// GETs, unlike runHostReport() below (which starts a whole-org report run
+// and polls for it to finish; fine for the nightly bulk lifecycle job that
+// already amortizes one report across every lead, but far too slow to run
+// per-lead every time a drawer opens). Tries the member-scoped listing that
+// matches every other member sub-resource in this file, then falls back to
+// the top-level sales controller filtered by memberId.
+export async function getMemberSalesDirect(db, memberId, market = 'mumbai') {
+  const nested = await safePaginate(db, `/api/v2/host/members/${memberId}/sales`, { market }, null)
+  if (nested && nested.length) return nested
+  return safePaginate(db, '/api/v2/host/sales', { market, extra: { memberId } }, [])
+}
+
+export function mapSalesDirect(items) {
+  return (items || [])
+    .map(item => {
+      const amount = Number(firstValue(item, ['totalInCurrency', 'total', 'amount', 'netAmount', 'price']) ?? 0)
+      const refunded = Number(firstValue(item, ['refunded', 'refundedAmount']) ?? 0)
+      return {
+        id: firstValue(item, ['id', 'saleId', 'paymentTransactionId']),
+        saleDate: firstValue(item, ['saleDate', 'soldAt', 'purchaseDate', 'transactionDate', 'paymentDate', 'createdAt', 'date']),
+        itemType: String(firstValue(item, ['itemType', 'type', 'saleType', 'category']) || 'sale').toLowerCase(),
+        itemName: firstValue(item, ['itemName', 'name', 'membershipName', 'description']) || 'Sale',
+        totalInCurrency: String(Math.max(0, amount - refunded)),
+        paymentMethod: firstValue(item, ['paymentMethod', 'method']) || 'unknown',
+        payingMember: firstValue(item, ['payingMemberName', 'customerName']) || null
+      }
+    })
+    .filter(s => s.saleDate)
+    .sort((a, b) => new Date(b.saleDate) - new Date(a.saleDate))
+}
+
 export async function getMemberMemberships(db, memberId, market = 'mumbai') {
   return safePaginate(db, `/api/v2/host/members/${memberId}/bought-memberships/active`, { market, extra: { includeFrozen: true } }, [])
 }
@@ -845,32 +882,17 @@ export async function buildProfile(db, memberId, locationId) {
   }
   const market = marketForLocation(locationId, db)
   const member = await getMember(db, safeMemberId, market)
-  const [sessions, memberships, notes, appointments] = await Promise.all([
+  // All member sub-resources fetched in parallel, all fast bounded GETs —
+  // no report-run polling here, so opening a lead's drawer never waits on
+  // Momence generating a whole-org report (see getMemberSalesDirect above).
+  const [sessions, memberships, notes, appointments, salesRaw] = await Promise.all([
     getMemberSessions(db, safeMemberId, market).catch(() => []),
     getMemberMemberships(db, safeMemberId, market).catch(() => []),
     getMemberNotes(db, safeMemberId, market).catch(() => []),
-    getMemberAppointments(db, safeMemberId, market).catch(() => [])
+    getMemberAppointments(db, safeMemberId, market).catch(() => []),
+    getMemberSalesDirect(db, safeMemberId, market).catch(() => [])
   ])
-  let salesHistory = []
-  try {
-    const from = member.firstSeen ? new Date(member.firstSeen) : new Date(Date.now() - 3 * 365 * 86400000)
-    const items = await runHostReport(db, 'total-sales', {
-      market,
-      locationId,
-      startDate: from.toISOString(),
-      endDate: new Date().toISOString(),
-      saleTypes: ['membership', 'session', 'appointment', 'monthly-subscription', 'custom-member-payment-plan-installment'],
-      moneyCreditSalesFilter: 'noFilter',
-      includeRefunds: true,
-      excludeGiftCardPaymentMethod: true,
-      excludeTransactionFeesInSaleValue: false
-    })
-    salesHistory = mapSalesHistoryReport(items.filter(item =>
-      String(item.memberId) === String(safeMemberId) || String(item.payingMemberId) === String(safeMemberId)
-    ))
-  } catch (e) {
-    salesHistory = []
-  }
+  const salesHistory = mapSalesDirect(salesRaw)
   const customFields = member.customFields || member.customFieldValues || {}
   const profile = {
     member: {

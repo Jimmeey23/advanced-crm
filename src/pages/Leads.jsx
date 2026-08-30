@@ -6,13 +6,14 @@ import {
   Phone, MessageCircle, Mail, MessageSquareText, Sparkles, Trash2, CheckSquare, Square,
   Users, TrendingUp, XCircle, Wallet, Clock, AlertTriangle, Flag,
   Trophy, PhoneOff, FlaskConical, CircleDot, PanelTop, Check, Pencil,
-  MoreVertical, Tags, UserPlus, CalendarPlus, CreditCard, Eye
+  MoreVertical, Tags, UserPlus, CalendarPlus, CreditCard, Eye, Lock, Keyboard,
+  Pin, PinOff, Calendar, Copy, ExternalLink, RefreshCw
 } from 'lucide-react'
 import { useApp } from '../store.jsx'
 import { useFetch } from '../hooks.js'
 import { api, buildQuery } from '../api.js'
-import { Avatar, ScorePill, Empty } from '../ui.jsx'
-import { fmtDate, stageClass, stageBadgeStyle, stageColor, riskClass, daysFromNow, downloadText, money, baseColumnValue, buildFormulaContext, evalFormula, lookupColumnValue, formatColumnValue, phoneCountryFlag } from '../lib.js'
+import { Avatar, ScorePill, Empty, Spinner } from '../ui.jsx'
+import { fmtDate, fmtDateCompact, stageClass, stageBadgeStyle, stageColor, riskClass, daysFromNow, downloadText, money, baseColumnValue, buildFormulaContext, evalFormula, lookupColumnValue, formatColumnValue, phoneCountryFlag, currentMonthRange } from '../lib.js'
 import Tip from '../components/Tip.jsx'
 import ComposeModal from '../components/ComposeModal.jsx'
 import RespondioTemplateModal from '../components/RespondioTemplateModal.jsx'
@@ -28,6 +29,7 @@ const cleanDate = value => {
   const text = String(value ?? '').trim()
   return !text || text === '-' || text === '\u2014' ? '' : text
 }
+const properName = value => String(value || '').trim().toLocaleLowerCase('en-IN').replace(/(^|[\s.'\-’])([a-z])/g, (_, prefix, letter) => `${prefix}${letter.toLocaleUpperCase('en-IN')}`)
 function withLifecycleColumns(configured) {
   const missing = DEFAULT_COLUMNS.filter(column => ['trialDate', 'firstPurchaseDate'].includes(column.field) && !configured.some(existing => existing.field === column.field))
   return missing.length ? [...configured, ...missing.map(c => ({ ...c }))] : configured
@@ -62,6 +64,9 @@ const EMPTY_FILTERS = {
   locationId: '', stage: '', status: '', statusGroup: '', associateId: '', sourceName: '', channel: '',
   classType: '', risk: '', minScore: '', maxScore: '', dateFrom: '', dateTo: '', createdWithinDays: '', flagged: ''
 }
+// Default view: current calendar month. "Clear filters" (EMPTY_FILTERS) or
+// manually editing the date fields is how a user widens back out to all time.
+const DEFAULT_FILTERS = { ...EMPTY_FILTERS, ...currentMonthRange() }
 
 const VIEWS = [
   { id: 'table', label: 'Table', icon: TableIcon },
@@ -97,6 +102,11 @@ function stageVisual(stage) {
   return { icon: hit?.icon || CircleDot, color: stageColor(stage).solid }
 }
 
+// A sentinel (rather than a literal "—") for an empty cell, so it can be
+// rendered as a subtle muted marker instead of a heavy dash glyph.
+const EMPTY_CELL = Symbol('empty-cell')
+const EmptyCell = () => <span className="cell-empty" aria-label="No data" />
+
 const GROUP_OPTIONS = [
   { id: '', label: 'No grouping' },
   { id: 'locationId', label: 'Location' },
@@ -109,12 +119,29 @@ const GROUP_OPTIONS = [
   { id: 'risk', label: 'AI risk' }
 ]
 
+const FILTER_LABELS = {
+  locationId: 'Location',
+  stage: 'Stage',
+  status: 'Outcome',
+  statusGroup: 'Status',
+  associateId: 'Owner',
+  sourceName: 'Source',
+  channel: 'Channel',
+  classType: 'Class',
+  risk: 'Risk',
+  minScore: 'Min score',
+  maxScore: 'Max score',
+  createdWithinDays: 'Created',
+  flagged: 'Flagged'
+}
+
 export default function Leads({ initialSearch = '' }) {
-  const { boot, lookup, openLead, refreshData, toast, navigate, dataVersion, role, locationIds } = useApp()
+  const { boot, lookup, openLead, refreshData, toast, navigate, dataVersion, role, locationIds, associateId: myAssociateId } = useApp()
   const [search, setSearch] = useState(initialSearch)
+  const [onlyMine, setOnlyMine] = useState(() => localStorage.getItem('p57_leads_only_mine') !== '0')
   const [filters, setFilters] = useState(() => role === 'agent' && locationIds[0]
-    ? { ...EMPTY_FILTERS, locationId: locationIds[0] }
-    : EMPTY_FILTERS)
+    ? { ...DEFAULT_FILTERS, locationId: locationIds[0] }
+    : DEFAULT_FILTERS)
 
   // boot/locationIds arrive after first render, so re-apply the agent lock
   // once they do (the lazy initializer above sees an empty list).
@@ -122,6 +149,26 @@ export default function Leads({ initialSearch = '' }) {
     if (role !== 'agent' || !locationIds[0]) return
     setFilters(f => (f.locationId === locationIds[0] ? f : { ...f, locationId: locationIds[0] }))
   }, [role, locationIds[0]])
+
+  // Default view is "my leads only" — applies to every role, not just agents.
+  // Toggling it off keeps whatever location/other filters were set and just
+  // stops constraining by owner.
+  React.useEffect(() => {
+    if (!myAssociateId) return
+    setFilters(f => {
+      if (onlyMine) return f.associateId === myAssociateId ? f : { ...f, associateId: myAssociateId }
+      return f.associateId === myAssociateId ? { ...f, associateId: '' } : f
+    })
+  }, [onlyMine, myAssociateId])
+
+  const toggleOnlyMine = () => {
+    setOnlyMine(v => {
+      const next = !v
+      try { localStorage.setItem('p57_leads_only_mine', next ? '1' : '0') } catch (e) { /* ignore */ }
+      return next
+    })
+    setPage(0)
+  }
 
   React.useEffect(() => { if (initialSearch) { setSearch(initialSearch); setPage(0) } }, [initialSearch])
   const [panelOpen, setPanelOpen] = useState(false)
@@ -145,6 +192,7 @@ export default function Leads({ initialSearch = '' }) {
   const [quickActionMembershipId, setQuickActionMembershipId] = useState('')
   const [quickActionPaymentMethodId, setQuickActionPaymentMethodId] = useState('')
   const [quickActionPurchaseMembershipId, setQuickActionPurchaseMembershipId] = useState('')
+  const [quickActionStripeItems, setQuickActionStripeItems] = useState([])
   const [focusLeadIds, setFocusLeadIds] = useState([])
   const [selected, setSelected] = useState(() => new Set())
   const [selectAllMatching, setSelectAllMatching] = useState(false)
@@ -159,16 +207,48 @@ export default function Leads({ initialSearch = '' }) {
     try { localStorage.setItem(COLUMNS_KEY, JSON.stringify(next)) } catch (e) { /* ignore */ }
   }, [boot?.settings?.leadColumns])
   const [headerPinned, setHeaderPinned] = useState(() => localStorage.getItem('p57_leads_header_pinned') !== 'false')
+  const [fixedCols, setFixedCols] = useState(() => localStorage.getItem('p57_leads_fixed_cols') === 'true')
   const [pageSize, setPageSize] = useState(() => Number(localStorage.getItem('p57_leads_page_size')) || 25)
   const [density, setDensity] = useState(() => localStorage.getItem('p57_leads_density') || 'comfortable')
-  const [rowHeight, setRowHeight] = useState(() => Number(localStorage.getItem('p57_leads_row_height')) || 58)
+  const [rowHeight, setRowHeight] = useState(() => Math.max(32, Math.min(88, Number(localStorage.getItem('p57_leads_row_height')) || 56)))
   const [tableZoom, setTableZoom] = useState(() => Number(localStorage.getItem('p57_leads_table_zoom')) || 100)
+  const [tableStyle, setTableStyle] = useState(() => ({
+    zebra: true,
+    gridLines: true,
+    fontScale: 100
+  }))
+  const [segments, setSegments] = useState([])
+  const [selectedSegmentId, setSelectedSegmentId] = useState('')
   const [colWidths, setColWidths] = useState(() => {
     try { return JSON.parse(localStorage.getItem('p57_leads_col_widths') || '{}') } catch (e) { return {} }
   })
   const [aiAlertOpen, setAiAlertOpen] = useState(false)
   const [manualFlagOverrides, setManualFlagOverrides] = useState({})
   const tableJumpRef = useRef(null)
+  const remotePrefsHydrated = useRef(false)
+  useEffect(() => {
+    if (!boot || remotePrefsHydrated.current) return
+    api.get('/api/user-preferences').then(data => {
+      const prefs = data?.leadTablePrefs || {}
+      remotePrefsHydrated.current = true
+      setSegments(Array.isArray(data?.leadSegments) ? data.leadSegments : [])
+      if (prefs.rowHeight != null) saveRowHeight(prefs.rowHeight)
+      if (prefs.tableZoom != null) saveTableZoom(prefs.tableZoom)
+      if (prefs.density) setDensity(prefs.density)
+      if (typeof prefs.headerPinned === 'boolean') setHeaderPinned(prefs.headerPinned)
+      if (typeof prefs.fixedCols === 'boolean') setFixedCols(prefs.fixedCols)
+      if (prefs.colWidths && typeof prefs.colWidths === 'object') setColWidths(prefs.colWidths)
+      setTableStyle(current => ({ ...current, zebra: prefs.zebra !== false, gridLines: prefs.gridLines !== false, fontScale: Number(prefs.fontScale) || 100 }))
+    }).catch(() => { remotePrefsHydrated.current = true })
+  }, [boot])
+  useEffect(() => {
+    if (!aiAlertOpen) return
+    const closeOnKey = event => { if (event.key === 'Escape') setAiAlertOpen(false) }
+    const closeOutside = event => { if (!event.target.closest?.('.ai-alert-compact')) setAiAlertOpen(false) }
+    document.addEventListener('keydown', closeOnKey)
+    document.addEventListener('mousedown', closeOutside, true)
+    return () => { document.removeEventListener('keydown', closeOnKey); document.removeEventListener('mousedown', closeOutside, true) }
+  }, [aiAlertOpen])
   const setColumns = (updater) => setColumnsRaw(prev => {
     const next = typeof updater === 'function' ? updater(prev) : updater
     try { localStorage.setItem(COLUMNS_KEY, JSON.stringify(next)) } catch (e) { /* ignore */ }
@@ -177,11 +257,14 @@ export default function Leads({ initialSearch = '' }) {
   const toggleDensity = () => setDensity(d => {
     const next = d === 'comfortable' ? 'compact' : 'comfortable'
     try { localStorage.setItem('p57_leads_density', next) } catch (e) { /* ignore */ }
+    const nextHeight = next === 'compact' ? 40 : 68
+    saveRowHeight(nextHeight)
     return next
   })
   const saveRowHeight = (next) => {
-    setRowHeight(next)
-    try { localStorage.setItem('p57_leads_row_height', String(next)) } catch (e) { /* ignore */ }
+    const capped = Math.max(32, Math.min(88, Number(next) || 56))
+    setRowHeight(capped)
+    try { localStorage.setItem('p57_leads_row_height', String(capped)) } catch (e) { /* ignore */ }
   }
   const saveTableZoom = (next) => {
     setTableZoom(next)
@@ -192,13 +275,62 @@ export default function Leads({ initialSearch = '' }) {
     try { localStorage.setItem('p57_leads_col_widths', JSON.stringify(next)) } catch (e) { /* ignore */ }
     return next
   })
+  const saveSegment = async () => {
+    const name = window.prompt('Name this segment')?.trim()
+    if (!name) return
+    const segment = { id: `segment_${Date.now()}`, name, filters, search, groupBy, sortBy, sortDir, createdAt: new Date().toISOString() }
+    const next = [...segments.filter(item => item.name.toLocaleLowerCase() !== name.toLocaleLowerCase()), segment]
+    try {
+      await api.put('/api/user-preferences', { leadSegments: next })
+      setSegments(next)
+      setSelectedSegmentId(segment.id)
+      toast(`Saved segment “${name}”`)
+    } catch (e) { toast(e.message, 'error') }
+  }
+  const applySegment = (id) => {
+    const segment = segments.find(item => item.id === id)
+    if (!segment) return
+    setSelectedSegmentId(id)
+    setFilters({ ...DEFAULT_FILTERS, ...(segment.filters || {}) })
+    setSearch(segment.search || '')
+    setGroupBy(segment.groupBy || '')
+    setSortBy(segment.sortBy || 'createdAt')
+    setSortDir(segment.sortDir || 'desc')
+    setPage(0)
+  }
+  const deleteSegment = async (id) => {
+    const segment = segments.find(item => item.id === id)
+    if (!segment || !window.confirm(`Delete saved segment “${segment.name}”?`)) return
+    try {
+      const next = segments.filter(item => item.id !== id)
+      await api.put('/api/user-preferences', { leadSegments: next })
+      setSegments(next)
+      setSelectedSegmentId('')
+      toast('Saved segment deleted')
+    } catch (e) { toast(e.message, 'error') }
+  }
+  useEffect(() => {
+    if (!boot || !remotePrefsHydrated.current) return
+    const timer = setTimeout(() => {
+      api.put('/api/user-preferences', { leadTablePrefs: { rowHeight, tableZoom, density, headerPinned, fixedCols, colWidths, ...tableStyle } }).catch(() => {})
+    }, 700)
+    return () => clearTimeout(timer)
+  }, [boot, rowHeight, tableZoom, density, headerPinned, fixedCols, colWidths, tableStyle])
   const hasFilters = Object.values(filters).some(Boolean) || search
   const q = buildQuery({ ...filters, search: search.trim() || undefined, page, pageSize, sortBy, sortDir })
+  const columnCountsQuery = buildQuery({ ...filters, search: search.trim() || undefined })
 
   const { data, loading, reload } = useFetch(() => api.get(`/api/leads?${q}`), [q, dataVersion])
 
-  const setF = (k) => (e) => { setFilters(f => ({ ...f, [k]: e.target.value })); setPage(0) }
-  const clearFilters = () => { setFilters(EMPTY_FILTERS); setSearch(''); setPage(0) }
+  const setF = (k) => (e) => {
+    if (k === 'associateId' && onlyMine) setOnlyMine(false)
+    setFilters(f => ({ ...f, [k]: e.target.value })); setPage(0)
+  }
+  const clearFilters = () => {
+    setOnlyMine(false)
+    try { localStorage.setItem('p57_leads_only_mine', '0') } catch (e) { /* ignore */ }
+    setFilters(EMPTY_FILTERS); setSearch(''); setPage(0)
+  }
 
   const changeStage = async (lead, stage) => {
     try { await api.patch(`/api/leads/${lead.id}`, { stage }); refreshData() }
@@ -241,11 +373,26 @@ export default function Leads({ initialSearch = '' }) {
     setQuickActionMembershipId('')
     setQuickActionPaymentMethodId('')
     setQuickActionPurchaseMembershipId('')
+    setQuickActionStripeItems([])
   }
 
   const submitQuickAction = async () => {
     if (!quickActionLead) return
     try {
+      if (quickActionMode === 'stripe') {
+        if (!quickActionStripeItems.length && !(Number(quickActionAmount) > 0)) throw new Error('Select at least one Stripe product or enter a custom amount.')
+        const result = await api.post('/api/stripe/payment-links', {
+          leadId: quickActionLead.id,
+          items: quickActionStripeItems,
+          amount: quickActionStripeItems.length ? undefined : Number(quickActionAmount),
+          name: quickActionName || `Payment for ${quickActionLead.fullName}`,
+          description: `Created for ${quickActionLead.fullName} in Physique 57 CRM`
+        })
+        setQuickActionUrl(result.payment.checkoutUrl)
+        setQuickActionStatus(result.payment.status)
+        toast('Stripe payment link created')
+        return
+      }
       let memberId = quickActionLead.memberId || quickActionLead.momence?.memberId
       if (!memberId) {
         const nameParts = String(quickActionLead.fullName || '').trim().split(/\s+/).filter(Boolean)
@@ -261,19 +408,6 @@ export default function Leads({ initialSearch = '' }) {
         memberId = created.memberId
         setQuickActionLead(current => current ? { ...current, memberId } : current)
         toast('Lead converted to a Momence member')
-      }
-      if (quickActionMode === 'stripe') {
-        if (!quickActionPurchaseMembershipId || !quickActionPaymentMethodId) throw new Error('Select a membership and payment method.')
-        const result = await api.post(`/api/momence/members/${memberId}/memberships`, {
-          membershipId: quickActionPurchaseMembershipId,
-          paymentMethodId: quickActionPaymentMethodId,
-          locationId: quickActionLead.locationId,
-          isEmailSent: true
-        })
-        setQuickActionStatus(result?.result?.status || 'paid')
-        toast('Momence POS purchase completed')
-        refreshData()
-        return
       }
       if (!quickActionSessionId) throw new Error('Select a Studio Session first.')
       if (quickActionPurchaseMembershipId) {
@@ -352,6 +486,16 @@ export default function Leads({ initialSearch = '' }) {
     } catch (e) { toast(e.message, 'error') }
     setBulkBusy(false)
   }
+  const bulkPatchField = async (patch, message) => {
+    if (!selected.size) return
+    setBulkBusy(true)
+    try {
+      const { updated } = await api.patch('/api/leads/bulk', { ids: [...selected], patch })
+      toast(`${message} for ${updated} lead${updated === 1 ? '' : 's'}`)
+      clearSelection(); refreshData()
+    } catch (e) { toast(e.message, 'error') }
+    setBulkBusy(false)
+  }
 
   const bulkDelete = async () => {
     if (!selected.size) return
@@ -401,6 +545,11 @@ export default function Leads({ initialSearch = '' }) {
     try { localStorage.setItem('p57_leads_header_pinned', String(next)) } catch (e) { /* ignore */ }
     return next
   })
+  const toggleFixedCols = () => setFixedCols(current => {
+    const next = !current
+    try { localStorage.setItem('p57_leads_fixed_cols', String(next)) } catch (e) { /* ignore */ }
+    return next
+  })
   const jumpToTable = () => {
     const ids = [...new Set([...missedLeads, ...outreachLeads].map(l => l.id))]
     setFocusLeadIds(ids)
@@ -410,30 +559,7 @@ export default function Leads({ initialSearch = '' }) {
   }
 
   return (
-    <div className="leads-workspace p-6 space-y-4">
-      {/* AI intelligence banner */}
-      {(missedLeads.length > 0 || outreachLeads.length > 0) && (
-        <div className={`ai-alert-compact ${aiAlertOpen ? 'is-open' : ''}`}>
-          <button className="ai-alert-trigger" onClick={() => setAiAlertOpen(v => !v)} title="AI missed follow-up & outreach detection">
-            <Sparkles size={15} />
-            <span>{missedLeads.length + outreachLeads.length}</span>
-          </button>
-          {aiAlertOpen && (
-            <div className="ai-alert-panel">
-              <div className="font-display font-semibold text-white text-[13px]">AI missed follow-up & outreach detection</div>
-              <div className="text-[12px] text-slate-400 mt-0.5">
-                {missedLeads.length > 0 && <span className="text-amber-300 font-medium">{missedLeads.length} leads have missed follow-ups · </span>}
-                {outreachLeads.length > 0 && <span className="text-rose-300 font-medium">{outreachLeads.length} leads need outreach (idle &gt; {cadenceDays}d)</span>}
-              </div>
-              <div className="flex items-center gap-2 mt-2">
-                <button className="btn btn-ghost !py-1.5 !text-[12px]" onClick={jumpToTable}>View in table</button>
-                <button className="btn btn-ghost !py-1.5 !text-[12px]" onClick={() => setAiAlertOpen(false)}>Collapse</button>
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
+    <div className="leads-workspace">
       {/* bulk selection toolbar */}
       {selected.size > 0 && (
         <div className="card p-3 flex flex-wrap items-center gap-3 border-rose-400/25" style={{ animation: 'fadeIn .15s ease' }}>
@@ -453,6 +579,14 @@ export default function Leads({ initialSearch = '' }) {
             <option value="" disabled>Reassign owner…</option>
             {(boot?.associates || []).filter(a => a.active !== false).map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
           </select>
+          <select className="input !w-auto !py-1.5 !text-[12.5px]" disabled={bulkBusy} defaultValue="" onChange={e => { if (e.target.value) bulkPatchField({ sourceName: e.target.value }, 'Source updated'); e.target.value = '' }}>
+            <option value="" disabled>Change source…</option>
+            {(boot?.sources || []).map(source => { const name = typeof source === 'string' ? source : source.name; return <option key={name} value={name}>{name}</option> })}
+          </select>
+          <select className="input !w-auto !py-1.5 !text-[12.5px]" disabled={bulkBusy} defaultValue="" onChange={e => { if (e.target.value) bulkPatchField({ locationId: e.target.value }, 'Studio updated'); e.target.value = '' }}>
+            <option value="" disabled>Change studio…</option>
+            {(boot?.locations || []).filter(location => location.active !== false).map(location => <option key={location.id} value={location.id}>{location.name}</option>)}
+          </select>
           {role !== 'agent' && (
             <button className="btn btn-ghost !py-1.5 !text-[12.5px] text-rose-300 hover:!bg-rose-500/10" disabled={bulkBusy} onClick={bulkDelete}>
               <Trash2 size={13} /> Delete
@@ -464,61 +598,135 @@ export default function Leads({ initialSearch = '' }) {
         </div>
       )}
 
-      {/* toolbar — nowrap + horizontal scroll instead of wrap: this row has
-          enough controls (search, filters, grouping, sort, pin, density,
-          columns, view switcher) that wrapping to a second row reads as
-          broken layout rather than a deliberate two-row toolbar. */}
-      <div className="flex flex-nowrap items-center gap-2 overflow-x-auto scrollbar-thin pb-1 [&>*]:shrink-0">
-        <div className="relative w-[220px]">
-          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
-          <input className="input !pl-9" placeholder="Search name, phone, email…" value={search} onChange={e => { setSearch(e.target.value); setPage(0) }} />
+      {/* toolbar — filters, owners, view controls in one cohesive bar */}
+      <div className="leads-toolbar">
+        <div className="leads-toolbar-group leads-toolbar-primary">
+          <button className={`btn ${panelOpen ? 'btn-soft' : 'btn-ghost'} !py-2`} onClick={() => setPanelOpen(o => !o)}>
+            <SlidersHorizontal size={14} /> Filters {hasFilters && <span className="filter-dot" />}
+          </button>
+          {myAssociateId && (
+            <button className={`btn ${onlyMine ? 'btn-soft' : 'btn-ghost'} !py-2`} onClick={toggleOnlyMine}>
+              <UserPlus size={14} /> {onlyMine ? 'My leads' : 'All leads'}
+            </button>
+          )}
+          <Tip content={<span className="text-[11.5px] leading-relaxed"><b>Ctrl/Cmd+A</b> select all · <b>Ctrl/Cmd+C</b> copy selected rows · <b>Ctrl/Cmd+V</b> paste into remarks · <b>Ctrl/Cmd+Z</b> undo · <b>Ctrl/Cmd+Shift+Z</b> redo</span>}>
+            <button type="button" className="btn btn-ghost !p-2" aria-label="Keyboard shortcuts"><Keyboard size={14} /></button>
+          </Tip>
         </div>
-        <button className={`btn ${panelOpen ? 'btn-soft' : 'btn-ghost'} !py-2`} onClick={() => setPanelOpen(o => !o)}>
-          <SlidersHorizontal size={14} /> Filters {hasFilters && <span className="chip !px-1.5 !py-0.5 !text-[10px] bg-rose-500/20 text-rose-300">!</span>}
-        </button>
-        {hasFilters && <button className="btn btn-ghost !py-2" onClick={clearFilters}><X size={14} /> Clear</button>}
-        <select className="input !w-auto !py-1.5" value={groupBy} onChange={e => { setGroupBy(e.target.value); setCollapsed({}) }}>
-          {GROUP_OPTIONS.map(g => <option key={g.id} value={g.id}>{g.id ? `Group by: ${g.label}` : 'No grouping'}</option>)}
-        </select>
-        {grouped && (
-          <div className="flex items-center gap-1">
-            <button className="btn btn-ghost !py-2 !px-3" onClick={() => setCollapsed({})} title="Expand all groups"><ChevronRight size={14} className="rotate-90" /></button>
-            <button className="btn btn-ghost !py-2 !px-3" onClick={() => setCollapsed(Object.fromEntries(grouped.map(g => [g.key, true])))} title="Collapse all groups"><ChevronRight size={14} /></button>
+
+        {hasFilters && (
+          <div className="leads-toolbar-chips" style={{ animation: 'fadeIn .15s ease' }}>
+            {Object.entries(filters).filter(([k, v]) => v && k !== 'dateFrom' && k !== 'dateTo').map(([k, v]) => {
+              let label = v
+              if (k === 'locationId') label = lookup.locById[v]?.name || v
+              if (k === 'associateId') label = lookup.asnById[v]?.name || v
+              if (k === 'stage') label = v
+              if (k === 'status') label = v.toUpperCase()
+              return (
+                <button key={k} className="active-filter-chip" onClick={() => { setFilters(f => ({ ...f, [k]: '' })); setPage(0) }}>
+                  <span className="active-filter-key">{FILTER_LABELS[k] || k}</span>
+                  <span className="active-filter-value">{label}</span>
+                  <X size={10} />
+                </button>
+              )
+            })}
+            {filters.dateFrom && filters.dateTo && (
+              <button className="active-filter-chip" onClick={() => { setFilters(f => ({ ...f, dateFrom: '', dateTo: '' })); setPage(0) }}>
+                <span className="active-filter-key">Date</span>
+                <span className="active-filter-value">{fmtDateCompact(filters.dateFrom)} – {fmtDateCompact(filters.dateTo)}</span>
+                <X size={10} />
+              </button>
+            )}
+            <button className="active-filter-clear" onClick={clearFilters}>Clear all</button>
           </div>
         )}
-        <div className="ml-auto flex items-center gap-2 flex-nowrap [&>*]:shrink-0">
+
+        <div className="leads-toolbar-divider" />
+
+        <div className="leads-toolbar-group leads-toolbar-owners">
+          <div className="saved-segments-control">
+            <select className="input !w-auto !py-1.5" value={selectedSegmentId} onChange={e => applySegment(e.target.value)} aria-label="Open saved segment">
+              <option value="">Saved segments</option>
+              {segments.map(segment => <option key={segment.id} value={segment.id}>{segment.name}</option>)}
+            </select>
+            <button type="button" className="btn btn-ghost !py-2 !px-3" onClick={saveSegment}>Save</button>
+            {selectedSegmentId && <button type="button" className="btn btn-ghost !py-2 !px-3" onClick={() => deleteSegment(selectedSegmentId)} title="Delete selected segment"><Trash2 size={13} /></button>}
+          </div>
+          <OwnerFilter associates={(boot?.associates || []).filter(a => a.active !== false && (!filters.locationId || (a.locationIds || [a.locationId]).includes(filters.locationId)))} selected={filters.associateId} onSelect={id => { if (onlyMine) setOnlyMine(false); setFilters(f => ({ ...f, associateId: f.associateId === id ? '' : id })); setPage(0) }} />
+          <select className="input !w-auto !py-1.5" value={groupBy} onChange={e => { setGroupBy(e.target.value); setCollapsed({}) }}>
+            {GROUP_OPTIONS.map(g => <option key={g.id} value={g.id}>{g.id ? `Group by ${g.label}` : 'No grouping'}</option>)}
+          </select>
+          {grouped && (
+            <div className="flex items-center gap-1">
+              <Tip content="Expand all groups"><button className="btn btn-ghost !py-2 !px-3" onClick={() => setCollapsed({})}><ChevronRight size={14} className="rotate-90" /></button></Tip>
+              <Tip content="Collapse all groups"><button className="btn btn-ghost !py-2 !px-3" onClick={() => setCollapsed(Object.fromEntries(grouped.map(g => [g.key, true])))}><ChevronRight size={14} /></button></Tip>
+            </div>
+          )}
+        </div>
+
+        <div className="leads-toolbar-divider" />
+
+        <div className="leads-toolbar-group leads-toolbar-view">
+          {(missedLeads.length > 0 || outreachLeads.length > 0) && (
+            <div className={`ai-alert-compact ${aiAlertOpen ? 'is-open' : ''}`}>
+              <button className="ai-alert-trigger" onClick={() => setAiAlertOpen(v => !v)} title="AI missed follow-up and outreach detection" aria-expanded={aiAlertOpen}>
+                <span className="ai-alert-pulse" />
+                <Sparkles size={14} />
+                <span>AI alerts</span>
+                <span className="ai-alert-count">{missedLeads.length + outreachLeads.length}</span>
+              </button>
+              {aiAlertOpen && (
+                <div className="ai-alert-panel">
+                  <div className="ai-alert-panel-head">
+                    <span className="ai-alert-panel-icon"><Sparkles size={13} /></span>
+                    <div>
+                      <div className="ai-alert-panel-title">AI follow-up intelligence</div>
+                      <div className="ai-alert-panel-sub">Live scan of {items.length} leads in view</div>
+                    </div>
+                  </div>
+                  <div className="ai-alert-metric-grid">
+                    <div className="ai-alert-metric is-amber">
+                      <span className="ai-alert-metric-value">{missedLeads.length}</span>
+                      <span className="ai-alert-metric-label">Missed follow-ups</span>
+                    </div>
+                    <div className="ai-alert-metric is-rose">
+                      <span className="ai-alert-metric-value">{outreachLeads.length}</span>
+                      <span className="ai-alert-metric-label">Idle &gt; {cadenceDays}d</span>
+                    </div>
+                    <div className="ai-alert-metric is-slate">
+                      <span className="ai-alert-metric-value">{missedLeads.filter(l => l.fu?.missedCount > 1).length}</span>
+                      <span className="ai-alert-metric-label">Critical (2+ missed)</span>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 mt-3">
+                    <button className="btn btn-ghost !py-1.5 !text-[12px]" onClick={jumpToTable}>View in table</button>
+                    <button className="btn btn-ghost !py-1.5 !text-[12px]" onClick={() => setAiAlertOpen(false)}>Close</button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
           <button className="btn btn-ghost !py-2" onClick={exportCsv}><Download size={14} /> Export</button>
           {view === 'table' && (
             <>
-              <button className={`btn btn-ghost !py-2 !px-3 ${headerPinned ? 'btn-soft' : ''}`} onClick={toggleHeaderPinned} title="Pin or unpin the table header row">
-                <PanelTop size={14} />
-              </button>
-              <button className="btn btn-ghost !py-2" onClick={toggleDensity} title="Row density">
-                <Rows3 size={14} /> {density === 'compact' ? 'Compact' : 'Comfortable'}
-              </button>
-              <label className="table-control">
-                <span>Row</span>
-                <input type="range" min="42" max="86" value={rowHeight} onChange={e => saveRowHeight(Number(e.target.value))} />
-              </label>
-              <label className="table-control">
-                <span>Zoom</span>
-                <input type="range" min="88" max="116" value={tableZoom} onChange={e => saveTableZoom(Number(e.target.value))} />
-              </label>
-              <ColumnManager columns={columns} setColumns={setColumns} />
+              <ViewMenu rowHeight={rowHeight} tableZoom={tableZoom} headerPinned={headerPinned} fixedCols={fixedCols} density={density} tableStyle={tableStyle} onTableStyle={setTableStyle} onRowHeight={saveRowHeight} onZoom={saveTableZoom} onPinHeader={toggleHeaderPinned} onFixedCols={toggleFixedCols} onDensity={toggleDensity} columnsComponent={<ColumnManager columns={columns} setColumns={setColumns} />} />
             </>
           )}
-          <div className="flex rounded-xl overflow-hidden border border-white/10">
+          <div className="leads-view-switcher">
             {VIEWS.map(v => {
               const Icon = v.icon
+              const active = view === v.id
               return (
-                <button
-                  key={v.id}
-                  className={`px-2.5 py-2 ${view === v.id ? 'text-white bg-rose-500/25' : 'text-slate-400 hover:text-white bg-white/5'} border-l border-white/10 first:border-l-0 transition-colors`}
-                  onClick={() => setView(v.id)}
-                  title={v.label}
-                >
-                  <Icon size={14} />
-                </button>
+                <Tip key={v.id} content={v.label}>
+                  <button
+                    className={active ? 'is-active' : ''}
+                    onClick={() => setView(v.id)}
+                    aria-label={v.label}
+                    aria-current={active}
+                  >
+                    <Icon size={14} />
+                  </button>
+                </Tip>
               )
             })}
           </div>
@@ -595,20 +803,21 @@ export default function Leads({ initialSearch = '' }) {
       {view === 'kanban' && <KanbanView items={items} boot={boot} lookup={lookup} openLead={openLead} changeStage={changeStage} changeLeadField={changeLeadField} groupBy={groupBy} />}
 
       {view !== 'summary' && view !== 'timeline' && view !== 'kanban' && (
-        <div className="card overflow-hidden" ref={tableJumpRef}>
+        <div className={`leads-table-shell card overflow-hidden ${tableStyle.zebra ? 'has-zebra' : 'no-zebra'} ${tableStyle.gridLines ? 'has-grid-lines' : 'no-grid-lines'}`} style={{ '--table-font-scale': tableStyle.fontScale / 100 }} ref={tableJumpRef}>
           {view === 'table' && (
             <TableView
               items={items} boot={boot} lookup={lookup} openLead={openLead} openQuickAction={openQuickAction}
               changeStage={changeStage} changeAssociate={changeAssociate} changeLeadField={changeLeadField} grouped={grouped} collapsed={collapsed} toggleGroup={toggleGroup}
               toggleManualFlag={toggleManualFlag}
-                  onMessage={setComposeLead}
-                  onTemplateMessage={setTemplateLead}
+              onMessage={setComposeLead}
+              onTemplateMessage={setTemplateLead}
               selected={selected} toggleSelect={toggleSelect} toggleSelectAll={toggleSelectAll}
-              columns={columns} density={density} rowHeight={rowHeight} tableZoom={tableZoom} colWidths={colWidths} setColWidths={saveColWidths} manualFlagOverrides={manualFlagOverrides} headerPinned={headerPinned} focusLeadIds={focusLeadIds} clearFocus={() => setFocusLeadIds([])} sortBy={sortBy} sortDir={sortDir} setSortBy={setSortBy} setSortDir={setSortDir}
+              columns={columns} density={density} rowHeight={rowHeight} tableZoom={tableZoom} colWidths={colWidths} setColWidths={saveColWidths} manualFlagOverrides={manualFlagOverrides} headerPinned={headerPinned} fixedCols={fixedCols} focusLeadIds={focusLeadIds} clearFocus={() => setFocusLeadIds([])} sortBy={sortBy} sortDir={sortDir} setSortBy={setSortBy} setSortDir={setSortDir}
+              columnCountsQuery={columnCountsQuery}
             />
           )}
-              {view === 'cards' && <CardsView items={items} lookup={lookup} openLead={openLead} grouped={grouped} collapsed={collapsed} toggleGroup={toggleGroup} boot={boot} onMessage={setComposeLead} onTemplateMessage={setTemplateLead} />}
-              {view === 'compact' && <CompactView items={items} lookup={lookup} openLead={openLead} boot={boot} onMessage={setComposeLead} onTemplateMessage={setTemplateLead} />}
+          {view === 'cards' && <CardsView items={items} lookup={lookup} openLead={openLead} grouped={grouped} collapsed={collapsed} toggleGroup={toggleGroup} boot={boot} onMessage={setComposeLead} onTemplateMessage={setTemplateLead} />}
+          {view === 'compact' && <CompactView items={items} lookup={lookup} openLead={openLead} boot={boot} onMessage={setComposeLead} onTemplateMessage={setTemplateLead} />}
           {!loading && !items.length && <Empty icon={<Search size={20} />} title="No leads match your filters" subtitle="Try adjusting the filters, or import a CSV of leads." />}
         </div>
       )}
@@ -642,6 +851,7 @@ export default function Leads({ initialSearch = '' }) {
         membershipId={quickActionMembershipId}
         purchaseMembershipId={quickActionPurchaseMembershipId}
         paymentMethodId={quickActionPaymentMethodId}
+        stripeItems={quickActionStripeItems}
         onClose={() => setQuickActionLead(null)}
         onSubmit={submitQuickAction}
         setClassType={setQuickActionClass}
@@ -651,18 +861,21 @@ export default function Leads({ initialSearch = '' }) {
         setMembershipId={setQuickActionMembershipId}
         setPurchaseMembershipId={setQuickActionPurchaseMembershipId}
         setPaymentMethodId={setQuickActionPaymentMethodId}
+        setStripeItems={setQuickActionStripeItems}
       />
     </div>
   )
 }
 
-function QuickActionModal({ lead, mode, classType, amount, name, sessionId, membershipId, purchaseMembershipId, paymentMethodId, url, status, onClose, onSubmit, setClassType, setAmount, setName, setSessionId, setMembershipId, setPurchaseMembershipId, setPaymentMethodId }) {
+function QuickActionModal({ lead, mode, classType, amount, name, sessionId, membershipId, purchaseMembershipId, paymentMethodId, stripeItems, url, status, onClose, onSubmit, setClassType, setAmount, setName, setSessionId, setMembershipId, setPurchaseMembershipId, setPaymentMethodId, setStripeItems }) {
   const isPay = mode === 'stripe'
   const [sessions, setSessions] = useState([])
   const [activeMemberships, setActiveMemberships] = useState([])
   const [catalog, setCatalog] = useState([])
   const [paymentMethods, setPaymentMethods] = useState([])
   const [loadingOptions, setLoadingOptions] = useState(false)
+  const [payments, setPayments] = useState([])
+  const [refreshingPayment, setRefreshingPayment] = useState('')
   const locationId = lead?.locationId
   const memberId = lead?.memberId || lead?.momence?.memberId
   const selectedCatalogItem = catalog.find(item => String(item.id) === String(purchaseMembershipId))
@@ -671,7 +884,10 @@ function QuickActionModal({ lead, mode, classType, amount, name, sessionId, memb
     if (!lead) return
     let alive = true
     setLoadingOptions(true)
-    const requests = [
+    const requests = isPay ? [
+      api.get('/api/stripe/catalog').then(data => alive && setCatalog(data.products || [])),
+      api.get(`/api/stripe/payments?${buildQuery({ leadId: lead.id })}`).then(data => alive && setPayments(data.payments || []))
+    ] : [
       api.get(`/api/momence/host-memberships?${buildQuery({ locationId })}`).then(data => alive && setCatalog((data.memberships || []).filter(m => m.disabled !== true && m.isDeleted !== true))),
       api.get(`/api/momence/payment-methods?${buildQuery({ locationId })}`).then(data => alive && setPaymentMethods(data.paymentMethods || []))
     ]
@@ -683,19 +899,46 @@ function QuickActionModal({ lead, mode, classType, amount, name, sessionId, memb
     if (!memberId || !sessionId || isPay) return
     api.get(`/api/momence/members/${memberId}/session-memberships?${buildQuery({ sessionId, locationId, recurringBooking: false })}`).then(data => setActiveMemberships(data.memberships || [])).catch(() => setActiveMemberships([]))
   }, [memberId, sessionId, locationId, isPay])
+  const toggleStripeItem = product => setStripeItems(current => current.some(item => item.priceId === product.priceId)
+    ? current.filter(item => item.priceId !== product.priceId)
+    : [...current, { priceId: product.priceId, quantity: 1, recurring: Boolean(product.recurring) }])
+  const refreshPayment = async paymentId => {
+    setRefreshingPayment(paymentId)
+    try {
+      const result = await api.get(`/api/stripe/payment-links/${paymentId}`)
+      setPayments(current => current.map(payment => payment.id === paymentId ? result.payment : payment))
+    } finally { setRefreshingPayment('') }
+  }
   return <Modal open={!!lead} onClose={onClose} width={760}>
-    <ModalHeader title={isPay ? 'Quick sale' : 'Book a Studio Session'} subtitle={lead ? `${lead.fullName} · ${lead.email || lead.phone || 'No contact details'}` : ''} onClose={onClose} />
+    <ModalHeader title={isPay ? 'Create Stripe payment link' : 'Book a Studio Session'} subtitle={lead ? `${lead.fullName} · ${lead.email || lead.phone || 'No contact details'}` : ''} onClose={onClose} />
     <div className="quick-sale-modal space-y-3">
       <section className="quick-sale-section"><span>Your location</span><strong>{lead?.center || 'Lead studio'}</strong></section>
-      <section className="quick-sale-section"><span>Customer</span><div className="quick-sale-customer"><strong>{lead?.fullName}</strong><small>{lead?.email || lead?.phone || 'Contact details required'}</small><em>{memberId ? `Momence #${memberId}` : 'Will be converted to a Momence member before checkout'}</em></div></section>
+      <section className="quick-sale-section"><span>Customer</span><div className="quick-sale-customer"><strong>{lead?.fullName}</strong><small>{lead?.email || lead?.phone || 'Contact details required'}</small><em>{isPay ? 'Stripe Checkout' : (memberId ? `Momence #${memberId}` : 'Will be converted to a Momence member before checkout')}</em></div></section>
+      {isPay && <>
+        <section className="quick-sale-section stripe-product-picker">
+          <span>Stripe products</span>
+          {loadingOptions ? <div className="stripe-payment-empty"><Spinner size={16} /> Loading active prices…</div> : catalog.length ? <div className="stripe-product-grid">{catalog.map(product => {
+            const selected = stripeItems.some(item => item.priceId === product.priceId)
+            return <button type="button" key={product.priceId} className={`stripe-product-option ${selected ? 'is-selected' : ''}`} onClick={() => toggleStripeItem(product)}>
+              <i>{selected ? <Check size={13} /> : null}</i><strong>{product.name}</strong><small>{product.description || (product.recurring ? `Billed every ${product.recurring.interval}` : 'One-time payment')}</small><b>{money(product.amount)}{product.recurring ? ` / ${product.recurring.interval}` : ''}</b>
+            </button>
+          })}</div> : <div className="stripe-payment-empty">No active Stripe prices found. Use a custom payment below.</div>}
+        </section>
+        <section className="quick-sale-section stripe-custom-payment">
+          <span>Custom payment</span>
+          <div><label><small>Payment title</small><input className="input" value={name} onChange={e => setName(e.target.value)} placeholder={`Payment for ${lead?.fullName || 'lead'}`} /></label><label><small>Amount (INR)</small><input className="input" type="number" min="1" step="1" value={amount} onChange={e => setAmount(e.target.value)} placeholder="Enter amount" disabled={stripeItems.length > 0} /></label></div>
+          {stripeItems.length > 0 && <small className="stripe-helper">Custom amount is disabled while Stripe products are selected.</small>}
+        </section>
+        {!!payments.length && <section className="quick-sale-section stripe-payment-history"><span>Payment history</span><div className="stripe-payment-list">{payments.map(payment => <div key={payment.id}><span className={`stripe-payment-status is-${payment.status}`}>{payment.status}</span><div><strong>{payment.items?.length ? `${payment.items.length} Stripe item${payment.items.length > 1 ? 's' : ''}` : payment.metadata?.leadName || 'Custom payment'}</strong><small>{new Date(payment.createdAt).toLocaleString('en-IN')} · {money(payment.amount || 0)}</small></div><button type="button" className="btn btn-ghost !p-1.5" onClick={() => refreshPayment(payment.id)} aria-label="Refresh payment status">{refreshingPayment === payment.id ? <Spinner size={13} /> : <RefreshCw size={13} />}</button>{payment.checkoutUrl && <a className="btn btn-ghost !p-1.5" href={payment.checkoutUrl} target="_blank" rel="noreferrer" aria-label="Open payment link"><ExternalLink size={13} /></a>}</div>)}</div></section>}
+      </>}
       {!isPay && <>
         <label className="block"><span className="text-[11px] text-slate-500">Studio Session</span><select className="input mt-1" value={sessionId} onChange={e => { setSessionId(e.target.value); setMembershipId('') }} disabled={loadingOptions}><option value="">{loadingOptions ? 'Loading classes…' : 'Choose a class'}</option>{sessions.map(s => <option key={s.id} value={s.id}>{new Date(s.startsAt).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })} · {s.name} · {s.inPersonLocation?.name || 'Studio'}</option>)}</select></label>
         <label className="block"><span className="text-[11px] text-slate-500">Active membership</span><select className="input mt-1" value={membershipId} onChange={e => { setMembershipId(e.target.value); setPurchaseMembershipId('') }} disabled={!sessionId}><option value="">{sessionId ? (activeMemberships.length ? 'Choose active membership' : 'No active membership — choose POS below') : 'Select a class first'}</option>{activeMemberships.map(m => <option key={m.bookingMembershipId || m.id} value={m.bookingMembershipId || m.id}>{m.name || m.membership?.name || 'Active membership'}{m.classesLeft != null ? ` · ${m.classesLeft} classes left` : ''}</option>)}</select></label>
       </>}
-      {(isPay || !membershipId) && <><section className="quick-sale-section quick-sale-cart"><span>Cart</span><div className="quick-sale-item"><b>Membership</b><select className="input" value={purchaseMembershipId} onChange={e => setPurchaseMembershipId(e.target.value)}><option value="">Select featured membership</option>{catalog.map(m => { const price = Number(m.price ?? m.priceInCurrency ?? m.defaultPrice ?? 0); return <option key={m.id} value={m.id}>{m.name} · ₹{price.toLocaleString('en-IN')}</option> })}</select>{selectedCatalogItem && <div><strong>{selectedCatalogItem.name}</strong><small>Featured Momence membership</small><b>₹{selectedPrice.toLocaleString('en-IN')}</b></div>}</div></section><div className="quick-sale-summary"><section className="quick-sale-section"><span>Discounts</span><small>Discount eligibility is validated by Momence during checkout.</small></section><section className="quick-sale-section"><span>Totals</span><div><small>Selected item</small><strong>₹{selectedPrice.toLocaleString('en-IN')}</strong></div><div><small>Total submitted to Momence POS</small><strong>₹{selectedPrice.toLocaleString('en-IN')}</strong></div></section></div><section className="quick-sale-section"><span>Payment</span><div className="quick-sale-payment-tabs"><button type="button" className="active">Other</button></div><select className="input" value={paymentMethodId} onChange={e => setPaymentMethodId(e.target.value)}><option value="">Select payment method</option>{paymentMethods.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}</select></section></>}
+      {!isPay && !membershipId && <><section className="quick-sale-section quick-sale-cart"><span>Cart</span><div className="quick-sale-item"><b>Membership</b><select className="input" value={purchaseMembershipId} onChange={e => setPurchaseMembershipId(e.target.value)}><option value="">Select featured membership</option>{catalog.map(m => { const price = Number(m.price ?? m.priceInCurrency ?? m.defaultPrice ?? 0); return <option key={m.id} value={m.id}>{m.name} · ₹{price.toLocaleString('en-IN')}</option> })}</select>{selectedCatalogItem && <div><strong>{selectedCatalogItem.name}</strong><small>Featured Momence membership</small><b>₹{selectedPrice.toLocaleString('en-IN')}</b></div>}</div></section><div className="quick-sale-summary"><section className="quick-sale-section"><span>Discounts</span><small>Discount eligibility is validated by Momence during checkout.</small></section><section className="quick-sale-section"><span>Totals</span><div><small>Selected item</small><strong>₹{selectedPrice.toLocaleString('en-IN')}</strong></div><div><small>Total submitted to Momence POS</small><strong>₹{selectedPrice.toLocaleString('en-IN')}</strong></div></section></div><section className="quick-sale-section"><span>Payment</span><div className="quick-sale-payment-tabs"><button type="button" className="active">Other</button></div><select className="input" value={paymentMethodId} onChange={e => setPaymentMethodId(e.target.value)}><option value="">Select payment method</option>{paymentMethods.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}</select></section></>}
       {url && <div className="rounded-xl border border-emerald-400/25 bg-emerald-500/10 p-3 text-[12px]"><strong className="block text-emerald-400">Payment link created</strong><a className="break-all text-slate-300 underline" href={url} target="_blank" rel="noreferrer">{url}</a></div>}
       {status && !url && <div className="rounded-xl border border-emerald-400/25 bg-emerald-500/10 p-3 text-[12px] text-emerald-400">{isPay ? 'Checkout' : 'Booking'} status: {status}</div>}
-      <div className="flex justify-end gap-2"><button className="btn btn-ghost" onClick={onClose}>Cancel</button><button className="btn btn-primary" disabled={isPay ? (!purchaseMembershipId || !paymentMethodId) : (!sessionId || (!membershipId && (!purchaseMembershipId || !paymentMethodId)))} onClick={onSubmit}>{isPay ? 'Confirm purchase' : purchaseMembershipId ? 'Confirm purchase & book' : 'Book member'}</button></div>
+      <div className="flex justify-end gap-2"><button className="btn btn-ghost" onClick={onClose}>Cancel</button>{url && <button className="btn btn-soft" onClick={() => navigator.clipboard?.writeText(url)}><Copy size={13} /> Copy link</button>}<button className="btn btn-primary" disabled={isPay ? (!stripeItems.length && !(Number(amount) > 0)) : (!sessionId || (!membershipId && (!purchaseMembershipId || !paymentMethodId)))} onClick={onSubmit}>{isPay ? 'Create payment link' : purchaseMembershipId ? 'Confirm purchase & book' : 'Book member'}</button></div>
     </div>
   </Modal>
 }
@@ -718,19 +961,149 @@ function ColumnsToggleIcon({ pinned }) {
   return <span className={`inline-flex w-4 h-4 rounded border items-center justify-center text-[9px] ${pinned ? 'bg-rose-500/20 border-rose-400/30 text-rose-300' : 'bg-white/5 border-white/10 text-slate-400'}`}>▥</span>
 }
 
-function Metric({ icon: Icon, children, tone = 'neutral', title }) {
-  const tones = {
-    neutral: 'bg-white/5 border-white/10 text-slate-300',
-    emerald: 'bg-emerald-500/10 border-emerald-400/25 text-emerald-300',
-    amber: 'bg-amber-500/10 border-amber-400/25 text-amber-300',
-    rose: 'bg-rose-500/10 border-rose-400/25 text-rose-300',
-    fuchsia: 'bg-fuchsia-500/10 border-fuchsia-400/25 text-fuchsia-300',
-    slate: 'bg-white/[0.03] border-white/8 text-slate-400'
+function OwnerFilter({ associates, selected, onSelect }) {
+  const selectedAssoc = associates.find(a => a.id === selected)
+  const [open, setOpen] = useState(false)
+  const [pos, setPos] = useState(null)
+  const ref = useRef(null)
+  const menuRef = useRef(null)
+  useEffect(() => {
+    if (!open) return
+    const onClick = (e) => { if (!ref.current?.contains(e.target) && !menuRef.current?.contains(e.target)) setOpen(false) }
+    const onKey = (e) => { if (e.key === 'Escape') setOpen(false) }
+    document.addEventListener('mousedown', onClick)
+    document.addEventListener('keydown', onKey)
+    return () => { document.removeEventListener('mousedown', onClick); document.removeEventListener('keydown', onKey) }
+  }, [open])
+  const toggle = () => {
+    if (!open) {
+      const r = ref.current?.getBoundingClientRect()
+      if (r) setPos({ left: r.left, top: r.bottom + 6 })
+    }
+    setOpen(o => !o)
   }
   return (
-    <span title={title} className={`group-metric inline-flex items-center gap-1.5 rounded-lg border px-2 py-1 text-[11px] font-medium mono ${tones[tone]}`}>
-      {Icon && <Icon size={11} className="shrink-0" />}
-      {children}
+    <div className="owner-filter" ref={ref}>
+      <button type="button" className={`owner-filter-trigger ${selectedAssoc ? 'is-active' : ''}`} onClick={toggle}>
+        {selectedAssoc ? (
+          <>
+            <Avatar className="avatar" name={selectedAssoc.name} color={selectedAssoc.color} photoUrl={selectedAssoc.photoUrl} photoZoom={selectedAssoc.photoZoom} photoPosX={selectedAssoc.photoPosX} photoPosY={selectedAssoc.photoPosY} size={20} fallback="👤" />
+            <span className="owner-filter-name">{selectedAssoc.name}</span>
+          </>
+        ) : (
+          <>
+            <Users size={14} />
+            <span>Owners</span>
+          </>
+        )}
+        <ChevronDown size={12} />
+      </button>
+      {open && pos && createPortal(
+        <div className="owner-filter-menu" ref={menuRef} style={{ position: 'fixed', left: pos.left, top: pos.top }}>
+          <button type="button" className="owner-filter-option" onClick={() => { onSelect(''); setOpen(false) }}>
+            <span className="owner-filter-avatar-placeholder"><Users size={12} /></span>
+            <span>All owners</span>
+          </button>
+          {associates.map(a => (
+            <button key={a.id} type="button" className={`owner-filter-option ${selected === a.id ? 'is-active' : ''}`} onClick={() => { onSelect(a.id); setOpen(false) }}>
+              <Avatar className="avatar" name={a.name} color={a.color} photoUrl={a.photoUrl} photoZoom={a.photoZoom} photoPosX={a.photoPosX} photoPosY={a.photoPosY} size={22} fallback="👤" />
+              <span>{a.name}</span>
+              {selected === a.id && <Check size={13} />}
+            </button>
+          ))}
+        </div>,
+        document.body
+      )}
+    </div>
+  )
+}
+
+function ViewMenu({ rowHeight, tableZoom, headerPinned, fixedCols, density, tableStyle, onTableStyle, onRowHeight, onZoom, onPinHeader, onFixedCols, onDensity, columnsComponent }) {
+  const [open, setOpen] = useState(false)
+  const [pos, setPos] = useState(null)
+  const ref = useRef(null)
+  const panelRef = useRef(null)
+  useEffect(() => {
+    if (!open) return
+    const onClick = (e) => { if (!ref.current?.contains(e.target) && !panelRef.current?.contains(e.target)) setOpen(false) }
+    const onKey = (e) => { if (e.key === 'Escape') setOpen(false) }
+    document.addEventListener('mousedown', onClick)
+    document.addEventListener('keydown', onKey)
+    return () => { document.removeEventListener('mousedown', onClick); document.removeEventListener('keydown', onKey) }
+  }, [open])
+  const toggle = () => {
+    if (!open) {
+      const r = ref.current?.getBoundingClientRect()
+      if (r) setPos({ right: Math.max(8, window.innerWidth - r.right), top: r.bottom + 6 })
+    }
+    setOpen(o => !o)
+  }
+  return (
+    <div className="view-menu" ref={ref}>
+      <button type="button" className={`btn btn-ghost !py-2 ${open ? 'btn-soft' : ''}`} onClick={toggle}>
+        <Rows3 size={14} /> View
+      </button>
+      {open && pos && createPortal(
+        <div className="view-menu-panel" ref={panelRef} style={{ position: 'fixed', top: pos.top, right: pos.right }}>
+          <div className="view-menu-section">
+            <span className="view-menu-label">Density</span>
+            <div className="view-menu-toggle">
+              <button type="button" className={density === 'compact' ? 'is-active' : ''} onClick={() => { onDensity(); setOpen(false) }}><Rows3 size={13} /> Compact</button>
+              <button type="button" className={density === 'comfortable' ? 'is-active' : ''} onClick={() => { onDensity(); setOpen(false) }}><LayoutGrid size={13} /> Comfortable</button>
+            </div>
+          </div>
+          <div className="view-menu-section">
+            <span className="view-menu-label">Row height</span>
+            <label className="view-menu-range">
+              <input type="range" min="32" max="88" value={rowHeight} onChange={e => onRowHeight(Number(e.target.value))} />
+              <span>{rowHeight}px</span>
+            </label>
+          </div>
+          <div className="view-menu-section">
+            <span className="view-menu-label">Zoom</span>
+            <label className="view-menu-range">
+              <input type="range" min="88" max="116" value={tableZoom} onChange={e => onZoom(Number(e.target.value))} />
+              <span>{tableZoom}%</span>
+            </label>
+          </div>
+          <div className="view-menu-section">
+            <span className="view-menu-label">Text size</span>
+            <label className="view-menu-range">
+              <input type="range" min="90" max="115" value={tableStyle.fontScale} onChange={e => onTableStyle(current => ({ ...current, fontScale: Number(e.target.value) }))} />
+              <span>{tableStyle.fontScale}%</span>
+            </label>
+          </div>
+          <div className="view-menu-section view-menu-switches">
+            <button type="button" className={headerPinned ? 'is-active' : ''} onClick={() => onPinHeader()}>
+              <PanelTop size={13} /> {headerPinned ? 'Header pinned' : 'Pin header'}
+            </button>
+            <button type="button" className={fixedCols ? 'is-active' : ''} onClick={() => onFixedCols()}>
+              {fixedCols ? <Pin size={13} /> : <PinOff size={13} />} {fixedCols ? 'Columns frozen' : 'Freeze columns'}
+            </button>
+            <button type="button" className={tableStyle.zebra ? 'is-active' : ''} onClick={() => onTableStyle(current => ({ ...current, zebra: !current.zebra }))}>Zebra rows</button>
+            <button type="button" className={tableStyle.gridLines ? 'is-active' : ''} onClick={() => onTableStyle(current => ({ ...current, gridLines: !current.gridLines }))}>Grid lines</button>
+          </div>
+          <div className="view-menu-section">{columnsComponent}</div>
+        </div>,
+        document.body
+      )}
+    </div>
+  )
+}
+
+function Metric({ icon: Icon, children, tone = 'neutral', title }) {
+  const tones = {
+    neutral: 'text-slate-300',
+    emerald: 'text-emerald-400',
+    amber: 'text-amber-400',
+    rose: 'text-rose-400',
+    fuchsia: 'text-fuchsia-400',
+    slate: 'text-slate-500'
+  }
+  return (
+    <span title={title} className="group-stat">
+      {Icon && <Icon size={12} className={`shrink-0 ${tones[tone]}`} />}
+      <span className={`group-stat-value ${tones[tone]}`}>{children}</span>
     </span>
   )
 }
@@ -750,7 +1123,7 @@ function GroupSummary({ list }) {
   const lastActivity = activity.length ? Math.min(...activity) : null
 
   return (
-    <span className="flex flex-wrap items-center gap-1.5">
+    <span className="group-stat-row">
       <Metric icon={Users} tone="neutral" title="Leads in this group">{total} lead{total === 1 ? '' : 's'}</Metric>
       <Metric icon={TrendingUp} tone="emerald" title="Won leads and conversion rate">{won} won · {conversion}%</Metric>
       {lost > 0 && <Metric icon={XCircle} tone="rose" title="Lost leads">{lost} lost</Metric>}
@@ -764,7 +1137,7 @@ function GroupSummary({ list }) {
   )
 }
 
-function TableView({ items, boot, lookup, openLead, openQuickAction, changeStage, changeAssociate, changeLeadField, toggleManualFlag, grouped, collapsed, toggleGroup, onMessage, onTemplateMessage, selected, toggleSelect, toggleSelectAll, columns, density, rowHeight, tableZoom, colWidths, setColWidths, manualFlagOverrides, headerPinned = true, focusLeadIds = [], clearFocus, sortBy, sortDir, setSortBy, setSortDir }) {
+function TableView({ items, boot, lookup, openLead, openQuickAction, changeStage, changeAssociate, changeLeadField, toggleManualFlag, grouped, collapsed, toggleGroup, onMessage, onTemplateMessage, selected, toggleSelect, toggleSelectAll, columns, density, rowHeight, tableZoom, colWidths, setColWidths, manualFlagOverrides, headerPinned = true, fixedCols = false, focusLeadIds = [], clearFocus, sortBy, sortDir, setSortBy, setSortDir, columnCountsQuery }) {
   const focusedItems = focusLeadIds.length ? items.filter(l => focusLeadIds.includes(l.id)) : items
   if (grouped) {
     return (
@@ -785,7 +1158,7 @@ function TableView({ items, boot, lookup, openLead, openQuickAction, changeStage
               </button>
               {isOpen && (
                 <div className="lead-group-table">
-                  <TableGrid items={focusLeadIds.length ? g.list.filter(l => focusLeadIds.includes(l.id)) : g.list} boot={boot} lookup={lookup} openLead={openLead} openQuickAction={openQuickAction} changeStage={changeStage} changeAssociate={changeAssociate} changeLeadField={changeLeadField} toggleManualFlag={toggleManualFlag} onMessage={onMessage} onTemplateMessage={onTemplateMessage} selected={selected} toggleSelect={toggleSelect} toggleSelectAll={toggleSelectAll} columns={columns} density={density} rowHeight={rowHeight} tableZoom={tableZoom} colWidths={colWidths} setColWidths={setColWidths} manualFlagOverrides={manualFlagOverrides} headerPinned={headerPinned} focusLeadIds={focusLeadIds} clearFocus={clearFocus} sortBy={sortBy} sortDir={sortDir} setSortBy={setSortBy} setSortDir={setSortDir} />
+                  <TableGrid items={focusLeadIds.length ? g.list.filter(l => focusLeadIds.includes(l.id)) : g.list} boot={boot} lookup={lookup} openLead={openLead} openQuickAction={openQuickAction} changeStage={changeStage} changeAssociate={changeAssociate} changeLeadField={changeLeadField} toggleManualFlag={toggleManualFlag} onMessage={onMessage} onTemplateMessage={onTemplateMessage} selected={selected} toggleSelect={toggleSelect} toggleSelectAll={toggleSelectAll} columns={columns} density={density} rowHeight={rowHeight} tableZoom={tableZoom} colWidths={colWidths} setColWidths={setColWidths} manualFlagOverrides={manualFlagOverrides} headerPinned={headerPinned} fixedCols={fixedCols} focusLeadIds={focusLeadIds} clearFocus={clearFocus} sortBy={sortBy} sortDir={sortDir} setSortBy={setSortBy} setSortDir={setSortDir} columnCountsQuery={columnCountsQuery} />
                 </div>
               )}
             </div>
@@ -794,10 +1167,18 @@ function TableView({ items, boot, lookup, openLead, openQuickAction, changeStage
       </div>
     )
   }
-  return <TableGrid items={focusedItems} boot={boot} lookup={lookup} openLead={openLead} openQuickAction={openQuickAction} changeStage={changeStage} changeAssociate={changeAssociate} changeLeadField={changeLeadField} toggleManualFlag={toggleManualFlag} onMessage={onMessage} onTemplateMessage={onTemplateMessage} selected={selected} toggleSelect={toggleSelect} toggleSelectAll={toggleSelectAll} columns={columns} density={density} rowHeight={rowHeight} tableZoom={tableZoom} colWidths={colWidths} setColWidths={setColWidths} manualFlagOverrides={manualFlagOverrides} headerPinned={headerPinned} focusLeadIds={focusLeadIds} clearFocus={clearFocus} sortBy={sortBy} sortDir={sortDir} setSortBy={setSortBy} setSortDir={setSortDir} />
+  return <TableGrid items={focusedItems} boot={boot} lookup={lookup} openLead={openLead} openQuickAction={openQuickAction} changeStage={changeStage} changeAssociate={changeAssociate} changeLeadField={changeLeadField} toggleManualFlag={toggleManualFlag} onMessage={onMessage} onTemplateMessage={onTemplateMessage} selected={selected} toggleSelect={toggleSelect} toggleSelectAll={toggleSelectAll} columns={columns} density={density} rowHeight={rowHeight} tableZoom={tableZoom} colWidths={colWidths} setColWidths={setColWidths} manualFlagOverrides={manualFlagOverrides} headerPinned={headerPinned} fixedCols={fixedCols} focusLeadIds={focusLeadIds} clearFocus={clearFocus} sortBy={sortBy} sortDir={sortDir} setSortBy={setSortBy} setSortDir={setSortDir} columnCountsQuery={columnCountsQuery} />
 }
 
-function TableGrid({ items, boot, lookup, openLead, openQuickAction, changeStage, changeAssociate, changeLeadField, toggleManualFlag, onMessage, onTemplateMessage, selected, toggleSelect, toggleSelectAll, columns, density, rowHeight = 58, tableZoom = 100, colWidths = {}, setColWidths, manualFlagOverrides = {}, headerPinned = true, focusLeadIds = [], clearFocus, sortBy, sortDir, setSortBy, setSortDir }) {
+function TableGrid({ items, boot, lookup, openLead, openQuickAction, changeStage, changeAssociate, changeLeadField, toggleManualFlag, onMessage, onTemplateMessage, selected, toggleSelect, toggleSelectAll, columns, density, rowHeight = 58, tableZoom = 100, colWidths = {}, setColWidths, manualFlagOverrides = {}, headerPinned = true, fixedCols = false, focusLeadIds = [], clearFocus, sortBy, sortDir, setSortBy, setSortDir, columnCountsQuery }) {
+  const { role } = useApp()
+  // Agents may now edit name/phone/email/status/source (owner stays locked
+  // behind the request flow) — confirm first since these are core lead
+  // fields, easy to change by accident from an inline table select.
+  const changeLeadFieldConfirmed = (lead, patchBody, fieldLabel) => {
+    if (role === 'agent' && !window.confirm(`Change ${fieldLabel} for ${lead.fullName}?`)) return
+    changeLeadField(lead, patchBody)
+  }
   const cadenceDays = boot?.settings?.cadence?.outreachDays || 7
   const activeChannels = ['fu1', 'fu2', 'fu3', 'fu4']
   const [columnSearch, setColumnSearch] = useState({})
@@ -819,17 +1200,92 @@ function TableGrid({ items, boot, lookup, openLead, openQuickAction, changeStage
   }
   const displayedItems = items.filter(lead => Object.entries(columnSearch).every(([field, query]) => !query || String(searchValue(lead, field) ?? '').toLowerCase().includes(query.toLowerCase())))
   const allChecked = displayedItems.length > 0 && displayedItems.every(l => selected?.has(l.id))
-  const py = density === 'compact' ? 'py-1.5' : ''
+
+  // Sheet-style shortcuts, scoped to what's actually safely editable in-grid:
+  // remarks is the one free-text cell, so undo/redo and paste target it;
+  // copy/select-all work over the row selection everyone already has.
+  const [undoStack, setUndoStack] = useState([])
+  const [redoStack, setRedoStack] = useState([])
+  const remarksChange = async (lead, remarks) => {
+    const prev = lead.remarks || ''
+    if (prev === remarks) return
+    await changeLeadField(lead, { remarks })
+    setUndoStack(s => [...s, { leadId: lead.id, prev, next: remarks }])
+    setRedoStack([])
+  }
+  const undoRemarks = () => {
+    setUndoStack(s => {
+      if (!s.length) return s
+      const entry = s[s.length - 1]
+      changeLeadField({ id: entry.leadId }, { remarks: entry.prev })
+      setRedoStack(r => [...r, entry])
+      return s.slice(0, -1)
+    })
+  }
+  const redoRemarks = () => {
+    setRedoStack(r => {
+      if (!r.length) return r
+      const entry = r[r.length - 1]
+      changeLeadField({ id: entry.leadId }, { remarks: entry.next })
+      setUndoStack(s => [...s, entry])
+      return r.slice(0, -1)
+    })
+  }
+  const copySelection = () => {
+    const rows = displayedItems.filter(l => selected?.has(l.id))
+    if (!rows.length) return
+    const text = rows.map(l => [l.fullName, l.phone || '', l.email || '', l.stage || '', lookup.asnById[l.associateId]?.name || ''].join('\t')).join('\n')
+    navigator.clipboard?.writeText(text).catch(() => {})
+  }
+  const pasteIntoSelection = async () => {
+    if (selected?.size !== 1) return
+    const lead = displayedItems.find(l => selected.has(l.id))
+    if (!lead) return
+    try {
+      const text = await navigator.clipboard.readText()
+      const value = text.split(/\r?\n/)[0].split('\t')[0]
+      if (value !== undefined) remarksChange(lead, value)
+    } catch (e) { /* clipboard permission denied */ }
+  }
+  const onGridKeyDown = (e) => {
+    const tag = e.target.tagName
+    if (['INPUT', 'SELECT', 'TEXTAREA'].includes(tag) || e.target.isContentEditable) return
+    const mod = e.metaKey || e.ctrlKey
+    if (!mod) return
+    if (e.key === 'a') { e.preventDefault(); toggleSelectAll() }
+    else if (e.key === 'c') { e.preventDefault(); copySelection() }
+    else if (e.key === 'v') { e.preventDefault(); pasteIntoSelection() }
+    else if (e.key === 'z' && !e.shiftKey) { e.preventDefault(); undoRemarks() }
+    else if ((e.key === 'z' && e.shiftKey) || e.key === 'y') { e.preventDefault(); redoRemarks() }
+  }
+  const py = ''
   const [scoreTip, setScoreTip] = useState(null)
-  const requiredMinWidths = { stage: 220, source: 240, owner: 260, location: 280, status: 180, statusGroup: 200, score: 92 }
+  const requiredMinWidths = { stage: 178, source: 194, owner: 260, location: 280, status: 146, statusGroup: 180, score: 92 }
   const widthOf = (id, fallback) => Math.max(requiredMinWidths[id] || 0, Number(colWidths[id]) || fallback)
   const selectW = widthOf('select', 76)
   const leadW = Math.round((Number(colWidths.lead) || 260) * .9)
-  const stageW = widthOf('stage', 220)
+  const stageW = widthOf('stage', 178)
   const setColSearch = field => value => setColumnSearch(current => ({ ...current, [field]: value }))
   const autoFitColumns = () => {
-    const next = { select: 76, lead: 260, stage: 190, createdAt: 140, remarksField: 350, actions: 82 }
-    for (const c of visibleCols) next[c.id] = c.field === 'owner' ? 180 : c.field === 'score' ? 104 : 145
+    const canvas = document.createElement('canvas')
+    const context = canvas.getContext('2d')
+    if (context) context.font = '500 12px Inter, system-ui, sans-serif'
+    const measure = (values, min = 80, max = 320, chrome = 58) => Math.max(
+      min,
+      Math.min(max, Math.ceil(Math.max(...values.map(value => context?.measureText(String(value || '')).width || 0)) + chrome))
+    )
+    const next = {
+      select: 64,
+      lead: measure([`Lead (${displayedItems.length})`, ...displayedItems.flatMap(lead => [properName(lead.fullName), lead.email])], 210, 360, 54),
+      stage: measure(['Stage', ...displayedItems.map(lead => lead.stage)], 150, 300, 74),
+      createdAt: measure(['Created', ...displayedItems.map(lead => fmtDateCompact(lead.createdAt))], 150, 210, 70),
+      remarksField: Number(colWidths.remarksField) || 420,
+      actions: 82
+    }
+    for (const c of visibleCols) {
+      const field = c.field || c.id
+      next[c.id] = measure([c.label, ...displayedItems.map(lead => searchValue(lead, field))], field === 'score' ? 104 : 120, field === 'location' ? 380 : 300, 66)
+    }
     for (const ch of activeChannels) next[ch] = 54
     setColWidths?.(next)
   }
@@ -850,29 +1306,29 @@ function TableGrid({ items, boot, lookup, openLead, openQuickAction, changeStage
     window.addEventListener('mouseup', onUp)
   }
   return (
-    <div className="lead-table-scroll scrollbar-thin" style={{ '--lead-row-height': `${rowHeight}px`, zoom: tableZoom / 100 }}>
+    <div className="lead-table-scroll scrollbar-thin" tabIndex={0} onKeyDown={onGridKeyDown} style={{ zoom: tableZoom / 100 }}>
       {focusLeadIds.length > 0 && (
         <div className="px-4 pt-4 pb-3 flex items-center gap-2">
           <span className="chip bg-rose-500/15 border border-rose-400/25 text-rose-300">{focusLeadIds.length} highlighted lead{focusLeadIds.length === 1 ? '' : 's'}</span>
           <button className="btn btn-ghost !py-1.5 !text-[12px]" onClick={clearFocus}>Show all leads</button>
         </div>
       )}
-      <table className="data-table leads-data-table">
+      <table className={`data-table leads-data-table is-${density} ${fixedCols ? 'has-sticky-cols' : ''}`} style={{ '--lead-row-height': `${rowHeight}px`, '--col-select-width': `${selectW}px`, '--col-lead-width': `${leadW}px`, '--col-stage-width': `${stageW}px` }}>
         <thead className={headerPinned ? 'is-pinned' : 'is-unpinned'}>
           <tr className="text-[10.5px] uppercase tracking-wider text-slate-500 border-b border-white/8">
-            <th className={`resizable-th px-3 py-3 font-semibold`} style={{ width: selectW, minWidth: selectW }}>
-              <button className="flex items-center justify-center text-slate-400 hover:text-white" onClick={toggleSelectAll} title={allChecked ? 'Deselect all' : 'Select all'}>
+            <th className={`resizable-th sticky-col sticky-col-select px-3 py-3 font-semibold`} style={{ width: selectW, minWidth: selectW }}>
+              <button className="flex items-center justify-center text-slate-400 hover:text-white" onClick={toggleSelectAll}>
                 {allChecked ? <CheckSquare size={15} className="text-rose-400" /> : <Square size={15} />}
               </button>
-              <span className="col-resize-handle" onDoubleClick={autoFitColumns} onMouseDown={startResize('select', widthOf('select', 76))} title="Drag to resize column. Double-click to auto-fit all columns." />
+              <span className="col-resize-handle" onDoubleClick={autoFitColumns} onMouseDown={startResize('select', widthOf('select', 76))} />
             </th>
-            <SortHead label="Lead" field="fullName" width={leadW} onResize={startResize} onAutoFit={autoFitColumns} className={`px-4 py-3 font-semibold`} sortBy={sortBy} sortDir={sortDir} setSortBy={setSortBy} setSortDir={setSortDir} searchValue={columnSearch.fullName || ''} onSearch={setColSearch('fullName')} />
-            <SortHead label="Stage" field="stage" width={stageW} onResize={startResize} onAutoFit={autoFitColumns} className={`px-4 py-3 font-semibold`} sortBy={sortBy} sortDir={sortDir} setSortBy={setSortBy} setSortDir={setSortDir} searchValue={columnSearch.stage || ''} onSearch={setColSearch('stage')} />
-            <SortHead label="Created" field="createdAt" width={widthOf('createdAt', 150)} onResize={startResize} onAutoFit={autoFitColumns} className="px-4 py-3 font-semibold" sortBy={sortBy} sortDir={sortDir} setSortBy={setSortBy} setSortDir={setSortDir} searchValue={columnSearch.createdAt || ''} onSearch={setColSearch('createdAt')} />
-            {visibleCols.map(c => { const field = c.field || c.id; return <SortHead key={c.id} label={c.label} field={field} resizeId={c.id} width={widthOf(c.id, c.field === 'owner' ? 260 : c.field === 'source' ? 240 : c.field === 'location' ? 280 : c.field === 'statusGroup' ? 200 : c.field === 'score' ? 92 : 150)} onResize={startResize} onAutoFit={autoFitColumns} className="px-4 py-3 font-semibold" sortBy={sortBy} sortDir={sortDir} setSortBy={setSortBy} setSortDir={setSortDir} searchValue={columnSearch[field] || ''} onSearch={setColSearch(field)} /> })}
-            <th className="resizable-th px-4 py-3 font-semibold" style={{ width: widthOf('remarksField', 350), minWidth: widthOf('remarksField', 350) }}>
+            <SortHead label={`Lead (${displayedItems.length})`} field="fullName" width={leadW} onResize={startResize} onAutoFit={autoFitColumns} className={`resizable-th sticky-col sticky-col-lead px-4 py-3 font-semibold`} sortBy={sortBy} sortDir={sortDir} setSortBy={setSortBy} setSortDir={setSortDir} searchValue={columnSearch.fullName || ''} onSearch={setColSearch('fullName')} columnCountsQuery={columnCountsQuery} lookup={lookup} />
+            <SortHead label="Stage" field="stage" width={stageW} onResize={startResize} onAutoFit={autoFitColumns} className={`resizable-th sticky-col sticky-col-stage px-4 py-3 font-semibold`} sortBy={sortBy} sortDir={sortDir} setSortBy={setSortBy} setSortDir={setSortDir} searchValue={columnSearch.stage || ''} onSearch={setColSearch('stage')} columnCountsQuery={columnCountsQuery} lookup={lookup} />
+            <SortHead label="Created" field="createdAt" width={widthOf('createdAt', 180)} onResize={startResize} onAutoFit={autoFitColumns} className="px-4 py-3 font-semibold" sortBy={sortBy} sortDir={sortDir} setSortBy={setSortBy} setSortDir={setSortDir} searchValue={columnSearch.createdAt || ''} onSearch={setColSearch('createdAt')} columnCountsQuery={columnCountsQuery} lookup={lookup} />
+            {visibleCols.map(c => { const field = c.field || c.id; return <SortHead key={c.id} label={c.label} field={field} resizeId={c.id} width={widthOf(c.id, c.field === 'owner' ? 260 : c.field === 'source' ? 194 : c.field === 'location' ? 280 : c.field === 'statusGroup' ? 180 : c.field === 'score' ? 92 : c.field === 'status' ? 146 : 150)} onResize={startResize} onAutoFit={autoFitColumns} className="px-4 py-3 font-semibold" sortBy={sortBy} sortDir={sortDir} setSortBy={setSortBy} setSortDir={setSortDir} searchValue={columnSearch[field] || ''} onSearch={setColSearch(field)} columnCountsQuery={columnCountsQuery} lookup={lookup} /> })}
+            <th className="resizable-th px-4 py-3 font-semibold" style={{ width: widthOf('remarksField', 420), minWidth: widthOf('remarksField', 420) }}>
               <span>Remarks</span>
-              <span className="col-resize-handle" onDoubleClick={autoFitColumns} onMouseDown={startResize('remarksField', widthOf('remarksField', 350))} title="Drag to resize column. Double-click to auto-fit all columns." />
+              <span className="col-resize-handle" onDoubleClick={autoFitColumns} onMouseDown={startResize('remarksField', widthOf('remarksField', 420))} title="Drag to resize column. Double-click to auto-fit all columns." />
             </th>
             {activeChannels.map((ch, i) => {
               return (
@@ -889,7 +1345,7 @@ function TableGrid({ items, boot, lookup, openLead, openQuickAction, changeStage
           </tr>
         </thead>
         <tbody>
-          {displayedItems.map(l => {
+          {displayedItems.map((l, idx) => {
             const owner = lookup.asnById[l.associateId]
             const nextFu = l.followUps?.find(f => f.date && f.done === false && f.date !== '-')
             const dueIn = nextFu ? daysFromNow(nextFu.date) : null
@@ -897,8 +1353,8 @@ function TableGrid({ items, boot, lookup, openLead, openQuickAction, changeStage
             const rowManualFlags = manualFlagOverrides[l.id] || l.manualFlags || []
             const rowFlagged = rowManualFlags.some(f => f.id === 'focus')
             return (
-              <tr key={l.id} className={`border-b border-white/5 hover:bg-white/[0.035] cursor-pointer transition-colors ${selected?.has(l.id) ? 'bg-rose-500/[0.05]' : ''} ${focusLeadIds.includes(l.id) ? 'ring-1 ring-rose-400/30 bg-rose-500/[0.08]' : ''}`} onClick={() => openLead(l.id)}>
-                <td className={`px-3 ${py}`} style={{ width: selectW, minWidth: selectW }} onClick={e => e.stopPropagation()}>
+              <tr key={l.id} className={`border-b border-white/5 hover:bg-white/[0.035] cursor-pointer transition-colors ${selected?.has(l.id) ? 'is-selected' : ''} ${focusLeadIds.includes(l.id) ? 'is-focused' : ''}`} style={{ '--row-index': idx }} onClick={() => openLead(l.id)}>
+                <td className={`sticky-col sticky-col-select px-3 ${py}`} style={{ width: selectW, minWidth: selectW }} onClick={e => e.stopPropagation()}>
                   <div className="flex items-center gap-2">
                     <button className="flex items-center justify-center text-slate-400 hover:text-white" onClick={() => toggleSelect(l.id)}>
                       {selected?.has(l.id) ? <CheckSquare size={15} className="text-rose-400" /> : <Square size={15} />}
@@ -908,38 +1364,48 @@ function TableGrid({ items, boot, lookup, openLead, openQuickAction, changeStage
                     </button>
                   </div>
                 </td>
-                <td className={`px-4 ${py}`} style={{ width: leadW, minWidth: leadW }}>
+                <td className={`sticky-col sticky-col-lead px-4 ${py}`} style={{ width: leadW, minWidth: leadW }}>
                   <div className="min-w-0">
-                    <div className="text-[13px] font-semibold text-white truncate flex items-center gap-1.5">
-                      {l.fullName}
+                    <div className="lead-name truncate flex items-center gap-1.5">
+                      {properName(l.fullName)}
                       {[...rowManualFlags, ...(l.flags || [])].map(f => (
                         <span key={f.id} title={f.name} className="chip !px-1.5 !py-0 text-[9px]" style={{ background: `${f.color}22`, color: f.color, border: `1px solid ${f.color}44` }}>{f.label}</span>
                       ))}
                     </div>
-                    {density === 'compact'
-                      ? <div className="lead-compact-meta"><span title={l.sourceName || 'No source'}>{l.sourceName || 'No source'}</span><span title={owner?.name || 'Unassigned'}>{owner?.name || 'Unassigned'}</span></div>
-                      : <div className="text-[11px] text-slate-500 truncate">{l.email}</div>}
+                    {density === 'compact' && <div className="lead-compact-meta"><span>{l.sourceName || 'No source'}</span><span>{owner?.name || 'Unassigned'}</span></div>}
                   </div>
                 </td>
-                <td className={`px-4 ${py}`} style={{ width: stageW, minWidth: stageW }} onClick={e => e.stopPropagation()}>
+                <td className={`sticky-col sticky-col-stage px-4 ${py}`} style={{ width: stageW, minWidth: stageW }} onClick={e => e.stopPropagation()}>
                   {(() => {
                     const { icon: StageIcon } = stageVisual(l.stage)
                     const badgeStyle = stageBadgeStyle(l.stage)
+                    const compact = density === 'compact'
                     return (
-                          <div className="relative w-full max-w-[170px] shrink-0">
-                        <StageIcon size={12} className="stage-select-icon absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" style={badgeStyle} />
-                        <select
-                          className={`input stage-select ${stageClass(l.stage)} !py-1 !pl-7 !text-[11.5px] !w-[170px] !rounded-full truncate`}
-                          style={badgeStyle}
-                          title={l.stage} value={l.stage} onClick={e => e.stopPropagation()} onChange={e => changeStage(l, e.target.value)}
-                        >
-                          {(boot?.stages || []).map(s => <option key={s}>{s}</option>)}
-                        </select>
-                      </div>
+                      <Tip content={l.stage || 'No stage'}>
+                        <div className={`stage-badge-wrap ${compact ? 'is-compact' : ''}`} style={badgeStyle}>
+                          <span className="stage-badge-icon"><StageIcon size={compact ? 12 : 14} /></span>
+                          <select
+                            className={`stage-badge-select ${stageClass(l.stage)}`}
+                            style={badgeStyle}
+                            value={l.stage} onClick={e => e.stopPropagation()} onChange={e => changeStage(l, e.target.value)}
+                            aria-label={`Change stage for ${l.fullName}`}
+                          >
+                            {(boot?.stages || []).map(s => <option key={s}>{s}</option>)}
+                          </select>
+                        </div>
+                      </Tip>
                     )
                   })()}
                 </td>
-                <td className={`px-4 ${py} text-[12px] text-slate-400 mono`} style={{ width: widthOf('createdAt', 150), minWidth: widthOf('createdAt', 150) }}>{fmtDate(l.createdAt)}</td>
+                <td className={`px-4 ${py} lead-date-cell`} style={{ width: widthOf('createdAt', 180), minWidth: widthOf('createdAt', 180) }}>
+                  {l.createdAt
+                    ? (
+                      <Tip content={<span className="text-[11.5px]">{fmtDate(l.createdAt)}</span>}>
+                        <span className="lead-date-value"><Calendar size={12} /> {fmtDateCompact(l.createdAt)}</span>
+                      </Tip>
+                    )
+                    : <EmptyCell />}
+                </td>
                 {visibleCols.map(c => {
                   if (c.field === 'phone') {
                     return (
@@ -951,21 +1417,26 @@ function TableGrid({ items, boot, lookup, openLead, openQuickAction, changeStage
                     )
                   }
                   if (c.field === 'trialDate' || c.field === 'firstPurchaseDate') {
-                    const raw = c.field === 'trialDate'
+                    const cleaned = cleanDate(c.field === 'trialDate'
                       ? (l.trialDate || l.momenceEvidence?.trialDate)
-                      : (l.firstPurchaseDate || l.momenceEvidence?.firstPurchaseDate || l.convertedAt)
+                      : (l.firstPurchaseDate || l.momenceEvidence?.firstPurchaseDate || l.convertedAt))
+                    const raw = cleaned && fmtDateCompact(cleaned) !== '—' ? cleaned : ''
                     return (
-                      <td key={c.id} className={`px-4 ${py} text-[12.5px] mono text-slate-400`}>
+                      <td key={c.id} className={`px-4 ${py} lead-date-cell`}>
                         {raw
-                          ? fmtDate(raw)
-                          : <span className="table-empty-icon" title={c.field === 'trialDate' ? 'No trial booked yet' : 'No purchase yet'}><CalendarDays size={13} /></span>}
+                          ? (
+                            <Tip content={<span className="text-[11.5px]">{fmtDate(raw)}</span>}>
+                              <span className="lead-date-value"><CalendarDays size={12} /> {fmtDateCompact(raw)}</span>
+                            </Tip>
+                          )
+                          : <span className="table-empty-icon"><CalendarDays size={13} /></span>}
                       </td>
                     )
                   }
                   if (c.field === 'source') {
                     return (
                       <td key={c.id} className={`px-4 ${py} text-[12.5px] text-slate-400 truncate`}>
-                        <select className="table-inline-select" value={l.sourceName || ''} onClick={e => e.stopPropagation()} onChange={e => changeLeadField(l, { sourceName: e.target.value })}>
+                        <select className="table-inline-select" value={l.sourceName || ''} onClick={e => e.stopPropagation()} onChange={e => changeLeadFieldConfirmed(l, { sourceName: e.target.value }, 'source')}>
                           <option value="">No source</option>
                           {(boot?.sources || []).map(source => { const name = typeof source === 'string' ? source : source.name; return <option key={typeof source === 'string' ? source : source.id || name} value={name}>{name}</option> })}
                         </select>
@@ -983,7 +1454,7 @@ function TableGrid({ items, boot, lookup, openLead, openQuickAction, changeStage
                     return <td key={c.id} className={`px-4 ${py}`} onClick={e => e.stopPropagation()}><select className="table-inline-select" value={l.locationId || ''} onChange={e => changeLeadField(l, { locationId: e.target.value })}>{(boot?.locations || []).filter(location => location.active !== false).map(location => <option key={location.id} value={location.id}>{location.name}</option>)}</select></td>
                   }
                   if (c.field === 'status') {
-                    return <td key={c.id} className={`px-4 ${py}`} onClick={e => e.stopPropagation()}><select className="table-inline-select capitalize" value={l.status || 'open'} onChange={e => changeLeadField(l, { status: e.target.value })}><option value="open">Open</option><option value="won">Won</option><option value="lost">Lost</option></select></td>
+                    return <td key={c.id} className={`px-4 ${py}`}><span className={`status-readonly status-${l.status || 'open'}`}>{l.status || 'open'}</span></td>
                   }
                   if (c.field === 'statusGroup') {
                     return <td key={c.id} className={`px-4 ${py} text-[12.5px] text-left ${l.statusGroup === 'Membership Sold' ? 'text-emerald-400' : l.statusGroup === 'Trial Completed' ? 'text-sky-400' : 'text-slate-400'}`}>{l.statusGroup || 'Pre-Trial'}</td>
@@ -998,14 +1469,15 @@ function TableGrid({ items, boot, lookup, openLead, openQuickAction, changeStage
                     )
                   }
                   const val = getColumnValue(c, l, lookup)
+                  const formatted = formatColumnValue(val, c)
                   return (
                     <td key={c.id} className={`px-4 ${py} text-[12.5px] ${c.type === 'number' || c.type === 'currency' || c.type === 'percent' ? 'mono text-slate-300' : 'text-slate-400'}`}>
-                      <span className="table-cell-fit" title={String(formatColumnValue(val, c) ?? '')}>{formatColumnValue(val, c)}</span>
+                      {formatted === '—' ? <EmptyCell /> : <span className="table-cell-fit" title={String(formatted ?? '')} style={{ maxWidth: '100%' }}>{formatted}</span>}
                     </td>
                   )
                 })}
                 <td className={`px-4 ${py}`}>
-                  <InlineRemark lead={l} onSave={remarks => changeLeadField(l, { remarks })} />
+                  <InlineRemark lead={l} onSave={remarks => remarksChange(l, remarks)} />
                 </td>
                 {activeChannels.map((ch, fuIndex) => (
                   <td key={ch} className="px-1 text-center" onClick={e => e.stopPropagation()}>
@@ -1020,6 +1492,7 @@ function TableGrid({ items, boot, lookup, openLead, openQuickAction, changeStage
           })}
         </tbody>
       </table>
+      {scoreTip && <ScoreDetailsPopover tip={scoreTip} onClose={() => setScoreTip(null)} />}
     </div>
   )
 }
@@ -1030,6 +1503,12 @@ function RowActionsMenu({ lead, openLead, openQuickAction, onMessage, onTemplate
   const [busy, setBusy] = useState(false)
   const [position, setPosition] = useState({ left: 0, top: 0 })
   const buttonRef = useRef(null)
+  useEffect(() => {
+    if (!open) return
+    const close = event => { if (event.key === 'Escape') setOpen(false) }
+    document.addEventListener('keydown', close)
+    return () => document.removeEventListener('keydown', close)
+  }, [open])
   const show = () => {
     const rect = buttonRef.current?.getBoundingClientRect()
     if (rect) {
@@ -1068,28 +1547,44 @@ function RowActionsMenu({ lead, openLead, openQuickAction, onMessage, onTemplate
 }
 
 function AssociateCell({ lead, owner, associates, onChange }) {
+  const { role, openLead } = useApp()
   const [open, setOpen] = useState(false)
   const [position, setPosition] = useState({ left: 0, top: 0, width: 250 })
   const buttonRef = useRef(null)
   const choices = associates.filter(a => a.active !== false && (a.locationIds || [a.locationId]).includes(lead.locationId))
+  useEffect(() => {
+    if (!open) return
+    const close = event => { if (event.key === 'Escape') setOpen(false) }
+    document.addEventListener('keydown', close)
+    return () => document.removeEventListener('keydown', close)
+  }, [open])
   const show = () => {
+    if (role !== 'admin') { openLead(lead.id); return }
     const rect = buttonRef.current?.getBoundingClientRect()
     if (rect) setPosition({ left: Math.min(rect.left, window.innerWidth - 270), top: Math.min(rect.bottom + 6, window.innerHeight - 330), width: Math.max(250, rect.width) })
     setOpen(true)
   }
+  if (role !== 'admin') {
+    return (
+      <button type="button" className="associate-cell-trigger !cursor-not-allowed" onClick={show} title="Open lead to request an owner change">
+        <Avatar className="avatar" name={owner?.name || '?'} color={owner?.color} photoUrl={owner?.photoUrl} photoZoom={owner?.photoZoom} photoPosX={owner?.photoPosX} photoPosY={owner?.photoPosY} size={27} fallback="👤" />
+        <span>{owner?.name || 'Unassigned'}</span><Lock size={11} className="text-slate-500" />
+      </button>
+    )
+  }
   return (
     <>
       <button ref={buttonRef} type="button" className="associate-cell-trigger" onClick={show} aria-haspopup="listbox" aria-expanded={open}>
-        <Avatar name={owner?.name || '?'} color={owner?.color} photoUrl={owner?.photoUrl} photoZoom={owner?.photoZoom} photoPosX={owner?.photoPosX} photoPosY={owner?.photoPosY} size={27} fallback="👤" />
+        <Avatar className="avatar" name={owner?.name || '?'} color={owner?.color} photoUrl={owner?.photoUrl} photoZoom={owner?.photoZoom} photoPosX={owner?.photoPosX} photoPosY={owner?.photoPosY} size={27} fallback="👤" />
         <span>{owner?.name || 'Unassigned'}</span><ChevronDown size={12} />
       </button>
       {open && createPortal(<>
         <button className="fixed inset-0 z-[108] cursor-default" aria-label="Close associate options" onClick={() => setOpen(false)} />
         <div className="associate-cell-menu" role="listbox" style={position}>
           <div className="associate-cell-menu-head">Assign associate <span>{choices.length} available</span></div>
-          <button className="associate-cell-option" onClick={() => { onChange(''); setOpen(false) }}><Avatar name="?" color="#64748b" size={28} /><span><b>Unassigned</b><small>Clear current owner</small></span>{!lead.associateId && <Check size={14} />}</button>
+          <button className="associate-cell-option" onClick={() => { onChange(''); setOpen(false) }}><Avatar className="avatar" name="?" color="#64748b" size={28} /><span><b>Unassigned</b><small>Clear current owner</small></span>{!lead.associateId && <Check size={14} />}</button>
           {choices.map(associate => <button key={associate.id} className="associate-cell-option" onClick={() => { onChange(associate.id); setOpen(false) }}>
-            <Avatar name={associate.name} color={associate.color} photoUrl={associate.photoUrl} photoZoom={associate.photoZoom} photoPosX={associate.photoPosX} photoPosY={associate.photoPosY} size={28} fallback="👤" />
+            <Avatar className="avatar" name={associate.name} color={associate.color} photoUrl={associate.photoUrl} photoZoom={associate.photoZoom} photoPosX={associate.photoPosX} photoPosY={associate.photoPosY} size={28} fallback="👤" />
             <span><b>{associate.name}</b><small>{associate.role || 'Associate'}</small></span>
             {lead.associateId === associate.id && <Check size={14} />}
           </button>)}
@@ -1112,7 +1607,7 @@ function InlineRemark({ lead, onSave }) {
   return <button type="button" className="inline-remark-trigger" title={lead.remarks || 'Add remark'} onClick={e => { e.stopPropagation(); setEditing(true) }}><span>{lead.remarks || 'Add remark…'}</span><Pencil size={11} /></button>
 }
 
-function SortHead({ label, field, resizeId, width, style, onResize, onAutoFit, className = '', sortBy, sortDir, setSortBy, setSortDir, searchValue = '', onSearch }) {
+function SortHead({ label, field, resizeId, width, style, onResize, onAutoFit, className = '', sortBy, sortDir, setSortBy, setSortDir, searchValue = '', onSearch, columnCountsQuery, lookup }) {
   const active = sortBy === field
   const nextDir = active && sortDir === 'asc' ? 'desc' : 'asc'
   const thStyle = style || { width, minWidth: width }
@@ -1120,25 +1615,106 @@ function SortHead({ label, field, resizeId, width, style, onResize, onAutoFit, c
   const searchRef = useRef(null)
   useEffect(() => { if (searchOpen) searchRef.current?.focus() }, [searchOpen])
   const showSearch = searchOpen || !!searchValue
+  const [countsOpen, setCountsOpen] = useState(false)
+  const [counts, setCounts] = useState(null)
+  const [countsLoading, setCountsLoading] = useState(false)
+  const [countsExpanded, setCountsExpanded] = useState(true)
+  const [countsPos, setCountsPos] = useState({ left: 0, top: 0 })
+  const countsBtnRef = useRef(null)
+  useEffect(() => {
+    if (!countsOpen && !searchOpen) return
+    const close = (event) => {
+      if (event.key !== 'Escape') return
+      setCountsOpen(false)
+      setCountsExpanded(false)
+      setSearchOpen(false)
+    }
+    document.addEventListener('keydown', close)
+    return () => document.removeEventListener('keydown', close)
+  }, [countsOpen, searchOpen])
+  const openCounts = async () => {
+    const rect = countsBtnRef.current?.getBoundingClientRect()
+    if (rect) setCountsPos({ left: Math.min(rect.left, window.innerWidth - 276), top: Math.min(rect.bottom + 6, window.innerHeight - 300) })
+    setCountsOpen(o => !o)
+    if (counts || countsLoading) return
+    setCountsLoading(true)
+    try {
+      const resp = await api.get(`/api/leads?${columnCountsQuery}&pageSize=5000`)
+      const key = field === 'createdAt' ? 'created' : field
+      const tally = new Map()
+      for (const l of (resp?.items || [])) {
+        const raw = baseColumnValue(key, l, lookup)
+        const val = (raw === null || raw === undefined || raw === '') ? 'Blank' : String(raw)
+        tally.set(val, (tally.get(val) || 0) + 1)
+      }
+      setCounts([...tally.entries()].sort((a, b) => b[1] - a[1]))
+    } catch (e) { setCounts([]) }
+    finally { setCountsLoading(false) }
+  }
+  const countsTotal = counts?.reduce((sum, [, n]) => sum + n, 0) || 0
+  const countsPalette = ['#fb7185', '#38bdf8', '#34d399', '#fbbf24', '#a78bfa', '#f97316', '#22d3ee', '#e879f9', '#94a3b8']
   return (
     <th className={`resizable-th ${className} select-none`} style={thStyle}>
       <div className="th-head-row">
-        <button type="button" className="th-sort-trigger" onClick={() => { setSortBy(field); setSortDir(nextDir) }} title={`Sort by ${label}`}>
-          <span className="truncate">{label}</span>
-          <ChevronDown size={11} className={`shrink-0 transition-transform ${active && sortDir === 'asc' ? 'rotate-180' : ''} ${active ? 'text-rose-400' : 'text-slate-500'}`} />
-        </button>
-        {onSearch && (
-          <button
-            type="button"
-            className={`th-search-toggle ${showSearch ? 'is-active' : ''}`}
-            onClick={(e) => { e.stopPropagation(); setSearchOpen(o => !o) }}
-            title={`Search ${label}`}
-            aria-label={`Search ${label} column`}
-          >
-            <Search size={11} />
+        <Tip content={`Sort by ${label}`}>
+          <button type="button" className="th-sort-trigger" onClick={() => { setSortBy(field); setSortDir(nextDir) }}>
+            <span>{label}</span>
+            <ChevronDown size={11} className={`shrink-0 transition-transform ${active && sortDir === 'asc' ? 'rotate-180' : ''} ${active ? 'text-rose-400' : 'text-slate-500'}`} />
           </button>
+        </Tip>
+        {onSearch && (
+          <Tip content={`Search ${label}`}>
+            <button
+              type="button"
+              className={`th-search-toggle ${showSearch ? 'is-active' : ''}`}
+              onClick={(e) => { e.stopPropagation(); setSearchOpen(o => !o) }}
+              aria-label={`Search ${label} column`}
+            >
+              <Search size={12} />
+            </button>
+          </Tip>
+        )}
+        {(
+          <Tip content={`${label} value breakdown`}>
+            <button
+              ref={countsBtnRef}
+              type="button"
+              className={`th-search-toggle th-counts-toggle ${countsOpen ? 'is-active' : ''}`}
+              onClick={(e) => { e.stopPropagation(); openCounts() }}
+              aria-label={`Value counts for ${label} column`}
+            >
+              <PieChart size={12} />
+            </button>
+          </Tip>
         )}
       </div>
+      {countsOpen && createPortal(<>
+        <button className="fixed inset-0 z-[108] cursor-default" aria-label="Close value counts" onClick={() => { setCountsOpen(false); setCountsExpanded(false) }} />
+        <div className="column-counts-pop" style={{ position: 'fixed', left: countsPos.left, top: countsPos.top }} onClick={e => e.stopPropagation()}>
+          <div className="column-counts-head">
+            <span>{label} breakdown</span>
+            <button type="button" className="btn btn-ghost !p-1" onClick={() => { setCountsOpen(false); setCountsExpanded(false) }}><X size={12} /></button>
+          </div>
+          {countsLoading && <div className="column-counts-loading"><Spinner size={16} /></div>}
+          {!countsLoading && counts && counts.length === 0 && <div className="column-counts-empty">No data</div>}
+          {!countsLoading && counts && counts.length > 0 && (
+            <div className="column-counts-list">
+              {counts.slice(0, countsExpanded ? counts.length : 12).map(([val, n], i) => (
+                <div key={val} className="column-counts-row">
+                  <span className="column-counts-label" title={val}>{val}</span>
+                  <div className="column-counts-bar-track">
+                    <div className="column-counts-bar" style={{ width: `${Math.max(4, Math.round((n / countsTotal) * 100))}%`, background: countsPalette[i % countsPalette.length] }} />
+                  </div>
+                  <span className="column-counts-count">{n}</span>
+                </div>
+              ))}
+              {!countsExpanded && counts.length > 12 && (
+                <button type="button" className="column-counts-more column-counts-more-btn" onClick={() => setCountsExpanded(true)}>+{counts.length - 12} more values</button>
+              )}
+            </div>
+          )}
+        </div>
+      </>, document.body)}
       {onSearch && showSearch && (
         <div className="th-search-pop" onClick={e => e.stopPropagation()}>
           <input
@@ -1168,6 +1744,11 @@ function ScoreDetailsPopover({ tip, onClose }) {
   ]
   const left = Math.max(14, Math.min(window.innerWidth - 334, x - 150))
   const top = Math.max(14, Math.min(window.innerHeight - 260, y + 12))
+  useEffect(() => {
+    const close = (event) => { if (event.key === 'Escape') onClose() }
+    document.addEventListener('keydown', close)
+    return () => document.removeEventListener('keydown', close)
+  }, [onClose])
   return createPortal(
     <div className="fixed inset-0 z-[120]" onClick={onClose}>
       <div className="score-detail-popover" style={{ left, top }} onClick={e => e.stopPropagation()}>
@@ -1183,7 +1764,7 @@ function ScoreDetailsPopover({ tip, onClose }) {
           {factors.map(f => (
             <div key={f.label} className="score-factor-row">
               <span>{f.label}</span>
-              <strong>{f.value}</strong>
+              <strong>{f.value === '—' ? <EmptyCell /> : f.value}</strong>
               <small>{f.detail}</small>
             </div>
           ))}
@@ -1209,7 +1790,7 @@ function FuCell({ lead, fuIndex, forceMissed = false }) {
 
   const channel = followUpItem && followUpItem.channel ? followUpItem.channel : 'other';
   const meta = channelMeta(channel)
-  const Icon = meta.icon || FileText
+  const Icon = meta.icon || MessageCircle
   const anchorRef = useRef(null)
   const [popOpen, setPopOpen] = useState(false)
   const [pos, setPos] = useState(null)
@@ -1228,26 +1809,27 @@ function FuCell({ lead, fuIndex, forceMissed = false }) {
       : (scheduledDate && scheduledDate !== '-' ? 'border-sky-400/50 bg-sky-400/15' : 'border-white/8 bg-white/[0.03]')
 
   const iconColor = filled ? 'var(--fu-emerald)' : hasOverduePending ? 'var(--fu-rose)' : (scheduledDate && scheduledDate !== '-' ? 'var(--fu-sky, #38bdf8)' : 'var(--fu-slate)')
-  const title = filled
-    ? `Completed: ${comments}`
-    : hasOverduePending
-      ? `Follow-up overdue for ${scheduledDate}`
-      : (scheduledDate && scheduledDate !== '-' ? `Scheduled for ${scheduledDate}` : 'No follow-up')
+  const isEmpty = !filled && !hasOverduePending && !(scheduledDate && scheduledDate !== '-')
+
+  const box = (
+    <span
+      ref={anchorRef}
+      onClick={openPopover}
+      className={`fu-cell-box inline-flex w-7 h-7 rounded-lg items-center justify-center border transition-all cursor-pointer ${boxClass}`}
+    >
+      {filled || (scheduledDate && scheduledDate !== '-')
+        ? <Icon size={13} style={{ color: iconColor }} />
+        : <XCircle size={13} style={{ color: iconColor }} />}
+    </span>
+  )
 
   return (
     <>
-      <Tip content={<FuTip lead={lead} followUpItem={followUpItem} isMissed={isMissed || hasOverduePending} />}>
-        <span
-          ref={anchorRef}
-          onClick={openPopover}
-          className={`fu-cell-box inline-flex w-7 h-7 rounded-lg items-center justify-center border transition-all cursor-pointer hover:brightness-125 hover:-translate-y-px hover:shadow-md ${boxClass}`}
-          title={title}
-        >
-          {filled || (scheduledDate && scheduledDate !== '-')
-            ? <Icon size={12} style={{ color: iconColor }} />
-            : <XCircle size={12} style={{ color: iconColor }} />}
-        </span>
-      </Tip>
+      {isEmpty ? box : (
+        <Tip content={<FuTip lead={lead} followUpItem={followUpItem} isMissed={isMissed || hasOverduePending} />}>
+          {box}
+        </Tip>
+      )}
       {popOpen && pos && createPortal(
         <QuickFollowUpPopover lead={lead} fuIndex={fuIndex} followUpItem={followUpItem} pos={pos} onClose={() => setPopOpen(false)} />,
         document.body

@@ -50,6 +50,18 @@ let activePort = null
 // URI it's given was never registered (only the real https:// one was).
 app.set('trust proxy', true)
 
+// Stripe signature verification requires the exact, unparsed request body.
+// Keep this route ahead of express.json(); every other API route remains JSON.
+app.post('/api/stripe/webhook', express.raw({ type: 'application/json' }), (req, res) => {
+  try {
+    const event = verifyStripeWebhook(req.body, req.headers['stripe-signature'])
+    applyStripeEvent(event)
+    res.json({ received: true })
+  } catch (e) {
+    res.status(400).json({ error: e.message })
+  }
+})
+
 // Frontend and API can be deployed to separate origins (e.g. frontend on
 // Vercel, this server on Railway) — allow cross-origin requests. Restrict
 // via CORS_ORIGIN (comma-separated list) once the frontend's real domain is
@@ -131,6 +143,7 @@ app.use((err, req, res, next) => {
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 200 * 1024 * 1024 } })
 const STRIPE_SECRET_KEY = String(process.env.STRIPE_SECRET_KEY || '').trim()
+const STRIPE_WEBHOOK_SECRET = String(process.env.STRIPE_WEBHOOK_SECRET || '').trim()
 const STRIPE_BASE = 'https://api.stripe.com/v1'
 
 let db = null
@@ -151,6 +164,37 @@ function leadById(id) {
 
 function ensurePaymentsShape() {
   if (!Array.isArray(db.payments)) db.payments = []
+}
+
+function verifyStripeWebhook(rawBody, signatureHeader) {
+  if (!STRIPE_WEBHOOK_SECRET) throw new Error('Stripe webhook secret is not configured.')
+  const parts = Object.fromEntries(String(signatureHeader || '').split(',').map(part => part.split('=')))
+  if (!parts.t || !parts.v1) throw new Error('Missing Stripe webhook signature.')
+  if (Math.abs(Date.now() / 1000 - Number(parts.t)) > 300) throw new Error('Expired Stripe webhook signature.')
+  const payload = Buffer.isBuffer(rawBody) ? rawBody.toString('utf8') : String(rawBody || '')
+  const expected = crypto.createHmac('sha256', STRIPE_WEBHOOK_SECRET).update(`${parts.t}.${payload}`).digest('hex')
+  const actualBuffer = Buffer.from(parts.v1, 'hex')
+  const expectedBuffer = Buffer.from(expected, 'hex')
+  if (actualBuffer.length !== expectedBuffer.length || !crypto.timingSafeEqual(actualBuffer, expectedBuffer)) throw new Error('Invalid Stripe webhook signature.')
+  return JSON.parse(payload)
+}
+
+function applyStripeEvent(event) {
+  if (!db) throw new Error('CRM is still starting.')
+  const session = event?.data?.object
+  if (!session?.id || !String(event.type || '').startsWith('checkout.session.')) return
+  ensurePaymentsShape()
+  const payment = db.payments.find(item => item.checkoutSessionId === session.id)
+  if (!payment) return
+  payment.status = event.type === 'checkout.session.expired' ? 'expired' : (session.payment_status || session.status || payment.status)
+  payment.paymentIntentId = typeof session.payment_intent === 'string' ? session.payment_intent : session.payment_intent?.id || payment.paymentIntentId || null
+  payment.customerId = typeof session.customer === 'string' ? session.customer : session.customer?.id || payment.customerId || null
+  payment.paidAt = payment.status === 'paid' ? (payment.paidAt || nowIso()) : payment.paidAt || null
+  payment.updatedAt = nowIso()
+  const lead = leadById(payment.leadId)
+  if (lead) markDirty(lead.id)
+  save()
+  log('payment', `${payment.leadName} payment ${payment.status}`, payment.leadId)
 }
 
 async function stripeRequest(path, { method = 'GET', body } = {}) {
@@ -184,6 +228,9 @@ function paymentRecordFromLead(lead, payload, status = 'open') {
     status,
     checkoutSessionId: payload.checkoutSessionId || null,
     checkoutUrl: payload.checkoutUrl || null,
+    items: payload.items || [],
+    description: payload.description || '',
+    paidAt: null,
     createdAt: now,
     updatedAt: now,
     metadata: payload.metadata || {}
@@ -230,6 +277,16 @@ function buildAlerts(scope = {}, req = null) {
   // `req` is passed so alerts obey the caller's location scope too — without
   // it an agent's alert feed would surface leads from every studio.
   const leads = req ? scopeLeadsForReq(req) : ((scope.studio || scope.associate) ? scopeLeads(db.leads, scope) : db.leads)
+  if (req?.authUser?.role === 'admin') {
+    for (const request of (db.ownerChangeRequests || [])) {
+      if (request.status !== 'pending') continue
+      alerts.push({
+        id: uid('alt'), leadId: request.leadId, leadName: request.leadName, level: 'high',
+        kind: 'owner_change_request', title: 'Owner change requested',
+        detail: `${request.requestedByName} wants to reassign to ${request.requestedAssociateName}.`
+      })
+    }
+  }
   for (const lead of leads) {
     if (lead.status !== 'open') continue
     const e = enrichLead(lead, db)
@@ -335,7 +392,8 @@ app.get('/api/bootstrap', (req, res) => {
       gptModel: gpt.modelName(db),
       respondio: respondio.isConfigured(db),
       mailtrap: mailer.isConfigured(db),
-      momence: momence.isConfigured(db)
+      momence: momence.isConfigured(db),
+      stripe: Boolean(STRIPE_SECRET_KEY)
     },
     webhookIntegrations: db.webhookIntegrations
   })
@@ -518,10 +576,65 @@ function canSeeLead(req, lead) {
   return !!lead && isAllowedLocation(req, lead.locationId)
 }
 
+// Owner (associateId) reassignment for agents goes through the
+// request/approve flow below instead of a direct edit. createdAt is
+// original intake metadata, never editable after the fact. Agents may
+// otherwise edit name/phone/email/status/source (the app confirms with
+// them client-side first since these are core lead fields).
+const AGENT_LOCKED_LEAD_FIELDS = ['associateId', 'createdAt']
+
+function pendingOwnerRequestFor(leadId) {
+  return (db.ownerChangeRequests || []).find(r => r.leadId === leadId && r.status === 'pending') || null
+}
+
+function withOwnerRequest(payload, leadId) {
+  return { ...payload, pendingOwnerChangeRequest: pendingOwnerRequestFor(leadId) }
+}
+
 app.get('/api/leads/:id', (req, res) => {
   const lead = leadById(req.params.id)
   if (!canSeeLead(req, lead)) return res.status(404).json({ error: 'Lead not found' })
-  res.json(enrichLead(lead, db))
+  res.json(withOwnerRequest(enrichLead(lead, db), lead.id))
+})
+
+app.post('/api/leads/:id/owner-change-request', (req, res) => {
+  const lead = leadById(req.params.id)
+  if (!canSeeLead(req, lead)) return res.status(404).json({ error: 'Lead not found' })
+  const associateId = req.body?.associateId || null
+  if (!associateId) return res.status(400).json({ error: 'associateId is required' })
+  if (pendingOwnerRequestFor(lead.id)) return res.status(409).json({ error: 'A request is already pending for this lead' })
+  const request = {
+    id: uid('ocr'), leadId: lead.id, leadName: lead.fullName,
+    requestedByAssociateId: req.authUser.associateId || null,
+    requestedByName: db.associates.find(a => a.id === req.authUser.associateId)?.name || req.authUser.email || 'An agent',
+    requestedAssociateId: associateId,
+    requestedAssociateName: db.associates.find(a => a.id === associateId)?.name || 'Unknown',
+    status: 'pending', createdAt: nowIso()
+  }
+  db.ownerChangeRequests.push(request)
+  save()
+  log('lead', `${request.requestedByName} requested owner change for ${lead.fullName} → ${request.requestedAssociateName}`, lead.id)
+  res.status(201).json(request)
+})
+
+app.post('/api/owner-change-requests/:id/decide', (req, res) => {
+  if (req.authUser.role !== 'admin') return res.status(403).json({ error: 'Only admins can decide owner change requests' })
+  const request = (db.ownerChangeRequests || []).find(r => r.id === req.params.id)
+  if (!request) return res.status(404).json({ error: 'Request not found' })
+  if (request.status !== 'pending') return res.status(409).json({ error: 'Request already decided' })
+  const action = req.body?.action
+  if (!['approve', 'deny'].includes(action)) return res.status(400).json({ error: 'action must be approve or deny' })
+  const lead = leadById(request.leadId)
+  if (action === 'approve' && lead) {
+    lead.associateId = request.requestedAssociateId
+    lead.updatedAt = nowIso()
+    markDirty(lead.id)
+    log('assign', `Owner change approved for ${lead.fullName} → ${request.requestedAssociateName}`, lead.id)
+  }
+  request.status = action === 'approve' ? 'approved' : 'denied'
+  request.decidedAt = nowIso()
+  save()
+  res.json(request)
 })
 
 // Preserve full timestamp precision for already-valid ISO datetimes (e.g.
@@ -680,13 +793,17 @@ app.delete('/api/leads/bulk', (req, res) => {
 app.patch('/api/leads/:id', (req, res) => {
   const lead = leadById(req.params.id)
   if (!canSeeLead(req, lead)) return res.status(404).json({ error: 'Lead not found' })
+  if (req.authUser.role !== 'admin') {
+    const blocked = AGENT_LOCKED_LEAD_FIELDS.filter(f => f in req.body)
+    if (blocked.length) return res.status(403).json({ error: `Not allowed to change: ${blocked.join(', ')}` })
+  }
   const before = lead.stage
   safePatch(lead, req.body)
   markDirty(lead.id)
   save()
   if (req.body.associateId) log('assign', `Assigned ${lead.fullName}`, lead.id)
   if (req.body.stage && req.body.stage !== before) log('stage', `${lead.fullName} moved ${before} → ${req.body.stage}`, lead.id)
-  res.json(enrichLead(lead, db))
+  res.json(withOwnerRequest(enrichLead(lead, db), lead.id))
 })
 
 app.post('/api/leads/:id/followups', (req, res) => {
@@ -1427,6 +1544,18 @@ app.get('/api/analytics/overview', (req, res) => {
     .reduce((s, l) => s + (l.valueEstimate || 0), 0)
 
   const trialBooked = open.filter(l => ['Trial Scheduled', 'Trial Completed'].includes(statusGroupOf(l.stage))).length
+  const trialCompleted = leads.filter(l => statusGroupOf(l.stage) === 'Trial Completed' || l.momenceEvidence?.trialCompleted).length
+
+  const topBy = (values) => {
+    const counts = new Map()
+    for (const value of values.filter(Boolean)) counts.set(value, (counts.get(value) || 0) + 1)
+    const [label = '', count = 0] = [...counts.entries()].sort((a, b) => b[1] - a[1])[0] || []
+    return { label, count }
+  }
+  const topSource = topBy(leads.map(l => l.sourceName))
+  const topStage = topBy(leads.map(l => l.stage))
+  const ownerNames = new Map(db.associates.map(associate => [associate.id, associate.name]))
+  const topOwner = topBy(won.map(l => ownerNames.get(l.associateId)))
 
   const unassigned = open.filter(l => !l.associateId).length
 
@@ -1449,6 +1578,11 @@ app.get('/api/analytics/overview', (req, res) => {
     revenueDeltaPct: revenueLastMonth ? Math.round(((revenueThisMonth - revenueLastMonth) / revenueLastMonth) * 100) : 0,
     avgDealValue: won.length ? Math.round(won.reduce((s, l) => s + (l.valueEstimate || 0), 0) / won.length) : 0,
     trialBooked,
+    trialCompleted,
+    trialRate: leads.length ? Math.round((trialCompleted / leads.length) * 1000) / 10 : 0,
+    topSource,
+    topStage,
+    topOwner,
     hotLeads: hot,
     unassigned,
     monthlyTarget: db.associates.filter(a => a.active !== false).reduce((s, a) => s + (a.targetMonthly || 0), 0),
@@ -1703,37 +1837,55 @@ app.post('/api/momence/lead-book-with-payment', async (req, res) => {
 app.post('/api/stripe/payment-links', async (req, res) => {
   const lead = leadById(req.body?.leadId)
   if (!lead) return res.status(404).json({ error: 'Lead not found' })
+  if (!isAllowedLocation(req, lead.locationId)) return res.status(403).json({ error: 'Lead is outside your studio access.' })
   try {
+    const requestedItems = Array.isArray(req.body?.items) ? req.body.items.filter(item => item?.priceId) : []
     const amount = Number(req.body?.amount || 0)
-    if (!Number.isFinite(amount) || amount <= 0) return res.status(400).json({ error: 'Enter a valid amount.' })
+    if (!requestedItems.length && (!Number.isFinite(amount) || amount <= 0)) return res.status(400).json({ error: 'Select a Stripe product or enter a valid custom amount.' })
     const metadata = {
       leadId: String(lead.id),
       locationId: String(lead.locationId || ''),
       classType: String(lead.classType || ''),
       leadName: String(lead.fullName || '')
     }
-    const session = await stripeRequest('/checkout/sessions', {
-      method: 'POST',
-      body: {
-        mode: 'payment',
+    const body = {
+      mode: requestedItems.some(item => item.recurring) ? 'subscription' : 'payment',
+      success_url: req.body?.successUrl || `${req.headers.origin || `${req.protocol}://${req.get('host')}`}/?stripe_session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: req.body?.cancelUrl || `${req.headers.origin || `${req.protocol}://${req.get('host')}`}/`,
+      customer_email: lead.email || undefined,
+      'metadata[leadId]': metadata.leadId,
+      'metadata[locationId]': metadata.locationId,
+      'metadata[classType]': metadata.classType,
+      'metadata[leadName]': metadata.leadName
+    }
+    if (requestedItems.length) {
+      requestedItems.forEach((item, index) => {
+        body[`line_items[${index}][price]`] = String(item.priceId)
+        body[`line_items[${index}][quantity]`] = String(Math.max(1, Math.min(99, Number(item.quantity) || 1)))
+      })
+    } else {
+      Object.assign(body, {
         'line_items[0][quantity]': '1',
-        'line_items[0][price_data][currency]': 'inr',
+        'line_items[0][price_data][currency]': String(req.body?.currency || 'inr').toLowerCase(),
         'line_items[0][price_data][unit_amount]': String(Math.round(amount * 100)),
         'line_items[0][price_data][product_data][name]': req.body?.name || `Payment for ${lead.fullName}`,
-        'line_items[0][price_data][product_data][description]': req.body?.description || 'Lead payment link created in Physique 57 CRM',
-        success_url: req.body?.successUrl || `${req.headers.origin || ''}/?stripe_session_id={CHECKOUT_SESSION_ID}`,
-        cancel_url: req.body?.cancelUrl || `${req.headers.origin || ''}/`,
-        'payment_intent_data[metadata][leadId]': metadata.leadId,
-        'payment_intent_data[metadata][locationId]': metadata.locationId,
-        'payment_intent_data[metadata][classType]': metadata.classType,
-        'payment_intent_data[metadata][leadName]': metadata.leadName,
-        'metadata[leadId]': metadata.leadId,
-        'metadata[locationId]': metadata.locationId,
-        'metadata[classType]': metadata.classType,
-        'metadata[leadName]': metadata.leadName
-      }
+        'line_items[0][price_data][product_data][description]': req.body?.description || 'Custom payment created in Physique 57 CRM'
+      })
+    }
+    if (body.mode === 'payment') {
+      body['payment_intent_data[metadata][leadId]'] = metadata.leadId
+      body['payment_intent_data[metadata][locationId]'] = metadata.locationId
+      body['payment_intent_data[metadata][classType]'] = metadata.classType
+      body['payment_intent_data[metadata][leadName]'] = metadata.leadName
+    } else {
+      body['subscription_data[metadata][leadId]'] = metadata.leadId
+      body['subscription_data[metadata][locationId]'] = metadata.locationId
+    }
+    const session = await stripeRequest('/checkout/sessions', {
+      method: 'POST',
+      body
     })
-    const record = paymentRecordFromLead(lead, { amount, checkoutSessionId: session.id, checkoutUrl: session.url, metadata }, session.payment_status || 'open')
+    const record = paymentRecordFromLead(lead, { amount: session.amount_total ? session.amount_total / 100 : amount, currency: session.currency || req.body?.currency || 'inr', checkoutSessionId: session.id, checkoutUrl: session.url, metadata, items: requestedItems, description: req.body?.description || '' }, session.payment_status || session.status || 'open')
     db.payments.unshift(record)
     lead.payments = [...(lead.payments || []), record.id]
     markDirty(lead.id)
@@ -1742,14 +1894,41 @@ app.post('/api/stripe/payment-links', async (req, res) => {
   } catch (e) { res.status(502).json({ error: e.message }) }
 })
 
+app.get('/api/stripe/catalog', async (req, res) => {
+  try {
+    const prices = await stripeRequest('/prices?active=true&limit=100&expand%5B%5D=data.product')
+    res.json({ configured: true, products: (prices.data || []).filter(price => price.active && price.product?.active !== false).map(price => ({
+      priceId: price.id,
+      productId: typeof price.product === 'string' ? price.product : price.product?.id,
+      name: typeof price.product === 'string' ? (price.nickname || price.id) : (price.product?.name || price.nickname || price.id),
+      description: typeof price.product === 'string' ? '' : (price.product?.description || ''),
+      image: typeof price.product === 'string' ? '' : (price.product?.images?.[0] || ''),
+      amount: Number(price.unit_amount || 0) / 100,
+      currency: price.currency,
+      recurring: price.recurring || null
+    })) })
+  } catch (e) { res.status(502).json({ configured: Boolean(STRIPE_SECRET_KEY), error: e.message, products: [] }) }
+})
+
+app.get('/api/stripe/payments', (req, res) => {
+  ensurePaymentsShape()
+  const leadId = String(req.query.leadId || '')
+  const payments = db.payments.filter(payment => (!leadId || String(payment.leadId) === leadId) && isAllowedLocation(req, payment.locationId)).sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)))
+  res.json({ payments })
+})
+
 app.get('/api/stripe/payment-links/:paymentId', async (req, res) => {
   ensurePaymentsShape()
   const payment = db.payments.find(p => p.id === req.params.paymentId)
   if (!payment) return res.status(404).json({ error: 'Payment link not found' })
+  if (!isAllowedLocation(req, payment.locationId)) return res.status(403).json({ error: 'Payment is outside your studio access.' })
   try {
     if (payment.checkoutSessionId) {
       const session = await stripeRequest(`/checkout/sessions/${payment.checkoutSessionId}`)
       payment.status = session.payment_status || session.status || payment.status
+      payment.paymentIntentId = typeof session.payment_intent === 'string' ? session.payment_intent : session.payment_intent?.id || payment.paymentIntentId || null
+      payment.customerId = typeof session.customer === 'string' ? session.customer : session.customer?.id || payment.customerId || null
+      payment.paidAt = payment.status === 'paid' ? (payment.paidAt || nowIso()) : payment.paidAt || null
       payment.updatedAt = nowIso()
       save()
       return res.json({ ok: true, payment: { ...payment, stripe: session } })
@@ -1922,6 +2101,24 @@ app.post('/api/momence/sync/:leadId', async (req, res) => {
 const SETTINGS_SECTIONS = ['org', 'ui', 'business', 'cadence', 'notifications', 'ai', 'roundRobin', 'reminders', 'momence', 'gpt', 'respondio', 'mailtrap']
 
 app.get('/api/settings', (req, res) => res.json(db.settings))
+app.get('/api/user-preferences', (req, res) => {
+  const key = String(req.authUser?.email || req.authUser?.id || 'unknown').toLowerCase()
+  res.json(db.settings.userPreferences?.[key] || {})
+})
+app.put('/api/user-preferences', async (req, res) => {
+  const key = String(req.authUser?.email || req.authUser?.id || 'unknown').toLowerCase()
+  db.settings.userPreferences = db.settings.userPreferences || {}
+  const current = db.settings.userPreferences[key] || {}
+  const body = req.body && typeof req.body === 'object' ? req.body : {}
+  db.settings.userPreferences[key] = {
+    ...current,
+    ...body,
+    leadTablePrefs: { ...(current.leadTablePrefs || {}), ...(body.leadTablePrefs || {}) },
+    leadSegments: Array.isArray(body.leadSegments) ? body.leadSegments.slice(0, 100) : (current.leadSegments || [])
+  }
+  try { await saveMetaNow() } catch (e) { return res.status(502).json({ error: `Preferences saved locally but failed to sync to Supabase: ${e.message}` }) }
+  res.json(db.settings.userPreferences[key])
+})
 // Mirrors respond.io's internal-API session (authToken/cookie/botId/orgId —
 // see respondioInternal.js) into the .env file too, per how it's configured,
 // so a fresh session pasted into Settings survives a server restart without

@@ -33,6 +33,7 @@ function ensureSettingsShape(target) {
       dataCenter: 'in', enabled: false, lastFetchAt: null, lastFetchError: null, onDuty: null
     }
   }
+  if (!Array.isArray(target.payments)) target.payments = []
   return target
 }
 
@@ -84,6 +85,7 @@ export function load() {
   const taxonomyVersion = state.settings?.taxonomyVersion || 0
   ensureSettingsShape(state)
   if (taxonomyVersion !== state.settings.taxonomyVersion) writeFile()
+  if (!state.ownerChangeRequests) state.ownerChangeRequests = []
   return state
 }
 
@@ -194,7 +196,7 @@ function applyRemoteLeadChange({ eventType, id, data }) {
   if (remoteChangeCb) remoteChangeCb()
 }
 
-const META_FIELDS = ['settings', 'locations', 'associates', 'stages', 'sources', 'channels', 'classTypes', 'activity', 'importHistory', 'webhookIntegrations', 'webhookLogs', 'sheetSyncLogs']
+const META_FIELDS = ['settings', 'locations', 'associates', 'stages', 'sources', 'channels', 'classTypes', 'activity', 'importHistory', 'webhookIntegrations', 'webhookLogs', 'sheetSyncLogs', 'payments']
 function applyRemoteMetaChange({ data }) {
   if (Date.now() - lastLocalWriteAt < 2000 || !state || !data) return
   for (const field of META_FIELDS) if (field in data) state[field] = data[field]

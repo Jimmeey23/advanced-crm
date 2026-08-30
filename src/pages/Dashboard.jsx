@@ -78,7 +78,13 @@ export default function Dashboard() {
   const { data: tl, loading: l2 } = useFetch(() => api.get(`/api/analytics/timeline?${buildQuery({ studio: filters.studio, associate: filters.associate })}`), [dataVersion, filters.studio, filters.associate])
   const { data: sources, loading: l4 } = useFetch(() => api.get(`/api/analytics/sources?${scopeQuery}`), [dataVersion, scopeQuery])
   const { data: team, loading: l5 } = useFetch(() => api.get(`/api/analytics/team?${scopeQuery}`), [dataVersion, scopeQuery])
-  const { data: hotResp } = useFetch(() => api.get(`/api/leads?${buildQuery({ risk: 'hot', pageSize: 50, locationId: filters.studio, associateId: filters.associate })}`), [dataVersion, filters.studio, filters.associate])
+  const monthRange = React.useMemo(() => {
+    const [y, m] = filters.month.split('-').map(Number)
+    const pad = n => String(n).padStart(2, '0')
+    const lastDay = new Date(y, m, 0).getDate()
+    return { dateFrom: `${filters.month}-01`, dateTo: `${filters.month}-${pad(lastDay)}` }
+  }, [filters.month])
+  const { data: hotResp } = useFetch(() => api.get(`/api/leads?${buildQuery({ risk: 'hot', pageSize: 50, locationId: filters.studio, associateId: filters.associate, ...monthRange })}`), [dataVersion, filters.studio, filters.associate, monthRange])
   // Dashboard-local, filter-scoped alerts — deliberately NOT the global
   // `useApp().alerts` slice (that one feeds the header bell/AlertsDropdown
   // app-wide and must stay unfiltered by this page's studio/associate/month).

@@ -10,9 +10,9 @@ import {
 } from 'recharts'
 import { useApp } from '../store.jsx'
 import { useFetch } from '../hooks.js'
-import { api } from '../api.js'
+import { api, buildQuery } from '../api.js'
 import { money, fmtDate, downloadText } from '../lib.js'
-import { Spinner } from '../ui.jsx'
+import { Spinner, Avatar } from '../ui.jsx'
 
 const DONUT_COLORS = ['#f43f5e', '#8b5cf6', '#06b6d4', '#f59e0b', '#10b981', '#6366f1', '#ec4899', '#14b8a6']
 const CHANNEL_COLORS = { call: '#06b6d4', whatsapp: '#10b981', email: '#8b5cf6', sms: '#f59e0b' }
@@ -42,7 +42,7 @@ const tooltipStyle = () => ({
 const AXIS = { fill: 'var(--axis)', fontSize: 10.5 }
 
 export default function ReportOverview({ title, desc }) {
-  const { openLead, role, locationIds } = useApp()
+  const { openLead, role, locationIds, associateId: myAssociateId, boot } = useApp()
   const locked = role === 'agent'
   const [scope, setScope] = useState('studio')
   const [entityId, setEntityId] = useState(() => (locked && locationIds[0]) ? locationIds[0] : '')
@@ -54,12 +54,14 @@ export default function ReportOverview({ title, desc }) {
   const [exporting, setExporting] = useState(false)
   const reportRef = useRef(null)
 
-  // boot/locationIds arrive after first render; re-apply the agent lock then.
+  // Agents may switch between their own studio and their own associate
+  // profile — the scope toggle itself isn't locked — but the id is always
+  // forced to "them", never a picker over other studios/associates.
   useEffect(() => {
-    if (!locked || !locationIds[0]) return
-    if (scope !== 'studio') return
-    setEntityId(id => (id === locationIds[0] ? id : locationIds[0]))
-  }, [locked, locationIds[0], scope])
+    if (!locked) return
+    const forced = scope === 'studio' ? locationIds[0] : myAssociateId
+    if (forced) setEntityId(id => (id === forced ? id : forced))
+  }, [locked, locationIds[0], myAssociateId, scope])
 
   const customRange = preset === 'custom' && dateFrom && dateTo
 
@@ -154,6 +156,15 @@ export default function ReportOverview({ title, desc }) {
     downloadText(`${data.scope}-${data.entityName}-${data.period.start}-to-${data.period.end}.csv`, blocks.join('\n\n'))
   }
 
+  // Associate overview detail: the aggregate report already gives the
+  // comparison metrics for the period; this adds the associate's photo and
+  // the actual lead-level activity (stage, latest remark, follow-ups done)
+  // so the tab is a working profile, not just numbers.
+  const associateDetail = scope === 'associate' && entityId ? (boot?.associates || []).find(a => a.id === entityId) : null
+  const detailQuery = associateDetail && data?.period ? buildQuery({ associateId: entityId, dateFrom: data.period.start, dateTo: data.period.end, pageSize: 500 }) : null
+  const { data: detailLeadsResp } = useFetch(() => detailQuery ? api.get(`/api/leads?${detailQuery}`) : Promise.resolve(null), [detailQuery])
+  const detailLeads = detailLeadsResp?.items || []
+
   const comp = data?.comparisons
   const cols = comp ? [
     { key: 'current', label: comp.current.label, accent: '#f43f5e', data: comp.current },
@@ -173,11 +184,11 @@ export default function ReportOverview({ title, desc }) {
 
         <div className="ml-auto flex flex-wrap items-center gap-2">
           <div className="flex rounded-xl bg-white/5 border border-white/10 p-1">
-            <button disabled={locked} className={`px-3 py-1.5 rounded-lg text-[12px] font-semibold flex items-center gap-1.5 ${scope === 'studio' ? 'bg-rose-500/25 text-white' : 'text-slate-400 hover:text-white'}`} onClick={() => setScope('studio')}><Building2 size={13} /> Studio overview</button>
-            <button disabled={locked} className={`px-3 py-1.5 rounded-lg text-[12px] font-semibold flex items-center gap-1.5 ${scope === 'associate' ? 'bg-rose-500/25 text-white' : 'text-slate-400 hover:text-white'}`} onClick={() => setScope('associate')}><UserCircle2 size={13} /> Associate overview</button>
+            <button className={`px-3 py-1.5 rounded-lg text-[12px] font-semibold flex items-center gap-1.5 ${scope === 'studio' ? 'bg-rose-500/25 text-white' : 'text-slate-400 hover:text-white'}`} onClick={() => setScope('studio')}><Building2 size={13} /> Studio overview</button>
+            <button className={`px-3 py-1.5 rounded-lg text-[12px] font-semibold flex items-center gap-1.5 ${scope === 'associate' ? 'bg-rose-500/25 text-white' : 'text-slate-400 hover:text-white'}`} onClick={() => setScope('associate')}><UserCircle2 size={13} /> Associate overview</button>
           </div>
 
-          <select className="input !w-auto !py-2 !text-[12px]" value={entityId} onChange={e => setEntityId(e.target.value)} disabled={locked}>
+          <select className="input !w-auto !py-2 !text-[12px]" value={entityId} onChange={e => setEntityId(e.target.value)} disabled={locked} title={locked ? 'Agents view their own studio/profile only' : undefined}>
             <option value="">{scope === 'associate' ? 'All associates' : 'All studios'}</option>
             {(data?.entities || []).map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
           </select>
@@ -211,6 +222,48 @@ export default function ReportOverview({ title, desc }) {
       {!loading && data && (
         <div className="space-y-5" ref={reportRef}>
           <div className="text-[12px] text-slate-500">{data.entityName} · {data.period.label} ({data.period.start} to {data.period.end})</div>
+
+          {associateDetail && (
+            <div className="card p-5 flex flex-wrap items-center gap-5">
+              <Avatar name={associateDetail.name} color={associateDetail.color} photoUrl={associateDetail.photoUrl} photoZoom={associateDetail.photoZoom} photoPosX={associateDetail.photoPosX} photoPosY={associateDetail.photoPosY} size={96} fallback="👤" />
+              <div className="flex-1 min-w-[180px]">
+                <div className="font-display font-bold text-white text-[17px]">{associateDetail.name}</div>
+                <div className="text-[12px] text-slate-500">{associateDetail.role || 'Sales Associate'}{associateDetail.email ? ` · ${associateDetail.email}` : ''}</div>
+                <div className="text-[11.5px] text-slate-500 mt-1">{detailLeads.length} lead{detailLeads.length === 1 ? '' : 's'} in this period</div>
+              </div>
+            </div>
+          )}
+
+          {associateDetail && detailLeads.length > 0 && (
+            <div className="card p-0 overflow-hidden">
+              <div className="px-4 py-3 border-b border-white/8 font-display font-semibold text-white text-[13.5px]">Lead activity this period</div>
+              <div className="overflow-x-auto scrollbar-thin">
+                <table className="data-table w-full">
+                  <thead>
+                    <tr className="text-[10.5px] uppercase tracking-wider text-slate-500 border-b border-white/8">
+                      <th className="px-4 py-2.5 text-left font-semibold">Lead</th>
+                      <th className="px-4 py-2.5 text-left font-semibold">Stage</th>
+                      <th className="px-4 py-2.5 text-left font-semibold">Latest comment</th>
+                      <th className="px-4 py-2.5 text-center font-semibold">FUs completed</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {detailLeads.map(l => {
+                      const completed = (l.followUps || []).filter(f => f.done).length
+                      return (
+                        <tr key={l.id} className="border-b border-white/5 hover:bg-white/[0.03] cursor-pointer" onClick={() => openLead(l.id)}>
+                          <td className="px-4 py-2.5 text-[12.5px] text-white font-medium">{l.fullName}</td>
+                          <td className="px-4 py-2.5 text-[12px] text-slate-400">{l.stage}</td>
+                          <td className="px-4 py-2.5 text-[12px] text-slate-500 max-w-[280px] truncate" title={l.remarks || ''}>{l.remarks || '—'}</td>
+                          <td className="px-4 py-2.5 text-[12px] text-slate-400 text-center mono">{completed}</td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
 
           {/* 3-column comparison */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">

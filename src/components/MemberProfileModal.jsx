@@ -27,6 +27,12 @@ export default function MemberProfileModal({ memberId, locationId, onClose }) {
       .finally(() => { if (alive) setLoading(false) })
     return () => { alive = false }
   }, [memberId, locationId])
+  useEffect(() => {
+    if (!memberId) return
+    const close = event => { if (event.key === 'Escape') onClose() }
+    document.addEventListener('keydown', close)
+    return () => document.removeEventListener('keydown', close)
+  }, [memberId, onClose])
 
   if (!memberId) return null
   const m = profile?.member

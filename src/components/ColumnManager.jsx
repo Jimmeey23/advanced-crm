@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Settings2, Eye, EyeOff, ArrowUp, ArrowDown, Plus, Trash2, X, Sigma, Link2 } from 'lucide-react'
 
@@ -37,6 +37,12 @@ const newId = () => `col_${Date.now().toString(36)}_${(uidSeq++).toString(36)}`
 export default function ColumnManager({ columns, setColumns }) {
   const [open, setOpen] = useState(false)
   const [adding, setAdding] = useState(null) // 'formula' | 'lookup' | null
+  useEffect(() => {
+    if (!open) return
+    const close = event => { if (event.key === 'Escape') setOpen(false) }
+    document.addEventListener('keydown', close)
+    return () => document.removeEventListener('keydown', close)
+  }, [open])
 
   const move = (idx, dir) => setColumns(cols => {
     const next = [...cols]

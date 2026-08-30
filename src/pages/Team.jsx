@@ -79,7 +79,7 @@ export default function Team() {
                 {locTeam.map(a => {
                   const stats = team?.find(t => t.associateId === a.id)
                   return (
-                    <button key={a.id} type="button" className={`w-full text-left flex items-center gap-2.5 rounded-xl bg-white/[0.03] border border-white/6 px-3 py-2 hover:bg-white/[0.06] transition-colors ${a.active === false ? 'opacity-55' : ''}`} onClick={() => setEditAsn(a)}>
+                    <button key={a.id} type="button" disabled={role === 'agent'} className={`w-full text-left flex items-center gap-2.5 rounded-xl bg-white/[0.03] border border-white/6 px-3 py-2 hover:bg-white/[0.06] transition-colors ${a.active === false ? 'opacity-55' : ''} ${role === 'agent' ? '!cursor-default' : ''}`} onClick={() => { if (role !== 'agent') setEditAsn(a) }}>
                       <Avatar name={a.name} color={a.color} photoUrl={a.photoUrl} photoZoom={a.photoZoom} photoPosX={a.photoPosX} photoPosY={a.photoPosY} size={26} fallback="👤" />
                       <div className="flex-1 min-w-0">
                         <div className="text-[12.5px] font-semibold text-slate-200 truncate">{a.name}</div>

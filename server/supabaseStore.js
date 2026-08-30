@@ -96,6 +96,7 @@ export async function loadState() {
     importHistory: persisted.importHistory || [],
     webhookIntegrations: persisted.webhookIntegrations || [],
     webhookLogs: persisted.webhookLogs || [],
+    payments: persisted.payments || [],
     sheetSyncLogs: persisted.sheetSyncLogs || [],
     inbox: meta.inbox || { messages: [], conversations: {} }
   }
@@ -140,6 +141,7 @@ export async function persistState(state, dirtyLeadIds = [], deletedLeadIds = []
     importHistory: state.importHistory,
     webhookIntegrations: state.webhookIntegrations,
     webhookLogs: state.webhookLogs,
+    payments: state.payments || [],
     sheetSyncLogs: state.sheetSyncLogs,
     inbox: state.inbox
   }
@@ -217,6 +219,7 @@ export async function persistMetaState(state) {
     importHistory: state.importHistory,
     webhookIntegrations: state.webhookIntegrations,
     webhookLogs: state.webhookLogs,
+    payments: state.payments || [],
     sheetSyncLogs: state.sheetSyncLogs
   }
   const { error } = await c.from(META_TABLE).upsert({ key: SETTINGS_META_KEY, data: settingsMeta, updated_at: new Date().toISOString() })

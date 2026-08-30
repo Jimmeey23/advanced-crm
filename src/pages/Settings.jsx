@@ -46,13 +46,25 @@ const TABS = [
 
 const AGENT_TAB_IDS = ['general', 'appearance']
 
-export default function SettingsPage() {
+export default function SettingsPage({ jumpTo }) {
   const { boot, refreshData, toast, theme, setTheme, accent, setAccent, role } = useApp()
   const visibleTabs = TABS.filter(t => role === 'admin' || AGENT_TAB_IDS.includes(t.id))
   const [tab, setTab] = useState(() => {
-    const requested = new URLSearchParams(window.location.search).get('tab') || 'general'
+    const requested = jumpTo?.tab || new URLSearchParams(window.location.search).get('tab') || 'general'
     return role !== 'admin' && !AGENT_TAB_IDS.includes(requested) ? 'general' : requested
   })
+
+  useEffect(() => {
+    if (!jumpTo?.section) return
+    const t = setTimeout(() => {
+      const el = document.getElementById(jumpTo.section)
+      if (!el) return
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      el.classList.add('settings-jump-highlight')
+      setTimeout(() => el.classList.remove('settings-jump-highlight'), 1800)
+    }, 60)
+    return () => clearTimeout(t)
+  }, [jumpTo?.section, jumpTo?.tab])
   const [activeIntegration, setActiveIntegration] = useState(() => new URLSearchParams(window.location.search).get('app') || null)
   const settings = boot?.settings || {}
 
@@ -787,7 +799,7 @@ export default function SettingsPage() {
                 <p className="text-[11.5px] text-slate-500">Covers only leads created directly in the app (Add Lead) — leads brought in via CSV import are always excluded.</p>
               </Toggle>
             </Section>
-            <Section icon={<Zap size={15} className="text-amber-400" />} title="Round-robin assignment" desc="Automatically assign incoming leads.">
+            <Section id="settings-round-robin" icon={<Zap size={15} className="text-amber-400" />} title="Round-robin assignment" desc="Automatically assign incoming leads.">
               <Toggle on={rr.enabled} onChange={v => setRr({ ...rr, enabled: v })} title="Round-robin lead assignment" desc="Assign every incoming lead to the next associate in rotation for its studio.">
                 <div className="flex items-center gap-3">
                   <select className="input !w-auto !py-1.5" value={rr.mode} onChange={e => setRr({ ...rr, mode: e.target.value })}>
@@ -839,7 +851,7 @@ export default function SettingsPage() {
               { id: 'salesforce', label: 'Salesforce', icon: Cloud, category: 'CRM', desc: 'Sync contacts, opportunities and ownership', comingSoon: true },
               { id: 'gmail', label: 'Gmail', icon: Mail, category: 'Messaging', desc: 'Send and track lead email', comingSoon: true },
               { id: 'whatsapp', label: 'WhatsApp Business', icon: MessageCircle, category: 'Messaging', desc: 'Message leads from verified business numbers', comingSoon: true },
-              { id: 'stripe', label: 'Stripe', icon: IndianRupee, category: 'Payments', desc: 'Attach payment and subscription activity', comingSoon: true },
+              { id: 'stripe', label: 'Stripe', icon: IndianRupee, category: 'Payments', desc: 'Create payment links and track Checkout payments', connected: Boolean(boot?.integrations?.stripe) },
               { id: 'airtable', label: 'Airtable', icon: Database, category: 'Productivity', desc: 'Sync lead records with Airtable bases', comingSoon: true },
               { id: 'googleCalendar', label: 'Google Calendar', icon: CalendarRange, category: 'Scheduling', desc: 'Coordinate consultations and follow-ups', comingSoon: true },
               { id: 'zendesk', label: 'Zendesk', icon: MessageCircle, category: 'Support', desc: 'Connect service tickets to lead profiles', comingSoon: true },
@@ -870,6 +882,25 @@ export default function SettingsPage() {
               {!configured && (
                 <p className="mt-3 text-[11.5px] text-slate-500">Credentials stay on this server and are only used to call the Momence API (OAuth2 password grant).</p>
               )}
+            </Section>
+            )}
+
+            {activeIntegration === 'stripe' && (
+            <Section bare>
+              <div className="flex flex-wrap items-center gap-2 mb-4">
+                {boot?.integrations?.stripe
+                  ? <span className="chip bg-emerald-500/10 text-emerald-300 border border-emerald-400/20"><ShieldCheck size={11} /> Stripe API connected</span>
+                  : <span className="chip bg-amber-500/10 text-amber-300 border border-amber-400/20">Server configuration required</span>}
+              </div>
+              <div className="card p-4 bg-white/[0.02] border-white/6 space-y-3">
+                <div><div className="font-semibold text-white text-[13px]">Server credentials</div><p className="text-[11.5px] text-slate-500 mt-1">Set <code>STRIPE_SECRET_KEY</code> and <code>STRIPE_WEBHOOK_SECRET</code> on the API server. Keys are never stored in the browser or returned by the API.</p></div>
+                <div><label className="label">Webhook endpoint</label><code className="input block !py-2 !text-[11.5px] overflow-x-auto whitespace-nowrap">/api/stripe/webhook</code><p className="text-[11px] text-slate-500 mt-1">Register this path on the public API domain for <code>checkout.session.completed</code>, <code>checkout.session.async_payment_succeeded</code>, and <code>checkout.session.expired</code>.</p></div>
+              </div>
+              <div className="mt-4 grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div className="card p-4"><div className="text-[11px] uppercase tracking-wider text-slate-500">Products</div><div className="text-[12px] text-slate-300 mt-1">Loaded live from active Stripe Prices.</div></div>
+                <div className="card p-4"><div className="text-[11px] uppercase tracking-wider text-slate-500">Checkout</div><div className="text-[12px] text-slate-300 mt-1">Supports product carts and custom INR links.</div></div>
+                <div className="card p-4"><div className="text-[11px] uppercase tracking-wider text-slate-500">Tracking</div><div className="text-[12px] text-slate-300 mt-1">Webhook updates plus manual status refresh.</div></div>
+              </div>
             </Section>
             )}
 
@@ -1503,10 +1534,10 @@ function IntegrationsPanel({ active, setActive, items, children }) {
   )
 }
 
-function Section({ icon, title, desc, bare, children }) {
-  if (bare) return <div className="card p-5">{children}</div>
+function Section({ icon, title, desc, bare, id, children }) {
+  if (bare) return <div id={id} className="card p-5">{children}</div>
   return (
-    <div className="card p-5">
+    <div id={id} className="card p-5">
       <div className="flex items-center gap-2 mb-1">
         <span className="w-8 h-8 rounded-lg bg-white/5 border border-white/10 flex items-center justify-center shrink-0">{icon}</span>
         <h3 className="font-display font-semibold text-white text-[14px]">{title}</h3>
