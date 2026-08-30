@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Search, CornerDownLeft, LayoutDashboard, KanbanSquare, Users, UploadCloud,
   Settings as SettingsIcon, BarChart3, CalendarDays, CalendarRange, Inbox as InboxIcon,
-  CalendarClock, Sun, Moon, RefreshCw, Plus, PanelLeft
+  CalendarClock, Sun, Moon, RefreshCw, Plus, PanelLeft, Table2
 } from 'lucide-react'
 import { useApp } from '../store.jsx'
 import { api } from '../api.js'
@@ -13,6 +13,7 @@ const PAGES = [
   { id: 'performance', label: 'Performance', icon: BarChart3 },
   { id: 'studio-weekly', label: 'Weekly studio report', icon: CalendarDays },
   { id: 'studio-monthly', label: 'Monthly studio report', icon: CalendarRange },
+  { id: 'pivot', label: 'Pivot builder', icon: Table2 },
   { id: 'pipeline', label: 'Pipeline', icon: KanbanSquare },
   { id: 'leads', label: 'Leads', icon: Users },
   { id: 'inbox', label: 'Inbox', icon: InboxIcon },

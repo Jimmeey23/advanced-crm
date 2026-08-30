@@ -412,13 +412,6 @@ export default function LeadDrawer() {
                 <Tip content={<span className="text-xs">WhatsApp template</span>}>
                   <button className="btn btn-soft !p-2" onClick={() => setTemplateOpen(true)} aria-label="WhatsApp template"><Sparkles size={15} /></button>
                 </Tip>
-                <Tip content={<span className="text-xs">Compact / Default / Wide / Full width</span>}>
-                  <div className="ld-width-presets">
-                    {[['S', 560], ['M', 720], ['L', 960], ['XL', window.innerWidth - 24]].map(([label, w]) => (
-                      <button key={label} type="button" className={`ld-width-preset-btn ${Math.abs(drawerWidth - w) < 8 ? 'is-active' : ''}`} onClick={() => setPresetWidth(w)}>{label}</button>
-                    ))}
-                  </div>
-                </Tip>
                 <button className={`btn btn-ghost !p-2 ${pinned ? 'text-rose-400' : ''}`} onClick={togglePinned} aria-label={pinned ? 'Unpin drawer' : 'Pin drawer open'} title={pinned ? 'Pinned — click outside won\'t close it' : 'Pin drawer open'}>
                   {pinned ? <Pin size={16} className="fill-current" /> : <PinOff size={16} />}
                 </button>

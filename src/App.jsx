@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react'
 import {
   LayoutDashboard, KanbanSquare, Users, UploadCloud, Settings, Search,
   Plus, Zap, Link2, ShieldCheck, Sun, Moon, BarChart3, ChevronsLeft, ChevronsRight,
-  CalendarDays, CalendarRange, Activity, Inbox as InboxIcon, CalendarClock, LogOut
+  CalendarDays, CalendarRange, Activity, Inbox as InboxIcon, CalendarClock, LogOut, Table2
 } from 'lucide-react'
 import { AppProvider, Toasts, useApp } from './store.jsx'
 import { useFetch } from './hooks.js'
@@ -20,6 +20,7 @@ import StudioWeekly from './pages/StudioWeekly.jsx'
 import StudioMonthly from './pages/StudioMonthly.jsx'
 import Inbox from './pages/Inbox.jsx'
 import SettingsPage from './pages/Settings.jsx'
+import Pivot from './pages/Pivot.jsx'
 import MomenceSchedule, { formatTone, personName, time as fmtSessionTime } from './pages/MomenceSchedule.jsx'
 import LeadDrawer from './components/LeadDrawer.jsx'
 import AddLeadModal from './components/AddLeadModal.jsx'
@@ -39,7 +40,8 @@ const NAV_GROUPS = [
   ] },
   { label: 'Reports', items: [
     { id: 'studio-weekly', label: 'Weekly studio report', title: 'Weekly Studio Pulse', icon: CalendarDays },
-    { id: 'studio-monthly', label: 'Monthly studio report', title: 'Monthly Studio Review', icon: CalendarRange }
+    { id: 'studio-monthly', label: 'Monthly studio report', title: 'Monthly Studio Review', icon: CalendarRange },
+    { id: 'pivot', label: 'Pivot builder', title: 'Pivot Builder', icon: Table2 }
   ] },
   { label: 'Work', items: [
     { id: 'pipeline', label: 'Pipeline', title: 'Sales Pipeline', icon: KanbanSquare },
@@ -413,6 +415,7 @@ function Shell() {
     case 'momence-schedule': return <MomenceSchedule />
     case 'import': return <Import />
     case 'team': return <Team />
+    case 'pivot': return <Pivot />
     case 'settings': return <SettingsPage jumpTo={viewParams} />
     default: return <Dashboard />
   }

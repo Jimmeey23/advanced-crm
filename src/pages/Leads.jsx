@@ -8,6 +8,7 @@ import {
   Trophy, PhoneOff, FlaskConical, CircleDot, PanelTop, Check, Pencil,
   MoreVertical, Tags, UserPlus, CalendarPlus, CreditCard, Eye, Lock, Keyboard,
   Pin, PinOff, Calendar, Copy, ExternalLink, RefreshCw, IndianRupee, Plus, Minus, Trash
+, Bookmark
 } from 'lucide-react'
 import { useApp } from '../store.jsx'
 import { useFetch } from '../hooks.js'
@@ -661,6 +662,19 @@ export default function Leads({ initialSearch = '', initialAssociateId = '' }) {
     [rawItems, pendingPatches]
   )
 
+  // Faces are only useful while they stay recognisable, so the row shows the
+  // owners actually present in the current result set (busiest first) and
+  // caps at eight; the full roster stays in the Owners menu.
+  const quickAssociates = useMemo(() => {
+    const counts = new Map()
+    for (const lead of items) if (lead.associateId) counts.set(lead.associateId, (counts.get(lead.associateId) || 0) + 1)
+    return [...counts.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .map(([id]) => lookup.asnById?.[id])
+      .filter(a => a && a.active !== false)
+      .slice(0, 8)
+  }, [items, lookup])
+
   // Once a refetch returns the same value the overlay was holding, the
   // overlay has served its purpose — drop it so it can't mask later edits.
   React.useEffect(() => {
@@ -781,6 +795,37 @@ export default function Leads({ initialSearch = '', initialAssociateId = '' }) {
             onClick={() => applyQuickView(v)}
           >{v.label}</button>
         ))}
+        {segments.length > 0 && <span className="quickview-sep" aria-hidden="true" />}
+        {segments.map(segment => (
+          <button
+            key={segment.id}
+            type="button"
+            className={`quickview is-segment ${selectedSegmentId === segment.id ? 'is-active' : ''}`}
+            onClick={() => applySegment(selectedSegmentId === segment.id ? '' : segment.id)}
+            title={`Saved segment · ${segment.name}`}
+          >
+            <Bookmark size={11} /> {segment.name}
+          </button>
+        ))}
+
+        {/* Owner filter as faces: recognising a colleague by their photo is
+            faster than reading their name out of a select. */}
+        {quickAssociates.length > 0 && <span className="quickview-sep" aria-hidden="true" />}
+        <div className="quickview-people">
+          {quickAssociates.map(a => (
+            <button
+              key={a.id}
+              type="button"
+              title={`Only ${a.name}'s leads`}
+              aria-pressed={filters.associateId === a.id}
+              className={`quickview-person ${filters.associateId === a.id ? 'is-active' : ''}`}
+              onClick={() => { if (onlyMine) setOnlyMine(false); setFilters(f => ({ ...f, associateId: f.associateId === a.id ? '' : a.id })); setPage(0) }}
+            >
+              <Avatar name={a.name} color={a.color} photoUrl={a.photoUrl} photoZoom={a.photoZoom} photoPosX={a.photoPosX} photoPosY={a.photoPosY} size={22} fallback="👤" />
+            </button>
+          ))}
+        </div>
+
         <span className="leads-quickviews-count">{data?.total ?? 0} leads</span>
       </div>
 
@@ -790,9 +835,6 @@ export default function Leads({ initialSearch = '', initialAssociateId = '' }) {
           <button className={`btn ${panelOpen ? 'btn-soft' : 'btn-ghost'} !py-2`} onClick={() => setPanelOpen(o => !o)}>
             <SlidersHorizontal size={14} /> Filters {hasFilters && <span className="filter-dot" />}
           </button>
-          <Tip content={<span className="text-xs leading-relaxed"><b>Ctrl/Cmd+A</b> select all · <b>Ctrl/Cmd+C</b> copy selected rows · <b>Ctrl/Cmd+V</b> paste into remarks · <b>Ctrl/Cmd+Z</b> undo · <b>Ctrl/Cmd+Shift+Z</b> redo</span>}>
-            <button type="button" className="btn btn-ghost !p-2" aria-label="Keyboard shortcuts"><Keyboard size={14} /></button>
-          </Tip>
         </div>
 
         {hasFilters && (
@@ -1529,7 +1571,13 @@ function TableGrid({ items, boot, lookup, openLead, openQuickAction, changeStage
     return 'ok'
   }
 
-  const requiredMinWidths = { stage: 178, source: 194, owner: 260, location: 280, status: 146, statusGroup: 180, score: 92 }
+  // These are floors, not fixed widths. They were set high enough (owner 260,
+  // location 280) that any drag below them was silently discarded and the
+  // column looked unresizable. They now only guard against collapsing a
+  // column to unreadability.
+  const requiredMinWidths = { stage: 120, source: 110, owner: 120, location: 120, status: 96, statusGroup: 110, score: 72 }
+  // Dates render as a short compact string; they never needed a 150px column.
+  const DEFAULT_COL_WIDTH = { owner: 190, location: 190, source: 150, stage: 178, status: 120, statusGroup: 140, score: 84, trialDate: 104, firstPurchaseDate: 104 }
   const widthOf = (id, fallback) => Math.max(requiredMinWidths[id] || 0, Number(colWidths[id]) || fallback)
   const selectW = widthOf('select', 76)
   const leadW = Math.round((Number(colWidths.lead) || 260) * .9)
@@ -1594,7 +1642,7 @@ function TableGrid({ items, boot, lookup, openLead, openQuickAction, changeStage
             <SortHead label={`Lead (${displayedItems.length})`} field="fullName" width={leadW} onResize={startResize} onAutoFit={autoFitColumns} className={`resizable-th sticky-col sticky-col-lead px-4 py-3 font-semibold`} sortBy={sortBy} sortDir={sortDir} setSortBy={setSortBy} setSortDir={setSortDir} searchValue={columnSearch.fullName || ''} onSearch={setColSearch('fullName')} columnCountsQuery={columnCountsQuery} lookup={lookup} />
             <SortHead label="Stage" field="stage" width={stageW} onResize={startResize} onAutoFit={autoFitColumns} className={`resizable-th sticky-col sticky-col-stage px-4 py-3 font-semibold`} sortBy={sortBy} sortDir={sortDir} setSortBy={setSortBy} setSortDir={setSortDir} searchValue={columnSearch.stage || ''} onSearch={setColSearch('stage')} columnCountsQuery={columnCountsQuery} lookup={lookup} />
             <SortHead label="Created" field="createdAt" width={widthOf('createdAt', 180)} onResize={startResize} onAutoFit={autoFitColumns} className="px-4 py-3 font-semibold" sortBy={sortBy} sortDir={sortDir} setSortBy={setSortBy} setSortDir={setSortDir} searchValue={columnSearch.createdAt || ''} onSearch={setColSearch('createdAt')} columnCountsQuery={columnCountsQuery} lookup={lookup} />
-            {visibleCols.map(c => { const field = c.field || c.id; return <SortHead key={c.id} label={c.label} field={field} resizeId={c.id} width={widthOf(c.id, c.field === 'owner' ? 260 : c.field === 'source' ? 194 : c.field === 'location' ? 280 : c.field === 'statusGroup' ? 180 : c.field === 'score' ? 92 : c.field === 'status' ? 146 : 150)} onResize={startResize} onAutoFit={autoFitColumns} className="px-4 py-3 font-semibold" sortBy={sortBy} sortDir={sortDir} setSortBy={setSortBy} setSortDir={setSortDir} searchValue={columnSearch[field] || ''} onSearch={setColSearch(field)} columnCountsQuery={columnCountsQuery} lookup={lookup} /> })}
+            {visibleCols.map(c => { const field = c.field || c.id; return <SortHead key={c.id} label={c.label} field={field} resizeId={c.id} width={widthOf(c.id, DEFAULT_COL_WIDTH[c.field] || 150)} onResize={startResize} onAutoFit={autoFitColumns} className="px-4 py-3 font-semibold" sortBy={sortBy} sortDir={sortDir} setSortBy={setSortBy} setSortDir={setSortDir} searchValue={columnSearch[field] || ''} onSearch={setColSearch(field)} columnCountsQuery={columnCountsQuery} lookup={lookup} /> })}
             <th className="resizable-th px-4 py-3 font-semibold" style={{ width: widthOf('remarksField', 420), minWidth: widthOf('remarksField', 420) }}>
               <span>Remarks</span>
               <span className="col-resize-handle" onDoubleClick={autoFitColumns} onMouseDown={startResize('remarksField', widthOf('remarksField', 420))} title="Drag to resize column. Double-click to auto-fit all columns." />
