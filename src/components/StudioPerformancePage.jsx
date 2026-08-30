@@ -17,15 +17,17 @@ import { Spinner } from '../ui.jsx'
 import { money, downloadText } from '../lib.js'
 import MetricCard from './MetricCard.jsx'
 
-const DONUT_COLORS = ['#f43f5e', '#8b5cf6', '#06b6d4', '#f59e0b', '#10b981', '#6366f1', '#ec4899', '#14b8a6']
-const CHANNEL_COLORS = { call: '#06b6d4', whatsapp: '#10b981', email: '#8b5cf6', sms: '#f59e0b' }
+// Fixed-order slots from the shared validated palette. Never cycled: a
+// ninth category folds into "Other" rather than reusing slot 1.
+const DONUT_COLORS = SERIES_DARK
+const CHANNEL_COLORS = { call: SERIES_DARK[0], whatsapp: SERIES_DARK[2], email: SERIES_DARK[6], sms: SERIES_DARK[3] }
 
 const tooltipStyle = () => ({
   background: 'var(--tt-bg)', border: '1px solid var(--tt-border)', borderRadius: 12,
   fontSize: 12, color: 'var(--tt-color)', boxShadow: '0 10px 30px rgba(0,0,0,.5)'
 })
 const AXIS = { fill: 'var(--axis)', fontSize: 10.5 }
-const FUNNEL_COLORS = { new: '#8b5cf6', trial: '#06b6d4', won: '#10b981', lost: '#f43f5e' }
+const FUNNEL_COLORS = { new: LIFECYCLE.dark.newLeads, trial: LIFECYCLE.dark.trial, won: LIFECYCLE.dark.won, lost: LIFECYCLE.dark.lost }
 
 function historyTrend(history, dataKey) {
   return (history || []).filter(h => h[dataKey] !== undefined).map(h => ({ label: h.periodLabel, value: h[dataKey] }))
@@ -275,12 +277,12 @@ export default function StudioPerformancePage({ range, title, desc }) {
     <div className="p-6 space-y-5">
       <div className="flex flex-wrap items-center gap-3">
         <div>
-          <h2 className="font-display text-[18px] font-bold text-white flex items-center gap-2">
+          <h2 className="font-display text-lg font-bold text-white flex items-center gap-2">
             <Building2 size={18} className="text-rose-400" /> {title}
           </h2>
-          <p className="text-[12px] text-slate-500 mt-0.5">
+          <p className="text-sm text-slate-500 mt-0.5">
             {desc}
-            {viewAsAssociate && <span className="chip !ml-2 !px-2 !py-0.5 text-[10px] bg-violet-500/15 border border-violet-400/25 text-violet-300">viewing as {viewAsAssociate.name}</span>}
+            {viewAsAssociate && <span className="chip !ml-2 !px-2 !py-0.5 text-xs bg-violet-500/15 border border-violet-400/25 text-violet-300">viewing as {viewAsAssociate.name}</span>}
           </p>
         </div>
         <div className="ml-auto flex flex-wrap items-center gap-2">
@@ -288,7 +290,7 @@ export default function StudioPerformancePage({ range, title, desc }) {
             <button className="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-white hover:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed" disabled={customRange} onClick={() => setOffset(o => o + 1)}>
               <ChevronLeft size={15} />
             </button>
-            <span className="px-2 text-[12.5px] font-semibold text-white min-w-[160px] text-center">{data?.label || '—'}</span>
+            <span className="px-2 text-sm font-semibold text-white min-w-[160px] text-center">{data?.label || '—'}</span>
             <button className="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-white hover:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed" disabled={customRange || offset === 0} onClick={() => setOffset(o => Math.max(0, o - 1))}>
               <ChevronRight size={15} />
             </button>
@@ -296,9 +298,9 @@ export default function StudioPerformancePage({ range, title, desc }) {
 
           <div className="flex items-center gap-1.5 rounded-xl bg-white/5 border border-white/10 px-2 py-1">
             <CalendarRange size={13} className="text-slate-500 shrink-0" />
-            <input type="date" className="input !w-auto !py-1 !text-[11.5px] !px-1.5" value={dateFrom} onChange={e => setDateFrom(e.target.value)} max={dateTo || undefined} />
-            <span className="text-slate-600 text-[11px]">–</span>
-            <input type="date" className="input !w-auto !py-1 !text-[11.5px] !px-1.5" value={dateTo} onChange={e => setDateTo(e.target.value)} min={dateFrom || undefined} />
+            <input type="date" className="input !w-auto !py-1 !text-xs !px-1.5" value={dateFrom} onChange={e => setDateFrom(e.target.value)} max={dateTo || undefined} />
+            <span className="text-slate-600 text-xs">–</span>
+            <input type="date" className="input !w-auto !py-1 !text-xs !px-1.5" value={dateTo} onChange={e => setDateTo(e.target.value)} min={dateFrom || undefined} />
             {customRange && (
               <button className="w-5 h-5 rounded-md flex items-center justify-center text-slate-500 hover:text-white hover:bg-white/10" title="Clear custom range" onClick={() => { setDateFrom(''); setDateTo('') }}>
                 <X size={12} />
@@ -308,7 +310,7 @@ export default function StudioPerformancePage({ range, title, desc }) {
 
           <div className="flex items-center gap-1.5 rounded-xl bg-white/5 border border-white/10 px-2 py-1.5">
             <GitCompareArrows size={13} className="text-slate-500 shrink-0" />
-            <select className="input !w-auto !py-0 !text-[11.5px] !border-0 !bg-transparent" value={compareMode} onChange={e => setCompareMode(e.target.value)}>
+            <select className="input !w-auto !py-0 !text-xs !border-0 !bg-transparent" value={compareMode} onChange={e => setCompareMode(e.target.value)}>
               <option value="prev">vs previous period</option>
               <option value="yoy">vs same period last year</option>
             </select>
@@ -317,24 +319,24 @@ export default function StudioPerformancePage({ range, title, desc }) {
           <div className="relative">
             <button
               type="button"
-              className="btn btn-ghost !py-2 !px-3 !text-[12px] flex items-center gap-1.5"
+              className="btn btn-ghost !py-2 !px-3 !text-sm flex items-center gap-1.5"
               onClick={() => setStudioPickerOpen(o => !o)}
             >
               <MapPin size={13} /> {primary?.locationName || 'Studio'}
-              {comparedLocations.length > 0 && <span className="chip !px-1.5 !py-0.5 text-[9px] bg-white/10 border border-white/10 text-slate-300">+{comparedLocations.length}</span>}
+              {comparedLocations.length > 0 && <span className="chip !px-1.5 !py-0.5 text-2xs bg-white/10 border border-white/10 text-slate-300">+{comparedLocations.length}</span>}
               <ChevronDownIcon size={13} className={`transition-transform ${studioPickerOpen ? 'rotate-180' : ''}`} />
             </button>
             {studioPickerOpen && (
               <div className="absolute right-0 top-[calc(100%+6px)] z-20 w-64 rounded-xl bg-[var(--card-bg,#111730)] border border-white/10 shadow-2xl p-2">
-                <div className="text-[10px] uppercase tracking-wider text-slate-500 px-2 py-1">Primary studio</div>
+                <div className="text-xs uppercase tracking-wider text-slate-500 px-2 py-1">Primary studio</div>
                 <select
-                  className="input !text-[12px] mb-2"
+                  className="input !text-sm mb-2"
                   value={primary?.locationId || ''}
                   onChange={e => setPrimaryLocation(e.target.value)}
                 >
                   {rows.map(r => <option key={r.locationId} value={r.locationId}>{r.locationName}</option>)}
                 </select>
-                <div className="text-[10px] uppercase tracking-wider text-slate-500 px-2 py-1">Add studios to compare</div>
+                <div className="text-xs uppercase tracking-wider text-slate-500 px-2 py-1">Add studios to compare</div>
                 <div className="max-h-none flex flex-col gap-0.5">
                   {rows.filter(r => r.locationId !== primary?.locationId).map(r => {
                     const checked = selectedLocationIds.includes(r.locationId)
@@ -342,7 +344,7 @@ export default function StudioPerformancePage({ range, title, desc }) {
                       <button
                         key={r.locationId}
                         type="button"
-                        className="flex items-center gap-2 px-2 py-1.5 rounded-lg text-[12px] text-slate-300 hover:bg-white/5 text-left"
+                        className="flex items-center gap-2 px-2 py-1.5 rounded-lg text-sm text-slate-300 hover:bg-white/5 text-left"
                         onClick={() => toggleCompareLocation(r.locationId)}
                       >
                         <span className={`w-4 h-4 rounded flex items-center justify-center border ${checked ? 'bg-rose-500/80 border-rose-500' : 'border-white/20'}`}>
@@ -359,16 +361,16 @@ export default function StudioPerformancePage({ range, title, desc }) {
 
           <div className="flex items-center gap-1.5 rounded-xl bg-white/5 border border-white/10 px-2 py-1.5">
             <UserCircle2 size={13} className="text-slate-500 shrink-0" />
-            <select className="input !w-auto !py-0 !text-[11.5px] !border-0 !bg-transparent" value={viewAsId} onChange={e => setViewAs(e.target.value)}>
+            <select className="input !w-auto !py-0 !text-xs !border-0 !bg-transparent" value={viewAsId} onChange={e => setViewAs(e.target.value)}>
               <option value="">All associates</option>
               {sortedAssociates.map(a => <option key={a.id} value={a.id}>View as {a.name}</option>)}
             </select>
           </div>
 
-          <button className="btn btn-ghost !py-2 !px-3 !text-[12px] flex items-center gap-1.5" onClick={exportCsv} disabled={!data}>
+          <button className="btn btn-ghost !py-2 !px-3 !text-sm flex items-center gap-1.5" onClick={exportCsv} disabled={!data}>
             <Download size={13} /> Export CSV
           </button>
-          <button className="btn btn-primary !py-2 !px-3 !text-[12px] flex items-center gap-1.5" onClick={exportPdf} disabled={!data || exporting}>
+          <button className="btn btn-primary !py-2 !px-3 !text-sm flex items-center gap-1.5" onClick={exportPdf} disabled={!data || exporting}>
             {exporting ? <Spinner size={13} /> : <FileDown size={13} />} {exporting ? 'Exporting…' : 'Export PDF'}
           </button>
         </div>
@@ -433,17 +435,17 @@ export default function StudioPerformancePage({ range, title, desc }) {
               <div className="flex flex-wrap items-center gap-3 mb-3">
                 <div className="flex items-center gap-2">
                   <Filter size={14} className="text-cyan-400" />
-                  <h3 className="font-display font-semibold text-white text-[15px]">Pipeline funnel</h3>
+                  <h3 className="font-display font-semibold text-white text-md">Pipeline funnel</h3>
                 </div>
                 <div className="flex items-center gap-1.5 rounded-xl bg-white/5 border border-white/10 p-1">
-                  <button type="button" className={`px-3 py-1.5 rounded-lg text-[11.5px] font-semibold ${funnelStage === 'all' ? 'bg-rose-500/25 text-white' : 'text-slate-400 hover:text-white'}`} onClick={() => setFunnelStage('all')}>All</button>
+                  <button type="button" className={`px-3 py-1.5 rounded-lg text-xs font-semibold ${funnelStage === 'all' ? 'bg-rose-500/25 text-white' : 'text-slate-400 hover:text-white'}`} onClick={() => setFunnelStage('all')}>All</button>
                   {funnelData.map((d) => (
-                    <button key={d.key} type="button" className={`px-3 py-1.5 rounded-lg text-[11.5px] font-semibold ${funnelStage === d.key ? 'text-white' : 'text-slate-400 hover:text-white'}`} style={{ background: funnelStage === d.key ? `${FUNNEL_COLORS[d.key]}22` : 'transparent' }} onClick={() => setFunnelStage(d.key)}>
+                    <button key={d.key} type="button" className={`px-3 py-1.5 rounded-lg text-xs font-semibold ${funnelStage === d.key ? 'text-white' : 'text-slate-400 hover:text-white'}`} style={{ background: funnelStage === d.key ? `${FUNNEL_COLORS[d.key]}22` : 'transparent' }} onClick={() => setFunnelStage(d.key)}>
                       {d.stage}
                     </button>
                   ))}
                 </div>
-                <select className="input !w-auto !py-1.5 !text-[12px] ml-auto" value={funnelLocationId} onChange={e => setFunnelLocationId(e.target.value)}>
+                <select className="input !w-auto !py-1.5 !text-sm ml-auto" value={funnelLocationId} onChange={e => setFunnelLocationId(e.target.value)}>
                   <option value="">All studios</option>
                   {rows.map(r => <option key={r.locationId} value={r.locationId}>{r.locationName}</option>)}
                 </select>
@@ -487,7 +489,7 @@ export default function StudioPerformancePage({ range, title, desc }) {
             <ReportHeading number="02" title="Studio performance briefs" subtitle={comparedLocations.length ? 'Complete studio detail, shown together for direct comparison' : 'Complete detail for the selected studio'} />
             <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 p-4">
               {selectedRows.map(r => <StudioBrief key={r.locationId} row={asRow(r)} openLead={openLead} />)}
-              {!selectedRows.length && <div className="col-span-full text-center text-slate-500 py-10 text-[12.5px]">No studios found.</div>}
+              {!selectedRows.length && <div className="col-span-full text-center text-slate-500 py-10 text-sm">No studios found.</div>}
             </div>
           </section>
 
@@ -496,11 +498,11 @@ export default function StudioPerformancePage({ range, title, desc }) {
               {perLocation.length > 1 && (
                 <div className="flex items-center gap-2 pt-1">
                   <Building2 size={14} className="text-rose-400 shrink-0" />
-                  <h3 className="font-display font-semibold text-white text-[14px]">{loc.locationName}</h3>
+                  <h3 className="font-display font-semibold text-white text-md">{loc.locationName}</h3>
                   {i === 0 ? (
-                    <span className="chip !px-2 !py-0.5 text-[9.5px] bg-rose-500/15 border border-rose-500/20 text-rose-300">Primary</span>
+                    <span className="chip !px-2 !py-0.5 text-2xs bg-rose-500/15 border border-rose-500/20 text-rose-300">Primary</span>
                   ) : (
-                    <span className="chip !px-2 !py-0.5 text-[9.5px] bg-white/5 border border-white/10 text-slate-400">Compare</span>
+                    <span className="chip !px-2 !py-0.5 text-2xs bg-white/5 border border-white/10 text-slate-400">Compare</span>
                   )}
                 </div>
               )}
@@ -586,8 +588,8 @@ function StudioBrief({ row, openLead }) {
 function Metric({ label, value, color }) {
   return (
     <div className="text-right shrink-0 hidden sm:block">
-      <div className="text-[9.5px] uppercase tracking-wider text-slate-500">{label}</div>
-      <div className="text-[13px] font-semibold mono" style={{ color }}>{value}</div>
+      <div className="text-2xs uppercase tracking-wider text-slate-500">{label}</div>
+      <div className="text-base font-semibold mono" style={{ color }}>{value}</div>
     </div>
   )
 }
@@ -595,13 +597,13 @@ function Metric({ label, value, color }) {
 function AssociateCard({ label, icon, associate }) {
   return (
     <div>
-      <div className="text-[10.5px] uppercase tracking-wider font-bold text-slate-500 mb-1.5 flex items-center gap-1.5">{icon}{label}</div>
+      <div className="text-xs uppercase tracking-wider font-bold text-slate-500 mb-1.5 flex items-center gap-1.5">{icon}{label}</div>
       {associate ? (
-        <div className="text-[12px] text-slate-300 bg-white/[0.03] border border-white/8 rounded-lg px-2.5 py-1.5">
+        <div className="text-sm text-slate-300 bg-white/[0.03] border border-white/8 rounded-lg px-2.5 py-1.5">
           <div className="font-semibold text-white">{associate.name}</div>
           <div className="text-emerald-400 mono">{money(associate.revenue)}</div>
         </div>
-      ) : <div className="text-[12px] text-slate-500">No wins yet</div>}
+      ) : <div className="text-sm text-slate-500">No wins yet</div>}
     </div>
   )
 }
@@ -613,15 +615,15 @@ function AssociateCard({ label, icon, associate }) {
 const DETAIL_LIST_MAX_HEIGHT = 260
 
 function DetailList({ title, color, items, openLead, moneyValue }) {
-  if (!items?.length) return <div className="text-[12px] text-slate-500">{title}: none</div>
+  if (!items?.length) return <div className="text-sm text-slate-500">{title}: none</div>
   return (
     <div>
-      <div className="text-[10.5px] uppercase tracking-wider font-bold mb-1.5" style={{ color }}>{title} ({items.length})</div>
+      <div className="text-xs uppercase tracking-wider font-bold mb-1.5" style={{ color }}>{title} ({items.length})</div>
       <div className="space-y-1 overflow-y-auto scrollbar-thin pr-1" style={{ maxHeight: DETAIL_LIST_MAX_HEIGHT }}>
         {items.map(it => (
-          <button key={it.id} className="w-full text-left flex items-center justify-between gap-2 text-[12px] text-slate-300 bg-white/[0.03] border border-white/8 rounded-lg px-2.5 py-1.5 hover:bg-white/[0.06] transition-colors" onClick={() => openLead(it.id)}>
+          <button key={it.id} className="w-full text-left flex items-center justify-between gap-2 text-sm text-slate-300 bg-white/[0.03] border border-white/8 rounded-lg px-2.5 py-1.5 hover:bg-white/[0.06] transition-colors" onClick={() => openLead(it.id)}>
             <span className="truncate">{it.fullName}</span>
-            {moneyValue ? <span className="mono text-emerald-400 shrink-0">{money(it.revenue)}</span> : <span className="chip !px-1.5 !py-0.5 text-[9px] bg-white/5 border border-white/10 text-slate-400 shrink-0 max-w-[140px] truncate" title={it.stage}>{it.stage}</span>}
+            {moneyValue ? <span className="mono text-emerald-400 shrink-0">{money(it.revenue)}</span> : <span className="chip !px-1.5 !py-0.5 text-2xs bg-white/5 border border-white/10 text-slate-400 shrink-0 max-w-[140px] truncate" title={it.stage}>{it.stage}</span>}
           </button>
         ))}
       </div>
@@ -632,7 +634,7 @@ function DetailList({ title, color, items, openLead, moneyValue }) {
 function TrendChart({ title, color, dataKey, data, valueFmt }) {
   return (
     <div className="card p-4">
-      <div className="text-[11.5px] font-semibold text-slate-300 mb-2">{title}</div>
+      <div className="text-xs font-semibold text-slate-300 mb-2">{title}</div>
       <div className="h-[110px]">
         <ResponsiveContainer width="100%" height="100%">
           <LineChart data={data} margin={{ top: 5, right: 5, left: -20, bottom: 0 }}>
@@ -678,14 +680,14 @@ function LeaderboardSection({ leaderboard }) {
 
   return (
     <div className="card overflow-hidden">
-      <div className="px-5 py-3 border-b border-white/8 flex items-center gap-2 text-[12.5px] font-semibold text-slate-200">
+      <div className="px-5 py-3 border-b border-white/8 flex items-center gap-2 text-sm font-semibold text-slate-200">
         <ListFilter size={13} className="text-fuchsia-400" /> Associate leaderboard
-        <span className="ml-auto text-[11px] font-normal text-slate-500">{leaderboard.length} associates · click a column to sort</span>
+        <span className="ml-auto text-xs font-normal text-slate-500">{leaderboard.length} associates · click a column to sort</span>
       </div>
       <div className="overflow-x-auto scrollbar-thin">
         <table className="w-full text-left">
           <thead>
-            <tr className="text-[10.5px] uppercase tracking-wider text-slate-500 border-b border-white/8">
+            <tr className="text-xs uppercase tracking-wider text-slate-500 border-b border-white/8">
               {LEADERBOARD_COLS.map(c => (
                 <th
                   key={c.key}
@@ -703,12 +705,12 @@ function LeaderboardSection({ leaderboard }) {
           <tbody>
             {sorted.map(a => (
               <tr key={a.associateId} className="border-b border-white/5 last:border-0 hover:bg-white/[0.03] transition-colors">
-                <td className="px-4 py-2.5 text-[12.5px] font-semibold text-white">{a.name}</td>
-                <td className="px-3 py-2.5 text-[12px] text-slate-300 text-center mono">{a.newLeads}</td>
-                <td className="px-3 py-2.5 text-[12px] text-slate-300 text-center mono">{a.trials}</td>
-                <td className="px-3 py-2.5 text-[12px] text-slate-300 text-center mono">{a.won}</td>
-                <td className="px-3 py-2.5 text-[12px] text-emerald-400 text-center mono">{money(a.revenue)}</td>
-                <td className="px-3 py-2.5 text-[12px] text-amber-400 text-center mono">{a.followUpRate}%</td>
+                <td className="px-4 py-2.5 text-sm font-semibold text-white">{a.name}</td>
+                <td className="px-3 py-2.5 text-sm text-slate-300 text-center mono">{a.newLeads}</td>
+                <td className="px-3 py-2.5 text-sm text-slate-300 text-center mono">{a.trials}</td>
+                <td className="px-3 py-2.5 text-sm text-slate-300 text-center mono">{a.won}</td>
+                <td className="px-3 py-2.5 text-sm text-emerald-400 text-center mono">{money(a.revenue)}</td>
+                <td className="px-3 py-2.5 text-sm text-amber-400 text-center mono">{a.followUpRate}%</td>
               </tr>
             ))}
           </tbody>
@@ -722,13 +724,13 @@ function SourceBreakdownSection({ sourceBreakdown }) {
   if (!sourceBreakdown.length) return null
   return (
     <div className="card overflow-hidden">
-      <div className="px-5 py-3 border-b border-white/8 flex items-center gap-2 text-[12.5px] font-semibold text-slate-200">
+      <div className="px-5 py-3 border-b border-white/8 flex items-center gap-2 text-sm font-semibold text-slate-200">
         <Tags size={13} className="text-cyan-400" /> Source breakdown
       </div>
       <div className="overflow-x-auto scrollbar-thin">
         <table className="w-full text-left">
           <thead>
-            <tr className="text-[10.5px] uppercase tracking-wider text-slate-500 border-b border-white/8">
+            <tr className="text-xs uppercase tracking-wider text-slate-500 border-b border-white/8">
               <th className="px-4 py-2.5 font-semibold">Source</th>
               <th className="px-3 py-2.5 font-semibold text-center">Leads</th>
               <th className="px-3 py-2.5 font-semibold text-center">Won</th>
@@ -738,10 +740,10 @@ function SourceBreakdownSection({ sourceBreakdown }) {
           <tbody>
             {sourceBreakdown.map(s => (
               <tr key={s.source} className="border-b border-white/5 last:border-0 hover:bg-white/[0.03] transition-colors">
-                <td className="px-4 py-2.5 text-[12.5px] font-semibold text-white">{s.source}</td>
-                <td className="px-3 py-2.5 text-[12px] text-slate-300 text-center mono">{s.count}</td>
-                <td className="px-3 py-2.5 text-[12px] text-slate-300 text-center mono">{s.wonCount}</td>
-                <td className="px-3 py-2.5 text-[12px] text-emerald-400 text-center mono">{s.wonRate}%</td>
+                <td className="px-4 py-2.5 text-sm font-semibold text-white">{s.source}</td>
+                <td className="px-3 py-2.5 text-sm text-slate-300 text-center mono">{s.count}</td>
+                <td className="px-3 py-2.5 text-sm text-slate-300 text-center mono">{s.wonCount}</td>
+                <td className="px-3 py-2.5 text-sm text-emerald-400 text-center mono">{s.wonRate}%</td>
               </tr>
             ))}
           </tbody>
@@ -755,14 +757,14 @@ function StageAgingSection({ stageBreakdown }) {
   if (!stageBreakdown.length) return null
   return (
     <div className="card overflow-hidden">
-      <div className="px-5 py-3 border-b border-white/8 flex items-center gap-2 text-[12.5px] font-semibold text-slate-200">
+      <div className="px-5 py-3 border-b border-white/8 flex items-center gap-2 text-sm font-semibold text-slate-200">
         <Hourglass size={13} className="text-amber-400" /> Pipeline stage aging
-        <span className="ml-auto text-[11px] font-normal text-slate-500">open leads by stage, as of now</span>
+        <span className="ml-auto text-xs font-normal text-slate-500">open leads by stage, as of now</span>
       </div>
       <div className="overflow-x-auto scrollbar-thin">
         <table className="w-full text-left">
           <thead>
-            <tr className="text-[10.5px] uppercase tracking-wider text-slate-500 border-b border-white/8">
+            <tr className="text-xs uppercase tracking-wider text-slate-500 border-b border-white/8">
               <th className="px-4 py-2.5 font-semibold">Stage</th>
               <th className="px-3 py-2.5 font-semibold text-center">Open leads</th>
               <th className="px-3 py-2.5 font-semibold text-center">Avg age</th>
@@ -771,9 +773,9 @@ function StageAgingSection({ stageBreakdown }) {
           <tbody>
             {stageBreakdown.map(s => (
               <tr key={s.stage} className="border-b border-white/5 last:border-0 hover:bg-white/[0.03] transition-colors">
-                <td className="px-4 py-2.5 text-[12.5px] font-semibold text-white">{s.stage}</td>
-                <td className="px-3 py-2.5 text-[12px] text-slate-300 text-center mono">{s.count}</td>
-                <td className={`px-3 py-2.5 text-[12px] text-center mono ${s.avgAgeDays > 14 ? 'text-rose-400' : 'text-slate-300'}`}>{s.avgAgeDays}d</td>
+                <td className="px-4 py-2.5 text-sm font-semibold text-white">{s.stage}</td>
+                <td className="px-3 py-2.5 text-sm text-slate-300 text-center mono">{s.count}</td>
+                <td className={`px-3 py-2.5 text-sm text-center mono ${s.avgAgeDays > 14 ? 'text-rose-400' : 'text-slate-300'}`}>{s.avgAgeDays}d</td>
               </tr>
             ))}
           </tbody>
@@ -787,13 +789,13 @@ function LostBySourceSection({ lostBySource }) {
   if (!lostBySource.length) return null
   return (
     <div className="card overflow-hidden">
-      <div className="px-5 py-3 border-b border-white/8 flex items-center gap-2 text-[12.5px] font-semibold text-slate-200">
+      <div className="px-5 py-3 border-b border-white/8 flex items-center gap-2 text-sm font-semibold text-slate-200">
         <ThumbsDown size={13} className="text-rose-400" /> Lost leads by source
       </div>
       <div className="overflow-x-auto scrollbar-thin">
         <table className="w-full text-left">
           <thead>
-            <tr className="text-[10.5px] uppercase tracking-wider text-slate-500 border-b border-white/8">
+            <tr className="text-xs uppercase tracking-wider text-slate-500 border-b border-white/8">
               <th className="px-4 py-2.5 font-semibold">Source</th>
               <th className="px-3 py-2.5 font-semibold text-center">Lost leads</th>
               <th className="px-3 py-2.5 font-semibold text-center">Lost value</th>
@@ -802,9 +804,9 @@ function LostBySourceSection({ lostBySource }) {
           <tbody>
             {lostBySource.map(s => (
               <tr key={s.source} className="border-b border-white/5 last:border-0 hover:bg-white/[0.03] transition-colors">
-                <td className="px-4 py-2.5 text-[12.5px] font-semibold text-white">{s.source}</td>
-                <td className="px-3 py-2.5 text-[12px] text-rose-400 text-center mono">{s.count}</td>
-                <td className="px-3 py-2.5 text-[12px] text-slate-300 text-center mono">{money(s.lostValue)}</td>
+                <td className="px-4 py-2.5 text-sm font-semibold text-white">{s.source}</td>
+                <td className="px-3 py-2.5 text-sm text-rose-400 text-center mono">{s.count}</td>
+                <td className="px-3 py-2.5 text-sm text-slate-300 text-center mono">{money(s.lostValue)}</td>
               </tr>
             ))}
           </tbody>
@@ -822,9 +824,9 @@ function AssociateComparisonChart({ leaderboard }) {
   }))
   return (
     <div className="card overflow-hidden">
-      <div className="px-5 py-3 border-b border-white/8 flex items-center gap-2 text-[12.5px] font-semibold text-slate-200">
+      <div className="px-5 py-3 border-b border-white/8 flex items-center gap-2 text-sm font-semibold text-slate-200">
         <Target size={13} className="text-cyan-400" /> Associate comparison — conversion vs revenue
-        <span className="ml-auto text-[11px] font-normal text-slate-500">bubble size = deals won</span>
+        <span className="ml-auto text-xs font-normal text-slate-500">bubble size = deals won</span>
       </div>
       <div className="h-[220px] p-3">
         <ResponsiveContainer width="100%" height="100%">
@@ -841,12 +843,12 @@ function AssociateComparisonChart({ leaderboard }) {
                 const d = payload[0].payload
                 return (
                   <div style={tooltipStyle()} className="px-3 py-2">
-                    <div className="font-semibold text-white text-[12px] mb-1">{d.name}</div>
-                    <div className="text-[11px]">{d.conversion}% conversion · {money(d.revenue)} · {d.won} won</div>
+                    <div className="font-semibold text-white text-sm mb-1">{d.name}</div>
+                    <div className="text-xs">{d.conversion}% conversion · {money(d.revenue)} · {d.won} won</div>
                   </div>
                 )
               }} />
-            <Scatter data={chartData} fill="#8b5cf6" fillOpacity={0.75} />
+            <Scatter data={chartData} fill={SERIES_DARK[6]} fillOpacity={0.75} />
           </ScatterChart>
         </ResponsiveContainer>
       </div>
@@ -860,14 +862,14 @@ function ChannelPerformanceSection({ channelPerformance }) {
   if (!channelPerformance.length) return null
   return (
     <div className="card overflow-hidden">
-      <div className="px-5 py-3 border-b border-white/8 flex items-center gap-2 text-[12.5px] font-semibold text-slate-200">
+      <div className="px-5 py-3 border-b border-white/8 flex items-center gap-2 text-sm font-semibold text-slate-200">
         <Radio size={13} className="text-cyan-400" /> Channel performance
       </div>
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 p-4">
         <div className="overflow-x-auto scrollbar-thin">
           <table className="w-full text-left">
             <thead>
-              <tr className="text-[10.5px] uppercase tracking-wider text-slate-500 border-b border-white/8">
+              <tr className="text-xs uppercase tracking-wider text-slate-500 border-b border-white/8">
                 <th className="px-3 py-2 font-semibold">Channel</th>
                 <th className="px-2 py-2 font-semibold text-center">Attempted</th>
                 <th className="px-2 py-2 font-semibold text-center">Responded</th>
@@ -879,15 +881,15 @@ function ChannelPerformanceSection({ channelPerformance }) {
             <tbody>
               {channelPerformance.map(c => (
                 <tr key={c.channel} className="border-b border-white/5 last:border-0 hover:bg-white/[0.03] transition-colors">
-                  <td className="px-3 py-2 text-[12.5px] font-semibold text-white flex items-center gap-1.5">
+                  <td className="px-3 py-2 text-sm font-semibold text-white flex items-center gap-1.5">
                     <span className="w-2 h-2 rounded-full shrink-0" style={{ background: CHANNEL_COLORS[c.channel] || '#94a3b8' }} />
                     {CHANNEL_LABELS[c.channel] || c.channel}
                   </td>
-                  <td className="px-2 py-2 text-[12px] text-slate-300 text-center mono">{c.attempted}</td>
-                  <td className="px-2 py-2 text-[12px] text-slate-300 text-center mono">{c.responded}</td>
-                  <td className="px-2 py-2 text-[12px] text-cyan-400 text-center mono">{c.responseRate}%</td>
-                  <td className="px-2 py-2 text-[12px] text-slate-300 text-center mono">{c.won}</td>
-                  <td className="px-2 py-2 text-[12px] text-emerald-400 text-center mono">{c.conversionRate}%</td>
+                  <td className="px-2 py-2 text-sm text-slate-300 text-center mono">{c.attempted}</td>
+                  <td className="px-2 py-2 text-sm text-slate-300 text-center mono">{c.responded}</td>
+                  <td className="px-2 py-2 text-sm text-cyan-400 text-center mono">{c.responseRate}%</td>
+                  <td className="px-2 py-2 text-sm text-slate-300 text-center mono">{c.won}</td>
+                  <td className="px-2 py-2 text-sm text-emerald-400 text-center mono">{c.conversionRate}%</td>
                 </tr>
               ))}
             </tbody>
@@ -917,7 +919,7 @@ function FollowUpAnalyticsSection({ data }) {
   const avgResponseLabel = avgResponseHours >= 24 ? `${(avgResponseHours / 24).toFixed(1)}d` : `${avgResponseHours}h`
   return (
     <div className="card overflow-hidden">
-      <div className="px-5 py-3 border-b border-white/8 flex items-center gap-2 text-[12.5px] font-semibold text-slate-200">
+      <div className="px-5 py-3 border-b border-white/8 flex items-center gap-2 text-sm font-semibold text-slate-200">
         <Clock3 size={13} className="text-amber-400" /> Follow-up analytics
       </div>
       <div className="p-4 space-y-4">
@@ -929,7 +931,7 @@ function FollowUpAnalyticsSection({ data }) {
         </div>
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           <div>
-            <div className="text-[10.5px] uppercase tracking-wider font-bold text-slate-500 mb-2">Completion rate by associate</div>
+            <div className="text-xs uppercase tracking-wider font-bold text-slate-500 mb-2">Completion rate by associate</div>
             {completionRateByAssociate.length ? (
               <div className="h-[160px]">
                 <ResponsiveContainer width="100%" height="100%">
@@ -938,25 +940,25 @@ function FollowUpAnalyticsSection({ data }) {
                     <XAxis type="number" domain={[0, 100]} tick={AXIS} axisLine={false} tickLine={false} unit="%" />
                     <YAxis type="category" dataKey="name" width={90} tick={AXIS} axisLine={false} tickLine={false} />
                     <Tooltip contentStyle={tooltipStyle()} formatter={(v) => `${v}%`} />
-                    <Bar dataKey="rate" name="Completion" radius={[0, 6, 6, 0]} barSize={11} fill="#10b981" opacity={0.85} />
+                    <Bar dataKey="rate" name="Completion" radius={[0, 6, 6, 0]} barSize={11} fill={LIFECYCLE.dark.won} opacity={0.85} />
                   </BarChart>
                 </ResponsiveContainer>
               </div>
-            ) : <div className="text-[12px] text-slate-500">No data.</div>}
+            ) : <div className="text-sm text-slate-500">No data.</div>}
           </div>
           <div>
-            <div className="text-[10.5px] uppercase tracking-wider font-bold text-slate-500 mb-2">Missed by channel</div>
+            <div className="text-xs uppercase tracking-wider font-bold text-slate-500 mb-2">Missed by channel</div>
             {missedByChannel.length ? (
               <div className="space-y-1.5">
                 {missedByChannel.map(m => (
-                  <div key={m.channel} className="flex items-center gap-2 text-[12px]">
+                  <div key={m.channel} className="flex items-center gap-2 text-sm">
                     <span className="w-2 h-2 rounded-full shrink-0" style={{ background: CHANNEL_COLORS[m.channel] || '#94a3b8' }} />
                     <span className="text-slate-300 flex-1">{CHANNEL_LABELS[m.channel] || m.channel}</span>
                     <span className="mono text-rose-400">{m.count}</span>
                   </div>
                 ))}
               </div>
-            ) : <div className="text-[12px] text-slate-500">No missed follow-ups.</div>}
+            ) : <div className="text-sm text-slate-500">No missed follow-ups.</div>}
           </div>
         </div>
       </div>
@@ -968,7 +970,7 @@ function RevenueMixSection({ revenueMix }) {
   if (!revenueMix.length) return null
   return (
     <div className="card overflow-hidden">
-      <div className="px-5 py-3 border-b border-white/8 flex items-center gap-2 text-[12.5px] font-semibold text-slate-200">
+      <div className="px-5 py-3 border-b border-white/8 flex items-center gap-2 text-sm font-semibold text-slate-200">
         <PieChartIcon size={13} className="text-fuchsia-400" /> Revenue mix by class type
       </div>
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 p-4">
@@ -985,7 +987,7 @@ function RevenueMixSection({ revenueMix }) {
         <div className="overflow-x-auto scrollbar-thin">
           <table className="w-full text-left">
             <thead>
-              <tr className="text-[10.5px] uppercase tracking-wider text-slate-500 border-b border-white/8">
+              <tr className="text-xs uppercase tracking-wider text-slate-500 border-b border-white/8">
                 <th className="px-3 py-2 font-semibold">Type</th>
                 <th className="px-2 py-2 font-semibold text-center">Leads</th>
                 <th className="px-2 py-2 font-semibold text-center">Revenue</th>
@@ -995,13 +997,13 @@ function RevenueMixSection({ revenueMix }) {
             <tbody>
               {revenueMix.map((m, i) => (
                 <tr key={m.type} className="border-b border-white/5 last:border-0 hover:bg-white/[0.03] transition-colors">
-                  <td className="px-3 py-2 text-[12.5px] font-semibold text-white flex items-center gap-1.5">
+                  <td className="px-3 py-2 text-sm font-semibold text-white flex items-center gap-1.5">
                     <span className="w-2 h-2 rounded-full shrink-0" style={{ background: DONUT_COLORS[i % DONUT_COLORS.length] }} />
                     {m.type}
                   </td>
-                  <td className="px-2 py-2 text-[12px] text-slate-300 text-center mono">{m.count}</td>
-                  <td className="px-2 py-2 text-[12px] text-emerald-400 text-center mono">{money(m.revenue)}</td>
-                  <td className="px-2 py-2 text-[12px] text-slate-300 text-center mono">{m.wonRate}%</td>
+                  <td className="px-2 py-2 text-sm text-slate-300 text-center mono">{m.count}</td>
+                  <td className="px-2 py-2 text-sm text-emerald-400 text-center mono">{money(m.revenue)}</td>
+                  <td className="px-2 py-2 text-sm text-slate-300 text-center mono">{m.wonRate}%</td>
                 </tr>
               ))}
             </tbody>
@@ -1024,14 +1026,14 @@ function CohortConversionSection({ cohortConversion }) {
   if (!cohortConversion.length) return null
   return (
     <div className="card overflow-hidden">
-      <div className="px-5 py-3 border-b border-white/8 flex items-center gap-2 text-[12.5px] font-semibold text-slate-200">
+      <div className="px-5 py-3 border-b border-white/8 flex items-center gap-2 text-sm font-semibold text-slate-200">
         <Layers size={13} className="text-violet-400" /> Cohort conversion
-        <span className="ml-auto text-[11px] font-normal text-slate-500">% of each cohort's new leads won by 1/2/4 periods later</span>
+        <span className="ml-auto text-xs font-normal text-slate-500">% of each cohort's new leads won by 1/2/4 periods later</span>
       </div>
       <div className="overflow-x-auto scrollbar-thin">
         <table className="w-full text-left">
           <thead>
-            <tr className="text-[10.5px] uppercase tracking-wider text-slate-500 border-b border-white/8">
+            <tr className="text-xs uppercase tracking-wider text-slate-500 border-b border-white/8">
               <th className="px-4 py-2.5 font-semibold">Cohort</th>
               <th className="px-3 py-2.5 font-semibold text-center">Size</th>
               <th className="px-3 py-2.5 font-semibold text-center">By P+1</th>
@@ -1042,11 +1044,11 @@ function CohortConversionSection({ cohortConversion }) {
           <tbody>
             {cohortConversion.map(c => (
               <tr key={c.cohortLabel} className="border-b border-white/5 last:border-0">
-                <td className="px-4 py-2.5 text-[12.5px] font-semibold text-white">{c.cohortLabel}</td>
-                <td className="px-3 py-2.5 text-[12px] text-slate-400 text-center mono">{c.size}</td>
-                <td className="px-3 py-2.5 text-[12px] text-slate-100 text-center mono" style={{ background: heatBg(c.convertedByP1) }}>{c.convertedByP1}%</td>
-                <td className="px-3 py-2.5 text-[12px] text-slate-100 text-center mono" style={{ background: heatBg(c.convertedByP2) }}>{c.convertedByP2}%</td>
-                <td className="px-3 py-2.5 text-[12px] text-slate-100 text-center mono" style={{ background: heatBg(c.convertedByP4) }}>{c.convertedByP4}%</td>
+                <td className="px-4 py-2.5 text-sm font-semibold text-white">{c.cohortLabel}</td>
+                <td className="px-3 py-2.5 text-sm text-slate-400 text-center mono">{c.size}</td>
+                <td className="px-3 py-2.5 text-sm text-slate-100 text-center mono" style={{ background: heatBg(c.convertedByP1) }}>{c.convertedByP1}%</td>
+                <td className="px-3 py-2.5 text-sm text-slate-100 text-center mono" style={{ background: heatBg(c.convertedByP2) }}>{c.convertedByP2}%</td>
+                <td className="px-3 py-2.5 text-sm text-slate-100 text-center mono" style={{ background: heatBg(c.convertedByP4) }}>{c.convertedByP4}%</td>
               </tr>
             ))}
           </tbody>
@@ -1067,7 +1069,7 @@ function ProgressBar({ label, target, actual, attainmentPct }) {
   const width = Math.max(2, Math.min(100, attainmentPct))
   return (
     <div>
-      <div className="flex items-center justify-between text-[12px] mb-1">
+      <div className="flex items-center justify-between text-sm mb-1">
         <span className="text-slate-300 truncate">{label}</span>
         <span className="mono text-slate-400 shrink-0 ml-2">{money(actual)}/{money(target)} · <span style={{ color }}>{attainmentPct}%</span></span>
       </div>
@@ -1084,19 +1086,19 @@ function GoalTrackingSection({ goalTracking }) {
   if (!perStudio.length && !perAssociate.length) return null
   return (
     <div className="card overflow-hidden">
-      <div className="px-5 py-3 border-b border-white/8 flex items-center gap-2 text-[12.5px] font-semibold text-slate-200">
+      <div className="px-5 py-3 border-b border-white/8 flex items-center gap-2 text-sm font-semibold text-slate-200">
         <Target size={13} className="text-rose-400" /> Goal tracking
-        <span className="ml-auto text-[11px] font-normal text-slate-500">target vs actual won this period</span>
+        <span className="ml-auto text-xs font-normal text-slate-500">target vs actual won this period</span>
       </div>
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 p-4">
         <div>
-          <div className="text-[10.5px] uppercase tracking-wider font-bold text-slate-500 mb-2.5">By studio</div>
+          <div className="text-xs uppercase tracking-wider font-bold text-slate-500 mb-2.5">By studio</div>
           <div className="space-y-3">
             {perStudio.map(s => <ProgressBar key={s.locationId} label={s.name} target={s.target} actual={s.actual} attainmentPct={s.attainmentPct} />)}
           </div>
         </div>
         <div>
-          <div className="text-[10.5px] uppercase tracking-wider font-bold text-slate-500 mb-2.5">By associate</div>
+          <div className="text-xs uppercase tracking-wider font-bold text-slate-500 mb-2.5">By associate</div>
           <div className="space-y-3">
             {perAssociate.map(a => <ProgressBar key={a.associateId} label={a.name} target={a.target} actual={a.actual} attainmentPct={a.attainmentPct} />)}
           </div>

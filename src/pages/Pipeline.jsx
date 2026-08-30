@@ -89,8 +89,8 @@ export default function Pipeline() {
     <div className="h-full flex flex-col">
       <div className="px-6 pt-6 pb-2 flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h2 className="font-display font-bold text-white text-[19px] flex items-center gap-2"><KanbanSquare size={20} className="text-rose-400" /> Sales Pipeline</h2>
-          <p className="text-[12.5px] text-slate-500 mt-0.5">Drag any lead card to a column to change its {GROUP_FIELDS.find(g => g.id === groupBy)?.label.toLowerCase()}.</p>
+          <h2 className="font-display font-bold text-white text-lg flex items-center gap-2"><KanbanSquare size={20} className="text-rose-400" /> Sales Pipeline</h2>
+          <p className="text-sm text-slate-500 mt-0.5">Drag any lead card to a column to change its {GROUP_FIELDS.find(g => g.id === groupBy)?.label.toLowerCase()}.</p>
         </div>
         <div className="flex items-center gap-2">
           <span className="chip bg-white/5 border border-white/10 text-slate-300"><Users size={12} /> {total} leads</span>
@@ -108,7 +108,7 @@ export default function Pipeline() {
         </div>
         <div className="flex items-center gap-1.5 rounded-xl bg-white/5 border border-white/10 px-2 py-1.5">
           <Layers size={13} className="text-slate-500 shrink-0" />
-          <select className="input !w-auto !py-0 !text-[12px] !border-0 !bg-transparent" value={groupBy} onChange={e => setGroupBy(e.target.value)}>
+          <select className="input !w-auto !py-0 !text-sm !border-0 !bg-transparent" value={groupBy} onChange={e => setGroupBy(e.target.value)}>
             {GROUP_FIELDS.map(g => <option key={g.id} value={g.id}>Group by: {g.label}</option>)}
           </select>
         </div>
@@ -123,7 +123,7 @@ export default function Pipeline() {
         <button type="button" className={`btn ${thisMonthOnly ? 'btn-soft' : 'btn-ghost'} !py-2`} title={thisMonthOnly ? 'Showing this month only — click to show all time' : 'Showing all time — click to scope to this month'} onClick={() => setThisMonthOnly(v => !v)}>
           {thisMonthOnly ? 'This month' : 'All time'}
         </button>
-        <label className="flex items-center gap-2 text-[12px] text-slate-400 cursor-pointer select-none ml-auto">
+        <label className="flex items-center gap-2 text-sm text-slate-400 cursor-pointer select-none ml-auto">
           <input type="checkbox" checked={hideEmpty} onChange={e => setHideEmpty(e.target.checked)} className="accent-rose-500" />
           Hide empty columns
         </label>
@@ -149,13 +149,13 @@ export default function Pipeline() {
                     {groupBy === 'stage' ? (
                       <>
                         <div className={`pipeline-stage-badge ${stageClass(col.key)}`} style={stageBadgeStyle(col.key)} title={col.key}>{col.label}</div>
-                        <div className="text-[10px] text-slate-500 truncate mt-0.5">{(boot?.stageStatusGroups || {})[col.key]}</div>
+                        <div className="text-xs text-slate-500 truncate mt-0.5">{(boot?.stageStatusGroups || {})[col.key]}</div>
                       </>
                     ) : (
-                      <div className="font-display font-bold text-white text-[13.5px] truncate" title={col.label}>{col.label}</div>
+                      <div className="font-display font-bold text-white text-base truncate" title={col.label}>{col.label}</div>
                     )}
                   </div>
-                  <span className="shrink-0 chip bg-white/6 border border-white/10 text-slate-300 mono !py-0.5 !px-2 text-[11.5px] font-semibold">{count}</span>
+                  <span className="shrink-0 chip bg-white/6 border border-white/10 text-slate-300 mono !py-0.5 !px-2 text-xs font-semibold">{count}</span>
                 </div>
                 <div className="flex-1 px-2 pb-2 pt-2 space-y-2 overflow-y-auto scrollbar-thin">
                   {col.leads.map(l => (
@@ -189,30 +189,30 @@ function LeadCard({ lead, lookup, openLead, onDragStart }) {
       <div className="flex items-start gap-2 mb-2">
         <Avatar name={lead.fullName} color={owner?.color} size={30} />
         <div className="flex-1 min-w-0">
-          <div className="text-[13px] font-semibold text-white truncate">{lead.fullName}</div>
-          <div className="text-[11px] text-slate-500 truncate">{lead.phone || lead.email}</div>
+          <div className="text-base font-semibold text-white truncate">{lead.fullName}</div>
+          <div className="text-xs text-slate-500 truncate">{lead.phone || lead.email}</div>
         </div>
         <ScorePill score={lead.ai.score} />
       </div>
 
       <div className="flex flex-wrap items-center gap-1.5">
-        <span className="chip bg-white/5 border border-white/10 text-slate-400 !py-0.5 !px-2 text-[10px]">{lead.sourceName}</span>
-        <span className={`chip !py-0.5 !px-2 text-[10px] ${riskClass(lead.ai.risk)}`}>{lead.ai.risk}</span>
-        {lead.classType && <span className="chip bg-white/5 border border-white/10 text-slate-400 !py-0.5 !px-2 text-[10px]">{lead.classType}</span>}
+        <span className="chip bg-white/5 border border-white/10 text-slate-400 !py-0.5 !px-2 text-xs">{lead.sourceName}</span>
+        <span className={`chip !py-0.5 !px-2 text-xs ${riskClass(lead.ai.risk)}`}>{lead.ai.risk}</span>
+        {lead.classType && <span className="chip bg-white/5 border border-white/10 text-slate-400 !py-0.5 !px-2 text-xs">{lead.classType}</span>}
       </div>
 
       <div className="flex items-center justify-between mt-2.5 pt-2 border-t border-white/6">
-        <span className="flex items-center gap-1.5 text-[11px] text-slate-500">
+        <span className="flex items-center gap-1.5 text-xs text-slate-500">
           <GripVertical size={12} className="text-slate-600" />
           {owner ? owner.name : 'Unassigned'}
         </span>
         {nextFu ? (
-          <span className={`flex items-center gap-1 text-[11px] font-semibold ${overdue ? 'text-rose-400' : 'text-slate-400'}`}>
+          <span className={`flex items-center gap-1 text-xs font-semibold ${overdue ? 'text-rose-400' : 'text-slate-400'}`}>
             <Clock size={11} />
             {overdue ? `${-dueIn}d overdue` : dueIn === 0 ? 'today' : fmtDate(nextFu.date)}
           </span>
         ) : (
-          <span className="text-[11px] text-slate-600">—</span>
+          <span className="text-xs text-slate-600">—</span>
         )}
       </div>
     </div>

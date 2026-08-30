@@ -609,8 +609,8 @@ export default function SettingsPage({ jumpTo }) {
     <div className={`p-6 settings-page ${['integrations', 'teams'].includes(tab) ? 'settings-integrations-page' : 'max-w-[980px]'}`}>
       <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
         <div>
-          <h2 className="font-display font-bold text-white text-[18px]">Settings</h2>
-          <p className="text-[12.5px] text-slate-500 mt-0.5">Tweak and edit every configuration for your studio network</p>
+          <h2 className="font-display font-bold text-white text-lg">Settings</h2>
+          <p className="text-sm text-slate-500 mt-0.5">Tweak and edit every configuration for your studio network</p>
         </div>
         {tab !== 'integrations' && <button className="btn btn-primary" onClick={() => saveSettings()}><Save size={14} /> Save all settings</button>}
       </div>
@@ -620,7 +620,7 @@ export default function SettingsPage({ jumpTo }) {
           const Icon = t.icon
           return (
             <button key={t.id} onClick={() => setTab(t.id)}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12.5px] font-semibold transition-colors ${tab === t.id ? 'bg-rose-500/20 text-white border border-rose-400/25' : 'text-slate-400 hover:text-white hover:bg-white/5 border border-transparent'}`}>
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-semibold transition-colors ${tab === t.id ? 'bg-rose-500/20 text-white border border-rose-400/25' : 'text-slate-400 hover:text-white hover:bg-white/5 border border-transparent'}`}>
               <Icon size={13} /> {t.label}
             </button>
           )
@@ -673,7 +673,7 @@ export default function SettingsPage({ jumpTo }) {
                 <ThemeCard active={theme === 'light'} onClick={() => setTheme('light')} title="Light" sub="Glossy white" swatch="linear-gradient(135deg,#ffffff,#eef1f8)" />
               </div>
               <div className="mt-4">
-                <label className="text-[10.5px] uppercase tracking-wider text-slate-500 font-semibold mb-1 block">Accent color</label>
+                <label className="text-xs uppercase tracking-wider text-slate-500 font-semibold mb-1 block">Accent color</label>
                 <div className="flex gap-2">
                   {ACCENTS.map(a => (
                     <button key={a.id} onClick={() => { setAccent(a.id); setUi({ ...ui, accent: a.id }) }}
@@ -735,7 +735,7 @@ export default function SettingsPage({ jumpTo }) {
                     </button>
                   </div>
                 ))}
-                <button className="btn btn-ghost !py-1.5 !text-[12px]" onClick={() => setLocations(ls => [...ls, { id: `loc_${Date.now()}`, name: 'New Studio', city: 'Mumbai', country: 'India', active: true, timeZone: 'Asia/Kolkata', accent: 'rose', address: '', fullAddress: '' }])}><Plus size={13} /> Add location</button>
+                <button className="btn btn-ghost !py-1.5 !text-sm" onClick={() => setLocations(ls => [...ls, { id: `loc_${Date.now()}`, name: 'New Studio', city: 'Mumbai', country: 'India', active: true, timeZone: 'Asia/Kolkata', accent: 'rose', address: '', fullAddress: '' }])}><Plus size={13} /> Add location</button>
               </div>
             </Section>
             <Section icon={<Users size={15} className="text-emerald-400" />} title="Associates" desc="Assign studio coverage and define monthly revenue and conversion targets.">
@@ -760,7 +760,7 @@ export default function SettingsPage({ jumpTo }) {
                     </div>
                   </div>
                 ))}
-                <button className="btn btn-ghost !py-1.5 !text-[12px]" onClick={() => setAssociates(as => [...as, { id: `asn_${Date.now()}`, name: 'New Associate', role: 'Sales Associate', email: '', color: '#f43f5e', locationId: locations[0]?.id, locationIds: locations[0]?.id ? [locations[0].id] : [], active: true, revenueTargetMonthly: 0, conversionTargetPct: 0 }])}><Plus size={13} /> Add associate</button>
+                <button className="btn btn-ghost !py-1.5 !text-sm" onClick={() => setAssociates(as => [...as, { id: `asn_${Date.now()}`, name: 'New Associate', role: 'Sales Associate', email: '', color: '#f43f5e', locationId: locations[0]?.id, locationIds: locations[0]?.id ? [locations[0].id] : [], active: true, revenueTargetMonthly: 0, conversionTargetPct: 0 }])}><Plus size={13} /> Add associate</button>
               </div>
             </Section>
             <button className="btn btn-primary" onClick={saveTeams}><Save size={14} /> Save teams</button>
@@ -792,11 +792,11 @@ export default function SettingsPage({ jumpTo }) {
                 <ToggleMini label="Follow-up message suggestions" value={aiSet.suggestions !== false} onChange={v => setAiSet({ ...aiSet, suggestions: v })} />
                 <ToggleMini label="Risk classification (hot/warm/cold)" value={aiSet.riskDetection !== false} onChange={v => setAiSet({ ...aiSet, riskDetection: v })} />
               </div>
-              <p className="text-[11.5px] text-slate-500 mt-3 flex items-center gap-1.5"><Sparkles size={11} /> Insights and suggested messages are generated from conversation history, stage, source and engagement — no external API key required.</p>
+              <p className="text-xs text-slate-500 mt-3 flex items-center gap-1.5"><Sparkles size={11} /> Insights and suggested messages are generated from conversation history, stage, source and engagement — no external API key required.</p>
             </Section>
             <Section icon={<Mail size={15} className="text-cyan-400" />} title="Email reminders" desc="Off by default. When on, sends a daily digest to each associate for their own open, non-imported leads only — never a blanket copy to support, never for CSV-imported leads.">
               <Toggle on={rem.emailReminders === true} onChange={v => setRem({ ...rem, emailReminders: v })} title="Enable email reminders" desc="Also requires 'Enable outbound email' under Integrations → Mailtrap.">
-                <p className="text-[11.5px] text-slate-500">Covers only leads created directly in the app (Add Lead) — leads brought in via CSV import are always excluded.</p>
+                <p className="text-xs text-slate-500">Covers only leads created directly in the app (Add Lead) — leads brought in via CSV import are always excluded.</p>
               </Toggle>
             </Section>
             <Section id="settings-round-robin" icon={<Zap size={15} className="text-amber-400" />} title="Round-robin assignment" desc="Automatically assign incoming leads.">
@@ -806,21 +806,21 @@ export default function SettingsPage({ jumpTo }) {
                     <option value="fair">Fair rotation (cycle in order)</option>
                     <option value="load-balanced">Load balanced (fewest open leads)</option>
                   </select>
-                  <label className="flex items-center gap-2 text-[12px] text-slate-300"><input type="checkbox" className="accent-rose-500" checked={rr.autoAssignOnImport !== false} onChange={e => setRr({ ...rr, autoAssignOnImport: e.target.checked })} /> Auto-assign on CSV import</label>
+                  <label className="flex items-center gap-2 text-sm text-slate-300"><input type="checkbox" className="accent-rose-500" checked={rr.autoAssignOnImport !== false} onChange={e => setRr({ ...rr, autoAssignOnImport: e.target.checked })} /> Auto-assign on CSV import</label>
                 </div>
               </Toggle>
               <Toggle on={zohoConfig?.enabled === true} onChange={toggleZohoShiftAware} title="Shift-aware assignment (Zoho People)" desc="Only rotate leads to associates who are actually on a working shift today — checked against Zoho People's attendance/shift data. Falls back to the full roster if Zoho is unreachable or nobody in a studio's roster matches an on-duty email.">
-                {!zohoConfig?.clientId && <p className="text-[11.5px] text-amber-400">Add USER_ZOHO_PEOPLE_CLIENT_ID/SECRET/REFRESH_TOKEN in .env first (see Integrations tab).</p>}
+                {!zohoConfig?.clientId && <p className="text-xs text-amber-400">Add USER_ZOHO_PEOPLE_CLIENT_ID/SECRET/REFRESH_TOKEN in .env first (see Integrations tab).</p>}
                 {zohoConfig?.enabled && (
                   <div className="flex items-center gap-3 flex-wrap">
                     <button className="btn btn-soft !py-1.5" onClick={refreshZohoShifts} disabled={zohoRefreshing}>{zohoRefreshing ? <Spinner size={13} /> : <RefreshCcw size={13} />} Refresh shifts now</button>
-                    {zohoConfig.onDuty?.date && <span className="text-[11.5px] text-slate-400">{zohoConfig.onDuty.emails?.length || 0} on shift today ({zohoConfig.onDuty.date})</span>}
-                    {zohoConfig.lastFetchError && <span className="text-[11.5px] text-rose-400">Last fetch failed: {zohoConfig.lastFetchError}</span>}
+                    {zohoConfig.onDuty?.date && <span className="text-xs text-slate-400">{zohoConfig.onDuty.emails?.length || 0} on shift today ({zohoConfig.onDuty.date})</span>}
+                    {zohoConfig.lastFetchError && <span className="text-xs text-rose-400">Last fetch failed: {zohoConfig.lastFetchError}</span>}
                   </div>
                 )}
               </Toggle>
               <Toggle on={rem.followUpEnabled !== false} onChange={v => setRem({ ...rem, followUpEnabled: v })} title="Legacy reminder toggles" desc="Backward-compatible reminder switches.">
-                <label className="flex items-center gap-2 text-[12px] text-slate-300"><input type="checkbox" className="accent-rose-500" checked={rem.leadAgeEnabled !== false} onChange={e => setRem({ ...rem, leadAgeEnabled: e.target.checked })} /> Alert on cold leads with no follow-ups</label>
+                <label className="flex items-center gap-2 text-sm text-slate-300"><input type="checkbox" className="accent-rose-500" checked={rem.leadAgeEnabled !== false} onChange={e => setRem({ ...rem, leadAgeEnabled: e.target.checked })} /> Alert on cold leads with no follow-ups</label>
               </Toggle>
             </Section>
             <button className="btn btn-primary" onClick={() => saveSettings()}><Save size={14} /> Save alert & AI settings</button>
@@ -872,15 +872,15 @@ export default function SettingsPage({ jumpTo }) {
               <div className="flex items-center gap-3 mt-4">
                 <button className="btn btn-primary" onClick={saveMomence}>Save credentials</button>
                 <button className="btn btn-ghost" onClick={testMomence} disabled={testing}>{testing ? <Spinner size={14} /> : <TestTube2 size={14} />} Test connection</button>
-                <a className="btn btn-ghost !py-2 text-[12px]" href="https://api.docs.momence.com/reference/apiv2authcontroller_token" target="_blank" rel="noreferrer">API reference <ExternalLink size={12} /></a>
+                <a className="btn btn-ghost !py-2 text-sm" href="https://api.docs.momence.com/reference/apiv2authcontroller_token" target="_blank" rel="noreferrer">API reference <ExternalLink size={12} /></a>
               </div>
               {testResult && (
-                <p className={`mt-3 text-[12.5px] flex items-center gap-1.5 ${testResult.ok ? 'text-emerald-400' : 'text-rose-400'}`}>
+                <p className={`mt-3 text-sm flex items-center gap-1.5 ${testResult.ok ? 'text-emerald-400' : 'text-rose-400'}`}>
                   {testResult.ok ? '✓' : '✕'} {testResult.text}
                 </p>
               )}
               {!configured && (
-                <p className="mt-3 text-[11.5px] text-slate-500">Credentials stay on this server and are only used to call the Momence API (OAuth2 password grant).</p>
+                <p className="mt-3 text-xs text-slate-500">Credentials stay on this server and are only used to call the Momence API (OAuth2 password grant).</p>
               )}
             </Section>
             )}
@@ -893,13 +893,13 @@ export default function SettingsPage({ jumpTo }) {
                   : <span className="chip bg-amber-500/10 text-amber-300 border border-amber-400/20">Server configuration required</span>}
               </div>
               <div className="card p-4 bg-white/[0.02] border-white/6 space-y-3">
-                <div><div className="font-semibold text-white text-[13px]">Server credentials</div><p className="text-[11.5px] text-slate-500 mt-1">Set <code>STRIPE_SECRET_KEY</code> and <code>STRIPE_WEBHOOK_SECRET</code> on the API server. Keys are never stored in the browser or returned by the API.</p></div>
-                <div><label className="label">Webhook endpoint</label><code className="input block !py-2 !text-[11.5px] overflow-x-auto whitespace-nowrap">/api/stripe/webhook</code><p className="text-[11px] text-slate-500 mt-1">Register this path on the public API domain for <code>checkout.session.completed</code>, <code>checkout.session.async_payment_succeeded</code>, and <code>checkout.session.expired</code>.</p></div>
+                <div><div className="font-semibold text-white text-base">Server credentials</div><p className="text-xs text-slate-500 mt-1">Set <code>STRIPE_SECRET_KEY</code> and <code>STRIPE_WEBHOOK_SECRET</code> on the API server. Keys are never stored in the browser or returned by the API.</p></div>
+                <div><label className="label">Webhook endpoint</label><code className="input block !py-2 !text-xs overflow-x-auto whitespace-nowrap">/api/stripe/webhook</code><p className="text-xs text-slate-500 mt-1">Register this path on the public API domain for <code>checkout.session.completed</code>, <code>checkout.session.async_payment_succeeded</code>, and <code>checkout.session.expired</code>.</p></div>
               </div>
               <div className="mt-4 grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <div className="card p-4"><div className="text-[11px] uppercase tracking-wider text-slate-500">Products</div><div className="text-[12px] text-slate-300 mt-1">Loaded live from active Stripe Prices.</div></div>
-                <div className="card p-4"><div className="text-[11px] uppercase tracking-wider text-slate-500">Checkout</div><div className="text-[12px] text-slate-300 mt-1">Supports product carts and custom INR links.</div></div>
-                <div className="card p-4"><div className="text-[11px] uppercase tracking-wider text-slate-500">Tracking</div><div className="text-[12px] text-slate-300 mt-1">Webhook updates plus manual status refresh.</div></div>
+                <div className="card p-4"><div className="text-xs uppercase tracking-wider text-slate-500">Products</div><div className="text-sm text-slate-300 mt-1">Loaded live from active Stripe Prices.</div></div>
+                <div className="card p-4"><div className="text-xs uppercase tracking-wider text-slate-500">Checkout</div><div className="text-sm text-slate-300 mt-1">Supports product carts and custom INR links.</div></div>
+                <div className="card p-4"><div className="text-xs uppercase tracking-wider text-slate-500">Tracking</div><div className="text-sm text-slate-300 mt-1">Webhook updates plus manual status refresh.</div></div>
               </div>
             </Section>
             )}
@@ -921,12 +921,12 @@ export default function SettingsPage({ jumpTo }) {
                 <button className="btn btn-ghost" onClick={testGptFn} disabled={testGpt}>{testGpt ? <Spinner size={14} /> : <TestTube2 size={14} />} Test enrichment</button>
               </div>
               {testGptResult && (
-                <p className={`mt-3 text-[12.5px] flex items-center gap-1.5 ${testGptResult.ok ? 'text-emerald-400' : 'text-rose-400'}`}>
+                <p className={`mt-3 text-sm flex items-center gap-1.5 ${testGptResult.ok ? 'text-emerald-400' : 'text-rose-400'}`}>
                   {testGptResult.ok ? '✓' : '✕'} {testGptResult.text}
                 </p>
               )}
               {!gptStatus?.configured && (
-                <p className="mt-3 text-[11.5px] text-slate-500">Keys can also be set via the USER_OPENAI_API_KEY environment variable, which always wins over this setting.</p>
+                <p className="mt-3 text-xs text-slate-500">Keys can also be set via the USER_OPENAI_API_KEY environment variable, which always wins over this setting.</p>
               )}
             </Section>
             )}
@@ -941,10 +941,10 @@ export default function SettingsPage({ jumpTo }) {
 
               {respStatus?.inboundWebhookUrl && (
                 <div className="mt-4 rounded-xl bg-white/[0.03] border border-white/6 px-4 py-3">
-                  <div className="text-[12.5px] font-semibold text-white">Receive replies live</div>
-                  <div className="text-[11px] text-slate-500 mt-0.5 mb-2">Without this, a lead's reply only shows up once someone reopens that lead. In Respond.io, add a Workflow (trigger: <em>Message Received</em>) with a <em>Webhook</em> action pointed at this URL — the payload contents don't matter, arrival alone tells every open tab to refresh.</div>
+                  <div className="text-sm font-semibold text-white">Receive replies live</div>
+                  <div className="text-xs text-slate-500 mt-0.5 mb-2">Without this, a lead's reply only shows up once someone reopens that lead. In Respond.io, add a Workflow (trigger: <em>Message Received</em>) with a <em>Webhook</em> action pointed at this URL — the payload contents don't matter, arrival alone tells every open tab to refresh.</div>
                   <div className="flex items-center gap-2">
-                    <code className="input !py-1.5 flex-1 !text-[11.5px] overflow-x-auto whitespace-nowrap">{respStatus.inboundWebhookUrl}</code>
+                    <code className="input !py-1.5 flex-1 !text-xs overflow-x-auto whitespace-nowrap">{respStatus.inboundWebhookUrl}</code>
                     <button className="btn btn-ghost !py-1.5" onClick={() => navigator.clipboard?.writeText(respStatus.inboundWebhookUrl).then(() => toast('URL copied')).catch(() => toast('Could not copy — copy manually', 'error'))}><Copy size={13} /> Copy</button>
                   </div>
                 </div>
@@ -954,22 +954,22 @@ export default function SettingsPage({ jumpTo }) {
                 <div className="mt-4 rounded-xl bg-white/[0.03] border border-white/6 px-4 py-3">
                   <div className="flex items-center justify-between gap-3">
                     <div>
-                      <div className="text-[12.5px] font-semibold text-white">Sync past conversations</div>
-                      <div className="text-[11px] text-slate-500 mt-0.5">Links every lead to its existing Respond.io contact up front (by email/phone), so full conversation history is ready the first time you open a lead — not just for messages sent after today.</div>
+                      <div className="text-sm font-semibold text-white">Sync past conversations</div>
+                      <div className="text-xs text-slate-500 mt-0.5">Links every lead to its existing Respond.io contact up front (by email/phone), so full conversation history is ready the first time you open a lead — not just for messages sent after today.</div>
                     </div>
-                    <button className="btn btn-soft !py-1.5 !text-[12px] shrink-0" onClick={syncAllRespondioContacts} disabled={syncingContacts}>
+                    <button className="btn btn-soft !py-1.5 !text-sm shrink-0" onClick={syncAllRespondioContacts} disabled={syncingContacts}>
                       {syncingContacts ? <Spinner size={13} /> : <RefreshCcw size={13} />} Sync now
                     </button>
                   </div>
-                  {syncContactsResult && <p className="mt-2 text-[11.5px] text-emerald-400">✓ Linked {syncContactsResult.linked} of {syncContactsResult.checked} checked ({syncContactsResult.alreadyLinked} were already linked)</p>}
+                  {syncContactsResult && <p className="mt-2 text-xs text-emerald-400">✓ Linked {syncContactsResult.linked} of {syncContactsResult.checked} checked ({syncContactsResult.alreadyLinked} were already linked)</p>}
                 </div>
               )}
 
               <div className="mt-4 card p-4 bg-white/[0.02] border-white/6">
                 <div className="flex items-center justify-between gap-3 mb-1">
                   <div>
-                    <div className="font-semibold text-white text-[13px]">Snippets sync (Saved Replies)</div>
-                    <div className="text-[11.5px] text-slate-500 mt-0.5">
+                    <div className="font-semibold text-white text-base">Snippets sync (Saved Replies)</div>
+                    <div className="text-xs text-slate-500 mt-0.5">
                       Respond.io has no public API for canned responses — this uses their internal web-app session instead, so it's unsupported and the token expires periodically. When it does, open respond.io in your browser, go to Settings &gt; Snippets, open DevTools &gt; Network, reload, and copy the <code>authorization</code>/<code>cookie</code> headers from any <code>snippet/list</code> request.
                     </div>
                   </div>
@@ -986,10 +986,10 @@ export default function SettingsPage({ jumpTo }) {
               <div className="mt-4 card p-4 bg-white/[0.02] border-white/6">
                 <div className="flex items-center justify-between gap-3 mb-3">
                   <div>
-                    <div className="font-semibold text-white text-[13px]">Approved WABA templates</div>
-                    <div className="text-[11.5px] text-slate-500">Linked WABA templates used automatically for first WhatsApp messages and available from the leads table.</div>
+                    <div className="font-semibold text-white text-base">Approved WABA templates</div>
+                    <div className="text-xs text-slate-500">Linked WABA templates used automatically for first WhatsApp messages and available from the leads table.</div>
                   </div>
-                  <button className="btn btn-ghost !py-1.5 !text-[12px]" onClick={() => setWabaTemplates(t => [...t, { id: `tpl_${Date.now().toString(36)}`, label: 'New template', name: '', language: 'en', namespace: '', parameters: [''] }])}>
+                  <button className="btn btn-ghost !py-1.5 !text-sm" onClick={() => setWabaTemplates(t => [...t, { id: `tpl_${Date.now().toString(36)}`, label: 'New template', name: '', language: 'en', namespace: '', parameters: [''] }])}>
                     <Plus size={13} /> Add template
                   </button>
                 </div>
@@ -997,23 +997,23 @@ export default function SettingsPage({ jumpTo }) {
                   {wabaTemplates.map((t, idx) => (
                     <div key={t.id || idx} className="rounded-xl border border-white/8 bg-white/[0.02] p-3 space-y-2">
                       <div className="grid grid-cols-2 gap-2">
-                        <input className="input !py-1.5 !text-[12px]" placeholder="Display label" value={t.label || ''} onChange={e => setWabaTemplates(arr => arr.map((x, i) => i === idx ? { ...x, label: e.target.value } : x))} />
-                        <input className="input !py-1.5 !text-[12px]" placeholder="Template name" value={t.name || ''} onChange={e => setWabaTemplates(arr => arr.map((x, i) => i === idx ? { ...x, name: e.target.value } : x))} />
+                        <input className="input !py-1.5 !text-sm" placeholder="Display label" value={t.label || ''} onChange={e => setWabaTemplates(arr => arr.map((x, i) => i === idx ? { ...x, label: e.target.value } : x))} />
+                        <input className="input !py-1.5 !text-sm" placeholder="Template name" value={t.name || ''} onChange={e => setWabaTemplates(arr => arr.map((x, i) => i === idx ? { ...x, name: e.target.value } : x))} />
                       </div>
                       <div className="grid grid-cols-2 gap-2">
-                        <input className="input !py-1.5 !text-[12px]" placeholder="Language code (en, en_US)" value={t.language || 'en'} onChange={e => setWabaTemplates(arr => arr.map((x, i) => i === idx ? { ...x, language: e.target.value } : x))} />
-                        <select className="input !py-1.5 !text-[12px]" value={t.category || 'marketing'} onChange={e => setWabaTemplates(arr => arr.map((x, i) => i === idx ? { ...x, category: e.target.value } : x))}>
+                        <input className="input !py-1.5 !text-sm" placeholder="Language code (en, en_US)" value={t.language || 'en'} onChange={e => setWabaTemplates(arr => arr.map((x, i) => i === idx ? { ...x, language: e.target.value } : x))} />
+                        <select className="input !py-1.5 !text-sm" value={t.category || 'marketing'} onChange={e => setWabaTemplates(arr => arr.map((x, i) => i === idx ? { ...x, category: e.target.value } : x))}>
                           <option value="marketing">marketing</option>
                           <option value="utility">utility</option>
                           <option value="authentication">authentication</option>
                         </select>
                       </div>
                       <div>
-                        <div className="text-[10.5px] uppercase tracking-wider text-slate-500 font-semibold mb-1">Parameters</div>
-                        <input className="input !py-1.5 !text-[12px]" placeholder="Comma-separated parameter labels" value={(t.parameters || []).join(', ')} onChange={e => setWabaTemplates(arr => arr.map((x, i) => i === idx ? { ...x, parameters: e.target.value.split(',').map(s => s.trim()).filter(Boolean) } : x))} />
+                        <div className="text-xs uppercase tracking-wider text-slate-500 font-semibold mb-1">Parameters</div>
+                        <input className="input !py-1.5 !text-sm" placeholder="Comma-separated parameter labels" value={(t.parameters || []).join(', ')} onChange={e => setWabaTemplates(arr => arr.map((x, i) => i === idx ? { ...x, parameters: e.target.value.split(',').map(s => s.trim()).filter(Boolean) } : x))} />
                       </div>
                       <div className="flex justify-end">
-                        <button className="btn btn-ghost !py-1.5 !text-[12px] text-rose-300" onClick={() => setWabaTemplates(arr => arr.filter((_, i) => i !== idx))}>
+                        <button className="btn btn-ghost !py-1.5 !text-sm text-rose-300" onClick={() => setWabaTemplates(arr => arr.filter((_, i) => i !== idx))}>
                           <X size={13} /> Remove
                         </button>
                       </div>
@@ -1026,12 +1026,12 @@ export default function SettingsPage({ jumpTo }) {
                 <button className="btn btn-ghost" onClick={testRespFn} disabled={testResp}>{testResp ? <Spinner size={14} /> : <TestTube2 size={14} />} Test connection</button>
               </div>
               {testRespResult && (
-                <p className={`mt-3 text-[12.5px] flex items-center gap-1.5 ${testRespResult.ok ? 'text-emerald-400' : 'text-rose-400'}`}>
+                <p className={`mt-3 text-sm flex items-center gap-1.5 ${testRespResult.ok ? 'text-emerald-400' : 'text-rose-400'}`}>
                   {testRespResult.ok ? '✓' : '✕'} {testRespResult.text}
                 </p>
               )}
               {!respStatus?.configured && (
-                <p className="mt-3 text-[11.5px] text-slate-500">Keys can also be set via the USER_RESPONDIO_API_KEY environment variable, which always wins over this setting.</p>
+                <p className="mt-3 text-xs text-slate-500">Keys can also be set via the USER_RESPONDIO_API_KEY environment variable, which always wins over this setting.</p>
               )}
             </Section>
             )}
@@ -1062,24 +1062,24 @@ export default function SettingsPage({ jumpTo }) {
                 </div>
               </div>
               {testMailResult && (
-                <p className={`mt-3 text-[12.5px] flex items-center gap-1.5 ${testMailResult.ok ? 'text-emerald-400' : 'text-rose-400'}`}>
+                <p className={`mt-3 text-sm flex items-center gap-1.5 ${testMailResult.ok ? 'text-emerald-400' : 'text-rose-400'}`}>
                   {testMailResult.ok ? '✓' : '✕'} {testMailResult.text}
                 </p>
               )}
               <div className="mt-4 rounded-xl bg-white/[0.03] border border-white/6 px-4 py-3 flex flex-wrap items-center gap-3">
                 <div className="flex-1 min-w-[220px]">
-                  <div className="text-[12.5px] font-semibold text-white">Follow-up digest</div>
-                  <div className="text-[11px] text-slate-500">Daily email to each associate listing only their own follow-ups due in the next 3 days or overdue — never for CSV-imported leads. Requires "Enable outbound email" and "Enable email reminders" (below) to be on.</div>
+                  <div className="text-sm font-semibold text-white">Follow-up digest</div>
+                  <div className="text-xs text-slate-500">Daily email to each associate listing only their own follow-ups due in the next 3 days or overdue — never for CSV-imported leads. Requires "Enable outbound email" and "Enable email reminders" (below) to be on.</div>
                 </div>
-                <button className="btn btn-soft !py-1.5 !text-[12px]" onClick={sendDigest} disabled={mailDigest}>{mailDigest ? <Spinner size={13} /> : <Send size={13} />} Send digest now</button>
+                <button className="btn btn-soft !py-1.5 !text-sm" onClick={sendDigest} disabled={mailDigest}>{mailDigest ? <Spinner size={13} /> : <Send size={13} />} Send digest now</button>
               </div>
               {mailDigestResult && (
-                <p className={`mt-2 text-[12.5px] flex items-center gap-1.5 ${mailDigestResult.ok ? 'text-emerald-400' : 'text-rose-400'}`}>
+                <p className={`mt-2 text-sm flex items-center gap-1.5 ${mailDigestResult.ok ? 'text-emerald-400' : 'text-rose-400'}`}>
                   {mailDigestResult.ok ? '✓' : '✕'} {mailDigestResult.text}
                 </p>
               )}
               {!mailStatus?.configured && (
-                <p className="mt-3 text-[11.5px] text-slate-500">Keys can also be set via the USER_MAILTRAP_HOST / USER_MAILTRAP_USER / USER_MAILTRAP_PASS environment variables, which always win over these settings.</p>
+                <p className="mt-3 text-xs text-slate-500">Keys can also be set via the USER_MAILTRAP_HOST / USER_MAILTRAP_USER / USER_MAILTRAP_PASS environment variables, which always win over these settings.</p>
               )}
             </Section>
             )}
@@ -1109,7 +1109,7 @@ export default function SettingsPage({ jumpTo }) {
                     fieldRef={webhookFieldRef}
                   />
                 ))}
-                {!webhooks.length && <p className="text-[11.5px] text-slate-500">No webhook integrations yet — create one above to get a URL you can paste into any form tool.</p>}
+                {!webhooks.length && <p className="text-xs text-slate-500">No webhook integrations yet — create one above to get a URL you can paste into any form tool.</p>}
               </div>
             </Section>
             )}
@@ -1120,9 +1120,9 @@ export default function SettingsPage({ jumpTo }) {
                 <div className="flex items-center gap-2.5">
                   <span className={`w-2 h-2 rounded-full shrink-0 ${sheetsConfig?.connected ? 'bg-emerald-400' : 'bg-slate-600'}`} />
                   {sheetsConfig?.connected ? (
-                    <span className="text-[12.5px] text-slate-200">Connected as <span className="font-medium text-white">{sheetsConfig.connectedEmail}</span></span>
+                    <span className="text-sm text-slate-200">Connected as <span className="font-medium text-white">{sheetsConfig.connectedEmail}</span></span>
                   ) : (
-                    <span className="text-[12.5px] text-slate-500">Not connected</span>
+                    <span className="text-sm text-slate-500">Not connected</span>
                   )}
                 </div>
                 {sheetsConfig?.connected ? (
@@ -1134,14 +1134,14 @@ export default function SettingsPage({ jumpTo }) {
 
               <div className="mt-4 rounded-xl border border-white/6 p-4">
                 <div className="flex items-center gap-2 mb-3">
-                  <span className="w-5 h-5 rounded-full bg-white/10 text-[10px] font-semibold text-slate-300 flex items-center justify-center shrink-0">1</span>
-                  <h4 className="text-[12.5px] font-semibold text-slate-200">OAuth client</h4>
+                  <span className="w-5 h-5 rounded-full bg-white/10 text-xs font-semibold text-slate-300 flex items-center justify-center shrink-0">1</span>
+                  <h4 className="text-sm font-semibold text-slate-200">OAuth client</h4>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div><label className="label">Google Cloud OAuth Client ID</label><input className="input" value={sheetsClientId} onChange={e => setSheetsClientId(e.target.value)} placeholder="….apps.googleusercontent.com" /></div>
                   <div><label className="label">Client secret</label><input className="input" type="password" value={sheetsClientSecret} onChange={e => setSheetsClientSecret(e.target.value)} placeholder={sheetsConfig?.hasClientSecret ? '•••••••• (stored)' : 'GOCSPX-…'} /></div>
                 </div>
-                <p className="text-[11px] text-slate-500 mt-2">Create an OAuth client in Google Cloud Console (APIs & Services → Credentials), then add this redirect URI: <code className="text-slate-300 bg-black/20 rounded px-1 py-0.5">{window.location.origin}/api/google-sheets/oauth/callback</code></p>
+                <p className="text-xs text-slate-500 mt-2">Create an OAuth client in Google Cloud Console (APIs & Services → Credentials), then add this redirect URI: <code className="text-slate-300 bg-black/20 rounded px-1 py-0.5">{window.location.origin}/api/google-sheets/oauth/callback</code></p>
                 <div className="flex items-center gap-3 mt-3">
                   <button className="btn btn-primary" onClick={saveSheetsCredentials}>Save OAuth client</button>
                   {sheetsConfig?.connected ? (
@@ -1156,8 +1156,8 @@ export default function SettingsPage({ jumpTo }) {
                 <>
                   <div className="mt-3 rounded-xl border border-white/6 p-4">
                     <div className="flex items-center gap-2 mb-3">
-                      <span className="w-5 h-5 rounded-full bg-white/10 text-[10px] font-semibold text-slate-300 flex items-center justify-center shrink-0">2</span>
-                      <h4 className="text-[12.5px] font-semibold text-slate-200">Sheet to sync</h4>
+                      <span className="w-5 h-5 rounded-full bg-white/10 text-xs font-semibold text-slate-300 flex items-center justify-center shrink-0">2</span>
+                      <h4 className="text-sm font-semibold text-slate-200">Sheet to sync</h4>
                     </div>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       <div><label className="label">Sheet ID</label><input className="input" value={sheetsSheetId} onChange={e => setSheetsSheetId(e.target.value)} placeholder="from the sheet's URL between /d/ and /edit" /></div>
@@ -1166,12 +1166,12 @@ export default function SettingsPage({ jumpTo }) {
                     <div className="flex items-center gap-3 mt-3 flex-wrap">
                       <button className="btn btn-primary" onClick={saveSheetTarget}>Save sheet</button>
                       <button className="btn btn-soft" onClick={() => syncSheetNow(false)} disabled={sheetsSyncing || !sheetsConfig?.sheetId}>{sheetsSyncing ? <Spinner size={14} /> : <RefreshCcw size={13} />} Sync now</button>
-                      <button className="btn btn-ghost !text-[12px]" onClick={() => syncSheetNow(true)} disabled={sheetsSyncing || !sheetsConfig?.sheetId} title="Ignore the sheet's already-imported markers and re-pull every row">Force full resync</button>
+                      <button className="btn btn-ghost !text-sm" onClick={() => syncSheetNow(true)} disabled={sheetsSyncing || !sheetsConfig?.sheetId} title="Ignore the sheet's already-imported markers and re-pull every row">Force full resync</button>
                       <button className="btn btn-ghost !py-2" onClick={toggleSheetsLogs}><ScrollText size={14} /> {sheetsLogsOpen ? 'Hide log' : 'View sync log'}</button>
                     </div>
 
                     {sheetsSyncResult && (
-                      <div className={`mt-3 rounded-lg px-3 py-2.5 border text-[12.5px] ${sheetsSyncResult.ok ? 'bg-emerald-500/10 border-emerald-400/20 text-emerald-300' : 'bg-rose-500/10 border-rose-400/20 text-rose-300'}`}>
+                      <div className={`mt-3 rounded-lg px-3 py-2.5 border text-sm ${sheetsSyncResult.ok ? 'bg-emerald-500/10 border-emerald-400/20 text-emerald-300' : 'bg-rose-500/10 border-rose-400/20 text-rose-300'}`}>
                         {sheetsSyncResult.ok ? (
                           <>
                             <span className="font-medium">✓ Synced</span> — {sheetsSyncResult.created} created · {sheetsSyncResult.updated || 0} updated · {sheetsSyncResult.duplicates} duplicate · {sheetsSyncResult.skipped} skipped
@@ -1181,17 +1181,17 @@ export default function SettingsPage({ jumpTo }) {
                       </div>
                     )}
                     {sheetsConfig?.lastSyncAt && (
-                      <p className="mt-2 text-[11px] text-slate-500">Last synced {new Date(sheetsConfig.lastSyncAt).toLocaleString()}
+                      <p className="mt-2 text-xs text-slate-500">Last synced {new Date(sheetsConfig.lastSyncAt).toLocaleString()}
                         {sheetsConfig.lastSyncCounts && ` — ${sheetsConfig.lastSyncCounts.created} created, ${sheetsConfig.lastSyncCounts.updated || 0} updated, ${sheetsConfig.lastSyncCounts.duplicates} duplicate, ${sheetsConfig.lastSyncCounts.skipped} skipped`}. Also syncs automatically every 30 minutes.
                       </p>
                     )}
 
                     {sheetsLogsOpen && (
                       <div className="mt-3 rounded-lg bg-black/20 border border-white/6 p-2.5 max-h-52 overflow-y-auto">
-                        {!sheetsLogs && <p className="text-[11px] text-slate-500">Loading…</p>}
-                        {sheetsLogs && !sheetsLogs.length && <p className="text-[11px] text-slate-500">No syncs yet.</p>}
+                        {!sheetsLogs && <p className="text-xs text-slate-500">Loading…</p>}
+                        {sheetsLogs && !sheetsLogs.length && <p className="text-xs text-slate-500">No syncs yet.</p>}
                         {sheetsLogs && sheetsLogs.map(l => (
-                          <div key={l.id} className="flex items-center gap-2 text-[11px] py-1 border-b border-white/5 last:border-0">
+                          <div key={l.id} className="flex items-center gap-2 text-xs py-1 border-b border-white/5 last:border-0">
                             <span className="mono text-slate-500">{new Date(l.ts).toLocaleString()}</span>
                             <OutcomeChip outcome={l.outcome} />
                             {l.detail && <span className="text-slate-500 truncate">{l.detail}</span>}
@@ -1204,14 +1204,14 @@ export default function SettingsPage({ jumpTo }) {
                   <div className="mt-3 rounded-xl border border-white/6 p-4">
                     <div className="flex items-center justify-between mb-3">
                       <div className="flex items-center gap-2">
-                        <span className="w-5 h-5 rounded-full bg-white/10 text-[10px] font-semibold text-slate-300 flex items-center justify-center shrink-0">3</span>
-                        <h4 className="text-[12.5px] font-semibold text-slate-200">Field mapping</h4>
+                        <span className="w-5 h-5 rounded-full bg-white/10 text-xs font-semibold text-slate-300 flex items-center justify-center shrink-0">3</span>
+                        <h4 className="text-sm font-semibold text-slate-200">Field mapping</h4>
                       </div>
-                      <button className="btn btn-ghost !py-1.5 !text-[12px]" onClick={() => detectMapping(false)} disabled={detectingMapping}>
+                      <button className="btn btn-ghost !py-1.5 !text-sm" onClick={() => detectMapping(false)} disabled={detectingMapping}>
                         {detectingMapping ? <Spinner size={12} /> : <Sparkles size={12} />} Re-detect from sheet
                       </button>
                     </div>
-                    <p className="text-[11px] text-slate-500 mb-3">Columns are matched to lead fields automatically by name — review and adjust below.</p>
+                    <p className="text-xs text-slate-500 mb-3">Columns are matched to lead fields automatically by name — review and adjust below.</p>
                     <FieldMappingEditor
                       key={sheetsMappingVersion}
                       fieldMapping={sheetsConfig.fieldMapping}
@@ -1230,19 +1230,19 @@ export default function SettingsPage({ jumpTo }) {
             {activeIntegration === 'zoho' && (
             <Section bare>
               <div className="flex items-center justify-between">
-                <span className="text-[12.5px] text-slate-400">
+                <span className="text-sm text-slate-400">
                   {zohoConfig?.hasRefreshToken ? `Credentials loaded from .env (${zohoConfig.dataCenter})` : 'Not configured — add keys to .env'}
                 </span>
                 {zohoConfig?.enabled && <span className="chip bg-emerald-500/10 text-emerald-300 border border-emerald-400/20"><ShieldCheck size={11} /> Shift-aware active</span>}
               </div>
-              <p className="text-[11px] text-slate-500 mt-2">Credentials are read-only here by design — set them in the server's <code className="text-slate-300 bg-black/20 rounded px-1 py-0.5">.env</code> file: <code className="text-slate-300 bg-black/20 rounded px-1 py-0.5">USER_ZOHO_PEOPLE_CLIENT_ID</code>, <code className="text-slate-300 bg-black/20 rounded px-1 py-0.5">USER_ZOHO_PEOPLE_CLIENT_SECRET</code>, <code className="text-slate-300 bg-black/20 rounded px-1 py-0.5">USER_ZOHO_PEOPLE_REFRESH_TOKEN</code>, and optionally <code className="text-slate-300 bg-black/20 rounded px-1 py-0.5">USER_ZOHO_PEOPLE_DATA_CENTER</code> (in/com/eu/com.au, defaults to in). Restart the server after editing .env.</p>
+              <p className="text-xs text-slate-500 mt-2">Credentials are read-only here by design — set them in the server's <code className="text-slate-300 bg-black/20 rounded px-1 py-0.5">.env</code> file: <code className="text-slate-300 bg-black/20 rounded px-1 py-0.5">USER_ZOHO_PEOPLE_CLIENT_ID</code>, <code className="text-slate-300 bg-black/20 rounded px-1 py-0.5">USER_ZOHO_PEOPLE_CLIENT_SECRET</code>, <code className="text-slate-300 bg-black/20 rounded px-1 py-0.5">USER_ZOHO_PEOPLE_REFRESH_TOKEN</code>, and optionally <code className="text-slate-300 bg-black/20 rounded px-1 py-0.5">USER_ZOHO_PEOPLE_DATA_CENTER</code> (in/com/eu/com.au, defaults to in). Restart the server after editing .env.</p>
               <div className="flex items-center gap-3 mt-3">
                 <button className="btn btn-soft" onClick={refreshZohoShifts} disabled={zohoRefreshing || !zohoConfig?.hasRefreshToken}>{zohoRefreshing ? <Spinner size={14} /> : <RefreshCcw size={13} />} Refresh shifts now</button>
               </div>
               {zohoConfig?.onDuty?.date && (
-                <p className="mt-2 text-[11px] text-slate-500">Last fetched {zohoConfig.lastFetchAt ? new Date(zohoConfig.lastFetchAt).toLocaleString() : '—'} — {zohoConfig.onDuty.emails?.length || 0} on shift for {zohoConfig.onDuty.date}. Turn on "Shift-aware assignment" under Alerts & AI → Round-robin to use this.</p>
+                <p className="mt-2 text-xs text-slate-500">Last fetched {zohoConfig.lastFetchAt ? new Date(zohoConfig.lastFetchAt).toLocaleString() : '—'} — {zohoConfig.onDuty.emails?.length || 0} on shift for {zohoConfig.onDuty.date}. Turn on "Shift-aware assignment" under Alerts & AI → Round-robin to use this.</p>
               )}
-              {zohoConfig?.lastFetchError && <p className="mt-2 text-[11px] text-rose-400">Last fetch failed: {zohoConfig.lastFetchError}</p>}
+              {zohoConfig?.lastFetchError && <p className="mt-2 text-xs text-rose-400">Last fetch failed: {zohoConfig.lastFetchError}</p>}
             </Section>
             )}
           </IntegrationsPanel>
@@ -1255,8 +1255,8 @@ export default function SettingsPage({ jumpTo }) {
                 <div className="rounded-xl bg-white/[0.03] border border-white/6 px-4 py-3 flex items-center gap-3">
                   <Database size={16} className="text-violet-400" />
                   <div className="flex-1">
-                    <div className="text-[13px] font-semibold text-white">Storage</div>
-                    <div className="text-[11.5px] text-slate-500">{boot?.leads?.length ?? '—'} leads in {boot?.integrations?.supabase ? 'Supabase (cloud sync)' : 'local JSON storage'}</div>
+                    <div className="text-base font-semibold text-white">Storage</div>
+                    <div className="text-xs text-slate-500">{boot?.leads?.length ?? '—'} leads in {boot?.integrations?.supabase ? 'Supabase (cloud sync)' : 'local JSON storage'}</div>
                   </div>
                   {boot?.integrations?.supabase
                     ? <span className="chip bg-emerald-500/10 text-emerald-300 border border-emerald-400/20"><ShieldCheck size={11} /> Cloud</span>
@@ -1265,8 +1265,8 @@ export default function SettingsPage({ jumpTo }) {
                 <div className="rounded-xl bg-white/[0.03] border border-white/6 px-4 py-3 flex items-center gap-3">
                   <Sparkles size={16} className="text-emerald-400" />
                   <div className="flex-1">
-                    <div className="text-[13px] font-semibold text-white">AI engine</div>
-                    <div className="text-[11.5px] text-slate-500">Rule-based scoring + optional GPT enrichment</div>
+                    <div className="text-base font-semibold text-white">AI engine</div>
+                    <div className="text-xs text-slate-500">Rule-based scoring + optional GPT enrichment</div>
                   </div>
                   {boot?.integrations?.gpt
                     ? <span className="chip bg-emerald-500/10 text-emerald-300 border border-emerald-400/20"><ShieldCheck size={11} /> GPT on</span>
@@ -1274,10 +1274,10 @@ export default function SettingsPage({ jumpTo }) {
                 </div>
               </div>
               {!boot?.integrations?.supabase && (
-                <p className="mt-3 text-[11.5px] text-slate-500 flex items-center gap-1.5"><Cloud size={11} /> To enable cloud storage, add USER_SUPABASE_URL and USER_SUPABASE_SERVICE_ROLE_KEY to your .env. Supabase keeps the latest snapshot of every lead and syncs on every change.</p>
+                <p className="mt-3 text-xs text-slate-500 flex items-center gap-1.5"><Cloud size={11} /> To enable cloud storage, add USER_SUPABASE_URL and USER_SUPABASE_SERVICE_ROLE_KEY to your .env. Supabase keeps the latest snapshot of every lead and syncs on every change.</p>
               )}
               <button className="btn btn-soft !mt-4" onClick={resetData}><RotateCcw size={14} /> Reset to demo data</button>
-              <p className="text-[11.5px] text-slate-500 mt-2">This restores the original demo dataset with 130 leads across all 4 studios.</p>
+              <p className="text-xs text-slate-500 mt-2">This restores the original demo dataset with 130 leads across all 4 studios.</p>
             </Section>
 
             <Section icon={<Users size={15} className="text-amber-400" />} title="Duplicate leads" desc="Find and remove leads that share the same email or phone number — same person, imported more than once (e.g. an overlapping sync).">
@@ -1288,12 +1288,12 @@ export default function SettingsPage({ jumpTo }) {
                 <div className="mt-3 rounded-xl bg-white/[0.03] border border-white/6 p-3.5">
                   {dedupePreview.wouldRemove > 0 ? (
                     <>
-                      <p className="text-[12.5px] text-amber-300">{dedupePreview.wouldRemove} duplicate lead{dedupePreview.wouldRemove === 1 ? '' : 's'} found across {dedupePreview.duplicateGroups} group{dedupePreview.duplicateGroups === 1 ? '' : 's'}.</p>
-                      <button className="btn btn-soft !mt-3 !py-1.5 !text-[12px]" onClick={() => setDedupeReviewOpen(true)}>
+                      <p className="text-sm text-amber-300">{dedupePreview.wouldRemove} duplicate lead{dedupePreview.wouldRemove === 1 ? '' : 's'} found across {dedupePreview.duplicateGroups} group{dedupePreview.duplicateGroups === 1 ? '' : 's'}.</p>
+                      <button className="btn btn-soft !mt-3 !py-1.5 !text-sm" onClick={() => setDedupeReviewOpen(true)}>
                         <Filter size={13} /> Review duplicates
                       </button>
                     </>
-                  ) : <p className="text-[12.5px] text-emerald-400">No duplicates found.</p>}
+                  ) : <p className="text-sm text-emerald-400">No duplicates found.</p>}
                 </div>
               )}
             </Section>
@@ -1308,7 +1308,7 @@ export default function SettingsPage({ jumpTo }) {
           onClose={() => setDedupeReviewOpen(false)}
         />
         <div className="max-h-[55vh] overflow-y-auto scrollbar-thin rounded-lg border border-white/6">
-          <table className="w-full text-[12px]">
+          <table className="w-full text-sm">
             <thead className="sticky top-0 bg-[#14141a] text-slate-500">
               <tr className="text-left">
                 <th className="p-2 w-8"></th>
@@ -1352,12 +1352,12 @@ export default function SettingsPage({ jumpTo }) {
           </table>
         </div>
         <div className="flex items-center justify-between mt-4">
-          <p className="text-[11.5px] text-slate-500">{dedupeSelected.size} lead{dedupeSelected.size === 1 ? '' : 's'} selected for removal</p>
+          <p className="text-xs text-slate-500">{dedupeSelected.size} lead{dedupeSelected.size === 1 ? '' : 's'} selected for removal</p>
           <div className="flex gap-2">
-            <button className="btn btn-soft !py-1.5 !text-[12px]" onClick={removeDuplicates} disabled={dedupeRemoving || !dedupeSelected.size}>
+            <button className="btn btn-soft !py-1.5 !text-sm" onClick={removeDuplicates} disabled={dedupeRemoving || !dedupeSelected.size}>
               {dedupeRemoving ? <Spinner size={13} /> : <Trash2 size={13} />} Remove selected
             </button>
-            <button className="btn btn-primary !py-1.5 !text-[12px]" onClick={removeAllDuplicates} disabled={dedupeRemovingAll || !dedupePreview?.wouldRemove}>
+            <button className="btn btn-primary !py-1.5 !text-sm" onClick={removeAllDuplicates} disabled={dedupeRemovingAll || !dedupePreview?.wouldRemove}>
               {dedupeRemovingAll ? <Spinner size={13} /> : <Trash2 size={13} />} Remove all duplicates
             </button>
           </div>
@@ -1505,7 +1505,7 @@ function IntegrationsPanel({ active, setActive, items, children }) {
   const app = items.find(i => i.id === active)
   return (
     <div className="space-y-4">
-      <button className="btn btn-ghost !py-1.5 !text-[12px]" onClick={() => setActive(null)}>
+      <button className="btn btn-ghost !py-1.5 !text-sm" onClick={() => setActive(null)}>
         <ChevronLeft size={14} /> Back to integrations
       </button>
       {app && (
@@ -1513,21 +1513,21 @@ function IntegrationsPanel({ active, setActive, items, children }) {
           <BrandLogo id={app.id} icon={app.icon} size={44} />
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
-              <div className="font-display font-semibold text-white text-[16px]">{app.label}</div>
+              <div className="font-display font-semibold text-white text-lg">{app.label}</div>
               {app.comingSoon
-                ? <span className="chip !py-0.5 bg-white/5 border border-white/10 text-slate-500 text-[10px]">Coming soon</span>
+                ? <span className="chip !py-0.5 bg-white/5 border border-white/10 text-slate-500 text-xs">Coming soon</span>
                 : app.connected
-                  ? <span className="chip !py-0.5 bg-emerald-500/10 text-emerald-300 border border-emerald-400/20 text-[10px]"><ShieldCheck size={10} /> Connected</span>
-                  : <span className="chip !py-0.5 bg-white/5 border border-white/10 text-slate-400 text-[10px]">Setup needed</span>}
+                  ? <span className="chip !py-0.5 bg-emerald-500/10 text-emerald-300 border border-emerald-400/20 text-xs"><ShieldCheck size={10} /> Connected</span>
+                  : <span className="chip !py-0.5 bg-white/5 border border-white/10 text-slate-400 text-xs">Setup needed</span>}
             </div>
-            <div className="text-[12px] text-slate-500 mt-0.5">{app.desc}</div>
+            <div className="text-sm text-slate-500 mt-0.5">{app.desc}</div>
           </div>
           {!app.comingSoon && <span className="integration-persistence"><Database size={11} /> Server persisted</span>}
         </div>
       )}
       {app?.comingSoon ? (
         <div className="card p-6 text-center">
-          <p className="text-[13px] text-slate-400">{app.label} isn't wired up yet — this app doesn't have a working integration for it today. Let your dev team know if you'd like it prioritized.</p>
+          <p className="text-base text-slate-400">{app.label} isn't wired up yet — this app doesn't have a working integration for it today. Let your dev team know if you'd like it prioritized.</p>
         </div>
       ) : <div className="integration-config-shell">{children}</div>}
     </div>
@@ -1540,9 +1540,9 @@ function Section({ icon, title, desc, bare, id, children }) {
     <div id={id} className="card p-5">
       <div className="flex items-center gap-2 mb-1">
         <span className="w-8 h-8 rounded-lg bg-white/5 border border-white/10 flex items-center justify-center shrink-0">{icon}</span>
-        <h3 className="font-display font-semibold text-white text-[14px]">{title}</h3>
+        <h3 className="font-display font-semibold text-white text-md">{title}</h3>
       </div>
-      <p className="text-[12px] text-slate-500 mb-4">{desc}</p>
+      <p className="text-sm text-slate-500 mb-4">{desc}</p>
       {children}
     </div>
   )
@@ -1589,7 +1589,7 @@ function TagEditor({ items, onChange, placeholder, allowBulk = false, defaults =
         {items.map((v, i) => (
           <span key={`${v}-${i}`} className="chip bg-white/5 border border-white/10 text-slate-200 group">
             {editIdx === i ? (
-              <input autoFocus className="!bg-transparent outline-none !w-[120px] text-[12px] !p-0" value={editVal} onChange={e => setEditVal(e.target.value)} onBlur={() => commitEdit(i)} onKeyDown={e => e.key === 'Enter' && commitEdit(i)} />
+              <input autoFocus className="!bg-transparent outline-none !w-[120px] text-sm !p-0" value={editVal} onChange={e => setEditVal(e.target.value)} onBlur={() => commitEdit(i)} onKeyDown={e => e.key === 'Enter' && commitEdit(i)} />
             ) : (
               <>
                 {v}
@@ -1663,9 +1663,9 @@ function CadenceSteps({ steps, onChange, channels = DEFAULT_FOLLOW_UP_CHANNELS }
     <div className="space-y-2">
       {rows.map((r, i) => (
         <div key={i} className="flex items-center gap-2.5 rounded-xl bg-white/[0.03] border border-white/6 px-3 py-2.5">
-          <span className="chip bg-white/5 border border-white/10 text-slate-300 !px-2 !py-1 text-[11px] shrink-0">Follow-up {i + 1}</span>
+          <span className="chip bg-white/5 border border-white/10 text-slate-300 !px-2 !py-1 text-xs shrink-0">Follow-up {i + 1}</span>
           <input className="input !w-16 !py-1.5" type="number" min={1} value={r.days} onChange={e => update(i, { days: Number(e.target.value) || 1 })} />
-          <span className="text-[11.5px] text-slate-500 shrink-0">days after previous contact</span>
+          <span className="text-xs text-slate-500 shrink-0">days after previous contact</span>
           <select className="input !w-auto !py-1.5 ml-auto" value={r.channel} onChange={e => update(i, { channel: e.target.value })}>
             {channels.map(c => <option key={c} value={c}>{c.replace(/_/g, ' ')}</option>)}
           </select>
@@ -1736,7 +1736,7 @@ function CadenceRules({ rules, onChange, stages }) {
         </div>
       ))}
       <button className="btn btn-ghost !py-1.5" onClick={addRule}><Plus size={14} /> Add rule</button>
-      {!rules.length && <p className="text-[11.5px] text-slate-600">No custom rules yet — leads won't be flagged beyond the built-in alerts.</p>}
+      {!rules.length && <p className="text-xs text-slate-600">No custom rules yet — leads won't be flagged beyond the built-in alerts.</p>}
     </div>
   )
 }
@@ -1745,9 +1745,9 @@ function ToggleMini({ label, value, onChange }) {
   return (
     <button className="flex items-center gap-3 rounded-xl bg-white/[0.03] border border-white/6 px-3.5 py-2.5 text-left" onClick={() => onChange(!value)}>
       <span className={`w-9 h-5 rounded-full relative transition-colors shrink-0 ${value ? 'bg-rose-500' : 'bg-white/10'}`}>
-        <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all ${value ? 'left-[18px]' : 'left-0.5'}`} />
+        <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-pure-white transition-all ${value ? 'left-[18px]' : 'left-0.5'}`} />
       </span>
-      <span className="text-[12.5px] font-medium text-slate-300 flex-1">{label}</span>
+      <span className="text-sm font-medium text-slate-300 flex-1">{label}</span>
     </button>
   )
 }
@@ -1757,8 +1757,8 @@ function ThemeCard({ active, onClick, title, sub, swatch }) {
     <button onClick={onClick} className={`rounded-2xl p-3 border transition-all ${active ? 'border-rose-400/40 bg-white/5' : 'border-white/10 bg-white/[0.02] hover:bg-white/5'}`}>
       <div className="h-16 rounded-xl mb-2" style={{ background: swatch, border: '1px solid rgba(255,255,255,0.12)' }} />
       <div className="flex items-center gap-2">
-        <span className="text-[13px] font-semibold text-white">{title}</span>
-        <span className="text-[11px] text-slate-500 ml-auto">{sub}</span>
+        <span className="text-base font-semibold text-white">{title}</span>
+        <span className="text-xs text-slate-500 ml-auto">{sub}</span>
         {active && <span className="w-4 h-4 rounded-full bg-emerald-400 flex items-center justify-center"><Check size={11} className="text-black" /></span>}
       </div>
     </button>
@@ -1805,20 +1805,20 @@ function WebhookRow({ webhook, logs, logsOpen, onToggleLogs, onRename, onSaveMap
       <div className="flex items-center gap-2 flex-wrap">
         <input className="input !py-1.5 flex-1 min-w-[160px] font-semibold" value={nameDraft} onChange={e => setNameDraft(e.target.value)}
           onBlur={() => nameDraft.trim() && nameDraft !== webhook.name && onRename(nameDraft.trim())} />
-        <select className="input !py-1.5 !text-[12px] !w-auto" value={webhook.method || 'POST'} onChange={e => onSaveMethod(e.target.value)} title="Request method this webhook accepts">
+        <select className="input !py-1.5 !text-sm !w-auto" value={webhook.method || 'POST'} onChange={e => onSaveMethod(e.target.value)} title="Request method this webhook accepts">
           {WEBHOOK_METHODS.map(m => <option key={m} value={m}>{m}</option>)}
         </select>
-        <span className="text-[11px] text-slate-500">Created {new Date(webhook.createdAt).toLocaleDateString()}</span>
-        <span className="text-[11px] text-slate-500">· Last used {webhook.lastUsedAt ? new Date(webhook.lastUsedAt).toLocaleString() : 'never'}</span>
+        <span className="text-xs text-slate-500">Created {new Date(webhook.createdAt).toLocaleDateString()}</span>
+        <span className="text-xs text-slate-500">· Last used {webhook.lastUsedAt ? new Date(webhook.lastUsedAt).toLocaleString() : 'never'}</span>
         <button className="btn btn-ghost !p-2" onClick={onToggleLogs} title="View call log"><ScrollText size={14} /></button>
         <button className="btn btn-ghost !p-2" onClick={onRegenerate} title="Regenerate key"><RefreshCcw size={14} /></button>
         <button className="btn btn-ghost !p-2 text-rose-400" onClick={onDelete} title="Delete"><Trash2 size={14} /></button>
       </div>
       <div className="flex items-center gap-2">
-        <code className="input !py-1.5 flex-1 !text-[11.5px] overflow-x-auto whitespace-nowrap">{webhook.url}</code>
+        <code className="input !py-1.5 flex-1 !text-xs overflow-x-auto whitespace-nowrap">{webhook.url}</code>
         <button className="btn btn-ghost !py-1.5" onClick={onCopy}><Copy size={13} /> Copy</button>
       </div>
-      {webhook.method === 'GET' && <p className="text-[11px] text-amber-400/90">GET mode — send lead fields as query params on this URL, not a body.</p>}
+      {webhook.method === 'GET' && <p className="text-xs text-amber-400/90">GET mode — send lead fields as query params on this URL, not a body.</p>}
 
       <FieldMappingEditor
         key={JSON.stringify(webhook.fieldMapping)}
@@ -1832,23 +1832,23 @@ function WebhookRow({ webhook, logs, logsOpen, onToggleLogs, onRename, onSaveMap
       />
 
       <div>
-        <button className="btn btn-ghost !py-1.5 !text-[12px]" onClick={() => setTestOpen(o => !o)}><TestTube2 size={12} /> {testOpen ? 'Hide test tool' : 'Test this webhook'}</button>
+        <button className="btn btn-ghost !py-1.5 !text-sm" onClick={() => setTestOpen(o => !o)}><TestTube2 size={12} /> {testOpen ? 'Hide test tool' : 'Test this webhook'}</button>
         {testOpen && (
           <div className="mt-2 space-y-2 rounded-lg bg-black/20 border border-white/6 p-2.5">
-            <p className="text-[11px] text-slate-500">Paste a sample payload to preview the lead it would create — nothing is saved.</p>
-            <textarea className="input !text-[12px] font-mono resize-none" rows={5} value={testPayload} onChange={e => setTestPayload(e.target.value)} />
+            <p className="text-xs text-slate-500">Paste a sample payload to preview the lead it would create — nothing is saved.</p>
+            <textarea className="input !text-sm font-mono resize-none" rows={5} value={testPayload} onChange={e => setTestPayload(e.target.value)} />
             <div className="flex items-center gap-2">
-              <button className="btn btn-soft !py-1.5 !text-[12px]" onClick={runTest} disabled={testing}>{testing ? <Spinner size={12} /> : <Zap size={12} />} Preview</button>
-              <button className="btn btn-ghost !py-1.5 !text-[12px]" onClick={detectFromPayload} disabled={detecting}>{detecting ? <Spinner size={12} /> : <Sparkles size={12} />} Detect mapping from this payload</button>
+              <button className="btn btn-soft !py-1.5 !text-sm" onClick={runTest} disabled={testing}>{testing ? <Spinner size={12} /> : <Zap size={12} />} Preview</button>
+              <button className="btn btn-ghost !py-1.5 !text-sm" onClick={detectFromPayload} disabled={detecting}>{detecting ? <Spinner size={12} /> : <Sparkles size={12} />} Detect mapping from this payload</button>
             </div>
-            {testError && <p className="text-[11.5px] text-rose-400">{testError}</p>}
+            {testError && <p className="text-xs text-rose-400">{testError}</p>}
             {testResult && (
               testResult.missing?.length ? (
-                <p className="text-[11.5px] text-rose-400">Missing required field(s): {testResult.missing.join(', ')}</p>
+                <p className="text-xs text-rose-400">Missing required field(s): {testResult.missing.join(', ')}</p>
               ) : (
                 <div className="rounded-lg bg-white/[0.03] border border-white/8 p-2 space-y-1">
                   {Object.entries(testResult.preview || {}).filter(([, v]) => v !== undefined && v !== '').map(([k, v]) => (
-                    <div key={k} className="flex items-center gap-2 text-[11.5px]">
+                    <div key={k} className="flex items-center gap-2 text-xs">
                       <span className="text-slate-500 w-28 shrink-0">{k}</span>
                       <span className="text-slate-200 truncate">{String(v)}</span>
                     </div>
@@ -1861,16 +1861,16 @@ function WebhookRow({ webhook, logs, logsOpen, onToggleLogs, onRename, onSaveMap
       </div>
 
       <div>
-        <button className="btn btn-ghost !py-1.5 !text-[12px]" onClick={toggleDocs}><ScrollText size={12} /> {docsOpen ? 'Hide API docs' : 'API docs'}</button>
+        <button className="btn btn-ghost !py-1.5 !text-sm" onClick={toggleDocs}><ScrollText size={12} /> {docsOpen ? 'Hide API docs' : 'API docs'}</button>
         {docsOpen && (
-          <div className="mt-2 space-y-3 rounded-lg bg-black/20 border border-white/6 p-2.5 text-[11.5px]">
+          <div className="mt-2 space-y-3 rounded-lg bg-black/20 border border-white/6 p-2.5 text-xs">
             <div>
               <div className="text-slate-500 mb-1">Auth: the <code className="mono">{webhook.key}</code> token embedded in the URL is the sole credential — anyone with the URL can post leads. No separate header needed. Regenerate to revoke it.</div>
             </div>
             <div>
               <div className="text-slate-400 font-semibold mb-1">Create / update a lead ({webhook.method || 'POST'})</div>
               <div className="text-slate-500 mb-1">Matches an existing lead by email or phone and updates it; otherwise creates a new lead. Send only the fields you want to set/change.</div>
-              <pre className="input !text-[11px] font-mono overflow-x-auto whitespace-pre">{webhook.method === 'GET'
+              <pre className="input !text-xs font-mono overflow-x-auto whitespace-pre">{webhook.method === 'GET'
                 ? `curl "${webhook.url}?name=Jane+Doe&email=jane@example.com&phone=9876543210"`
                 : `curl -X POST '${webhook.url}' \\\n  -H 'Content-Type: application/json' \\\n  -d '{\n    "name": "Jane Doe",\n    "email": "jane@example.com",\n    "phone": "9876543210",\n    "notes": "Interested in trial class"\n  }'`}</pre>
             </div>
@@ -1906,10 +1906,10 @@ function WebhookRow({ webhook, logs, logsOpen, onToggleLogs, onRename, onSaveMap
 
       {logsOpen && (
         <div className="rounded-lg bg-black/20 border border-white/6 p-2.5 max-h-52 overflow-y-auto">
-          {!logs && <p className="text-[11px] text-slate-500">Loading…</p>}
-          {logs && !logs.length && <p className="text-[11px] text-slate-500">No calls received yet.</p>}
+          {!logs && <p className="text-xs text-slate-500">Loading…</p>}
+          {logs && !logs.length && <p className="text-xs text-slate-500">No calls received yet.</p>}
           {logs && logs.map(l => (
-            <div key={l.id} className="flex items-center gap-2 text-[11px] py-1 border-b border-white/5 last:border-0">
+            <div key={l.id} className="flex items-center gap-2 text-xs py-1 border-b border-white/5 last:border-0">
               <span className="mono text-slate-500">{new Date(l.ts).toLocaleString()}</span>
               <OutcomeChip outcome={l.outcome} />
               {l.detail && <span className="text-slate-500 truncate">{l.detail}</span>}
@@ -1932,7 +1932,7 @@ function OutcomeChip({ outcome }) {
     synced: 'bg-emerald-500/15 text-emerald-300',
     error: 'bg-rose-500/15 text-rose-300'
   }
-  return <span className={`chip !px-1.5 !py-0.5 text-[10px] ${styles[outcome] || 'bg-white/10 text-slate-300'}`}>{outcome}</span>
+  return <span className={`chip !px-1.5 !py-0.5 text-xs ${styles[outcome] || 'bg-white/10 text-slate-300'}`}>{outcome}</span>
 }
 
 function Toggle({ on, onChange, title, desc, children }) {
@@ -1940,11 +1940,11 @@ function Toggle({ on, onChange, title, desc, children }) {
     <div className="rounded-2xl border border-white/8 p-4">
       <div className="flex items-start gap-3">
         <div className="flex-1">
-          <h4 className="font-display font-semibold text-white text-[13px]">{title}</h4>
-          <p className="text-[12px] text-slate-500 mt-0.5">{desc}</p>
+          <h4 className="font-display font-semibold text-white text-base">{title}</h4>
+          <p className="text-sm text-slate-500 mt-0.5">{desc}</p>
         </div>
         <button onClick={() => onChange(!on)} className={`w-11 h-6 rounded-full relative transition-colors shrink-0 ${on ? 'bg-rose-500' : 'bg-white/10'}`}>
-          <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white transition-all ${on ? 'left-[22px]' : 'left-0.5'}`} />
+          <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-pure-white transition-all ${on ? 'left-[22px]' : 'left-0.5'}`} />
         </button>
       </div>
       {on && <div className="mt-4">{children}</div>}

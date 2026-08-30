@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import { X } from 'lucide-react'
 import { AVATAR_COLORS, initials } from './lib.js'
+import Logo from './components/Logo.jsx'
 
 export function Avatar({ name, color, size = 30, className = '', photoUrl, photoZoom, photoPosX, photoPosY, fallback }) {
   const c = color || AVATAR_COLORS[(name || '').length % AVATAR_COLORS.length]
@@ -113,8 +114,8 @@ export function ModalHeader({ title, subtitle, onClose }) {
   return (
     <div className="modal-header flex items-start justify-between mb-5">
       <div>
-        <h2 className="font-display text-[17px] font-semibold text-white">{title}</h2>
-        {subtitle && <p className="text-[12.5px] text-slate-400 mt-1">{subtitle}</p>}
+        <h2 className="font-display text-lg font-semibold text-white">{title}</h2>
+        {subtitle && <p className="text-sm text-slate-400 mt-1">{subtitle}</p>}
       </div>
       <button className="btn btn-ghost modal-close !p-2" onClick={onClose}><X size={16} /></button>
     </div>
@@ -127,20 +128,34 @@ export function Spinner({ size = 18 }) {
   )
 }
 
+const LOADER_STAGES = [
+  'Connecting to your workspace',
+  'Loading studios and team',
+  'Fetching your leads',
+  'Almost there'
+]
+
 export function AppLoader() {
+  // Bootstrap is a multi-second wait on a large lead table, so the loader
+  // says what it is doing rather than spinning silently. The rail is
+  // indeterminate on purpose — the server sends no progress, and a fake
+  // percentage would be a lie the user can catch.
+  const [stage, setStage] = useState(0)
+  useEffect(() => {
+    const t = setInterval(() => setStage(s => Math.min(s + 1, LOADER_STAGES.length - 1)), 2200)
+    return () => clearInterval(t)
+  }, [])
+
   return (
     <div className="app-loader-shell" role="status" aria-live="polite">
-      <div className="app-loader-orbit">
-        <span className="app-loader-ring app-loader-ring-a" />
-        <span className="app-loader-ring app-loader-ring-b" />
-        <span className="app-loader-core">
-          <span className="app-loader-core-mark" />
-        </span>
+      <div className="app-loader-brand">
+        <Logo size={56} animate />
       </div>
       <div className="app-loader-copy">
-        <strong>Physique 57 CRM</strong>
-        <span>Loading your workspace…</span>
+        <strong>Physique 57 Lead Studio</strong>
+        <span key={stage}>{LOADER_STAGES[stage]}…</span>
       </div>
+      <div className="app-loader-rail"><span /></div>
     </div>
   )
 }
@@ -150,7 +165,37 @@ export function Empty({ icon, title, subtitle }) {
     <div className="flex flex-col items-center justify-center py-16 text-center">
       <div className="w-12 h-12 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center mb-3 text-slate-500">{icon}</div>
       <p className="font-semibold text-slate-300">{title}</p>
-      {subtitle && <p className="text-[12.5px] text-slate-500 mt-1 max-w-xs">{subtitle}</p>}
+      {subtitle && <p className="text-sm text-slate-500 mt-1 max-w-xs">{subtitle}</p>}
+    </div>
+  )
+}
+
+// Skeletons replace spinners wherever the shape of the incoming content is
+// already known — the layout stops jumping when data lands.
+export function Skeleton({ w = '100%', h = 12, radius = 6, className = '' }) {
+  return <span className={`skeleton ${className}`} style={{ width: w, height: h, borderRadius: radius }} aria-hidden="true" />
+}
+
+export function TableSkeleton({ rows = 8, cols = 7 }) {
+  const widths = ['38%', '72%', '54%', '64%', '46%', '58%', '50%']
+  return (
+    <div className="table-skeleton" role="status" aria-label="Loading leads">
+      {Array.from({ length: rows }).map((_, r) => (
+        <div className="table-skeleton-row" key={r}>
+          {Array.from({ length: cols }).map((__, c) => (
+            <Skeleton key={c} w={widths[(r + c) % widths.length]} h={10} />
+          ))}
+        </div>
+      ))}
+    </div>
+  )
+}
+
+export function CardSkeleton({ lines = 3 }) {
+  return (
+    <div className="card p-4 space-y-3" role="status" aria-label="Loading">
+      <Skeleton w="42%" h={14} />
+      {Array.from({ length: lines }).map((_, i) => <Skeleton key={i} w={`${88 - i * 14}%`} h={10} />)}
     </div>
   )
 }

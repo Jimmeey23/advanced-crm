@@ -12,7 +12,7 @@ import {
 import { useApp } from '../store.jsx'
 import { useFetch } from '../hooks.js'
 import { api, buildQuery } from '../api.js'
-import { Avatar, ScorePill, Empty, Spinner } from '../ui.jsx'
+import { Avatar, ScorePill, Empty, Spinner, TableSkeleton } from '../ui.jsx'
 import { fmtDate, fmtDateCompact, stageClass, stageBadgeStyle, stageColor, riskClass, daysFromNow, downloadText, money, baseColumnValue, buildFormulaContext, evalFormula, lookupColumnValue, formatColumnValue, phoneCountryFlag, currentMonthRange } from '../lib.js'
 import Tip from '../components/Tip.jsx'
 import ComposeModal from '../components/ComposeModal.jsx'
@@ -64,6 +64,17 @@ const EMPTY_FILTERS = {
   locationId: '', stage: '', status: '', statusGroup: '', associateId: '', sourceName: '', channel: '',
   classType: '', risk: '', minScore: '', maxScore: '', dateFrom: '', dateTo: '', createdWithinDays: '', flagged: ''
 }
+// One-click answers to the questions an associate actually opens this page
+// with. Each preset is a full filter set, not an additive toggle, so the
+// state after clicking is always exactly what the chip says.
+const QUICK_VIEWS = [
+  { id: 'hot', label: 'Hot leads', hint: 'Score 80 and above, still open', patch: { status: 'open', minScore: '80' } },
+  { id: 'unassigned', label: 'Unassigned', hint: 'Open leads with no owner', patch: { status: 'open', associateId: 'none' } },
+  { id: 'flagged', label: 'Flagged', hint: 'Manually flagged for attention', patch: { flagged: '1' } },
+  { id: 'new', label: 'New this week', hint: 'Created in the last 7 days', patch: { createdWithinDays: '7' } },
+  { id: 'won', label: 'Won', hint: 'Converted leads', patch: { status: 'won' } }
+]
+
 // Default view: current calendar month. "Clear filters" (EMPTY_FILTERS) or
 // manually editing the date fields is how a user widens back out to all time.
 const DEFAULT_FILTERS = { ...EMPTY_FILTERS, ...currentMonthRange() }
@@ -135,7 +146,7 @@ const FILTER_LABELS = {
   flagged: 'Flagged'
 }
 
-export default function Leads({ initialSearch = '' }) {
+export default function Leads({ initialSearch = '', initialAssociateId = '' }) {
   const { boot, lookup, openLead, refreshData, toast, navigate, dataVersion, role, locationIds, associateId: myAssociateId } = useApp()
   const [search, setSearch] = useState(initialSearch)
   const [onlyMine, setOnlyMine] = useState(() => localStorage.getItem('p57_leads_only_mine') !== '0')
@@ -171,6 +182,7 @@ export default function Leads({ initialSearch = '' }) {
   }
 
   React.useEffect(() => { if (initialSearch) { setSearch(initialSearch); setPage(0) } }, [initialSearch])
+  React.useEffect(() => { if (initialAssociateId) { setFilters(f => ({ ...f, associateId: initialAssociateId })); setPage(0) } }, [initialAssociateId])
   const [panelOpen, setPanelOpen] = useState(false)
   const [page, setPage] = useState(0)
   const [sortBy, setSortBy] = useState('createdAt')
@@ -203,6 +215,10 @@ export default function Leads({ initialSearch = '' }) {
   })
   const [focusLeadIds, setFocusLeadIds] = useState([])
   const [selected, setSelected] = useState(() => new Set())
+  // Server-truth rows are overlaid with in-flight edits so the table
+  // never flashes back to the old value while the PATCH is in the air.
+  const [pendingPatches, setPendingPatches] = useState({})
+  const [activeQuickView, setActiveQuickView] = useState('')
   const [selectAllMatching, setSelectAllMatching] = useState(false)
   const [selectAllBusy, setSelectAllBusy] = useState(false)
   const [bulkBusy, setBulkBusy] = useState(false)
@@ -218,7 +234,7 @@ export default function Leads({ initialSearch = '' }) {
   const [fixedCols, setFixedCols] = useState(() => localStorage.getItem('p57_leads_fixed_cols') === 'true')
   const [pageSize, setPageSize] = useState(() => Number(localStorage.getItem('p57_leads_page_size')) || 25)
   const [density, setDensity] = useState(() => localStorage.getItem('p57_leads_density') || 'comfortable')
-  const [rowHeight, setRowHeight] = useState(() => Math.max(32, Math.min(88, Number(localStorage.getItem('p57_leads_row_height')) || 56)))
+  const [rowHeight, setRowHeight] = useState(() => Math.max(32, Math.min(88, Number(localStorage.getItem('p57_leads_row_height')) || 40)))
   const [tableZoom, setTableZoom] = useState(() => Number(localStorage.getItem('p57_leads_table_zoom')) || 100)
   const [tableStyle, setTableStyle] = useState(() => ({
     zebra: true,
@@ -242,7 +258,11 @@ export default function Leads({ initialSearch = '' }) {
       const prefs = data?.leadTablePrefs || {}
       remotePrefsHydrated.current = true
       setSegments(Array.isArray(data?.leadSegments) ? data.leadSegments : [])
-      if (prefs.rowHeight != null) saveRowHeight(prefs.rowHeight)
+      // Row heights stored under the old airy cell design (56, 68, ...) leave
+      // the redrawn 40px cells floating in empty space, so anything above the
+      // new comfortable ceiling is migrated down once. Heights the user picked
+      // at or below it are their choice and are restored untouched.
+      if (prefs.rowHeight != null) saveRowHeight(prefs.rowHeight > 48 ? 40 : prefs.rowHeight)
       if (prefs.tableZoom != null) saveTableZoom(prefs.tableZoom)
       if (prefs.density) setDensity(prefs.density)
       if (typeof prefs.headerPinned === 'boolean') setHeaderPinned(prefs.headerPinned)
@@ -354,26 +374,83 @@ export default function Leads({ initialSearch = '' }) {
     if (k === 'associateId' && onlyMine) setOnlyMine(false)
     setFilters(f => ({ ...f, [k]: e.target.value })); setPage(0)
   }
+  // A quick view replaces the filter set rather than layering onto it, and
+  // clicking the active one returns to the default month view.
+  const applyQuickView = (view) => {
+    setActiveQuickView(current => {
+      const next = current === view.id ? '' : view.id
+      setFilters(next ? { ...EMPTY_FILTERS, ...view.patch } : DEFAULT_FILTERS)
+      return next
+    })
+    setOnlyMine(false)
+    setPage(0)
+  }
+
   const clearFilters = () => {
     setOnlyMine(false)
     try { localStorage.setItem('p57_leads_only_mine', '0') } catch (e) { /* ignore */ }
     setFilters(EMPTY_FILTERS); setSearch(''); setPage(0)
   }
 
-  const changeStage = async (lead, stage) => {
-    try { await api.patch(`/api/leads/${lead.id}`, { stage }); refreshData() }
-    catch (e) { toast(e.message, 'error') }
+  // Optimistic single-lead writes. The row updates on click, the request
+  // follows, and a failure rolls the row back. `undo` gets the previous
+  // values so the toast can put them back with one more PATCH.
+  const applyOptimistic = (leadId, patch) =>
+    setPendingPatches(prev => ({ ...prev, [leadId]: { ...(prev[leadId] || {}), ...patch } }))
+
+  const clearOptimistic = (leadId, keys) =>
+    setPendingPatches(prev => {
+      const current = prev[leadId]
+      if (!current) return prev
+      const next = { ...current }
+      keys.forEach(k => { delete next[k] })
+      const out = { ...prev }
+      if (Object.keys(next).length) out[leadId] = next
+      else delete out[leadId]
+      return out
+    })
+
+  const patchLead = async (lead, patch, { message, undoLabel = 'Undo' } = {}) => {
+    const keys = Object.keys(patch)
+    const previous = Object.fromEntries(keys.map(k => [k, lead[k] ?? null]))
+    applyOptimistic(lead.id, patch)
+    try {
+      await api.patch(`/api/leads/${lead.id}`, patch)
+      if (message) {
+        toast(message, 'success', {
+          action: {
+            label: undoLabel,
+            onClick: async () => {
+              applyOptimistic(lead.id, previous)
+              try {
+                await api.patch(`/api/leads/${lead.id}`, previous)
+                refreshData()
+              } catch (err) {
+                clearOptimistic(lead.id, keys)
+                toast(err.message, 'error')
+              }
+            }
+          }
+        })
+      }
+      refreshData()
+    } catch (e) {
+      clearOptimistic(lead.id, keys)
+      toast(e.message, 'error')
+    }
   }
 
-  const changeAssociate = async (lead, associateId) => {
-    try { await api.patch(`/api/leads/${lead.id}`, { associateId: associateId || null }); refreshData() }
-    catch (e) { toast(e.message, 'error') }
-  }
+  const changeStage = (lead, stage) =>
+    patchLead(lead, { stage }, { message: `${lead.fullName || 'Lead'} moved to ${stage}` })
 
-  const changeLeadField = async (lead, patch) => {
-    try { await api.patch(`/api/leads/${lead.id}`, patch); refreshData() }
-    catch (e) { toast(e.message, 'error') }
-  }
+  const changeAssociate = (lead, associateId) =>
+    patchLead(lead, { associateId: associateId || null }, {
+      message: associateId
+        ? `Assigned to ${lookup.asnById?.[associateId]?.name || 'associate'}`
+        : 'Owner cleared'
+    })
+
+  const changeLeadField = (lead, patch) => patchLead(lead, patch)
 
   const leadBillingPreset = (lead, classType = '') => {
     const loc = String(lookup.locById[lead.locationId]?.name || '').toLowerCase()
@@ -496,12 +573,33 @@ export default function Leads({ initialSearch = '' }) {
   }
   const clearSelection = () => { setSelected(new Set()); setSelectAllMatching(false) }
 
+  // Bulk undo restores each lead's own previous value, so a mixed
+  // selection goes back to exactly where it was rather than to one
+  // shared stage or owner.
+  const restorePrevious = (field, before) => async () => {
+    const groups = new Map()
+    for (const [id, value] of Object.entries(before)) {
+      const key = JSON.stringify(value ?? null)
+      if (!groups.has(key)) groups.set(key, { value: value ?? null, ids: [] })
+      groups.get(key).ids.push(id)
+    }
+    try {
+      for (const { value, ids } of groups.values()) {
+        await api.patch('/api/leads/bulk', { ids, patch: { [field]: value } })
+      }
+      toast('Change reverted')
+      refreshData()
+    } catch (e) { toast(e.message, 'error') }
+  }
+
   const bulkChangeStage = async (stage) => {
     if (!stage || !selected.size) return
+    const before = Object.fromEntries(items.filter(l => selected.has(l.id)).map(l => [l.id, l.stage ?? null]))
     setBulkBusy(true)
     try {
       const { updated } = await api.patch('/api/leads/bulk', { ids: [...selected], patch: { stage } })
-      toast(`Moved ${updated} lead${updated === 1 ? '' : 's'} to ${stage}`)
+      toast(`Moved ${updated} lead${updated === 1 ? '' : 's'} to ${stage}`, 'success',
+        Object.keys(before).length ? { action: { label: 'Undo', onClick: restorePrevious('stage', before) } } : {})
       clearSelection(); refreshData()
     } catch (e) { toast(e.message, 'error') }
     setBulkBusy(false)
@@ -509,10 +607,12 @@ export default function Leads({ initialSearch = '' }) {
 
   const bulkAssign = async (associateId) => {
     if (!associateId || !selected.size) return
+    const before = Object.fromEntries(items.filter(l => selected.has(l.id)).map(l => [l.id, l.associateId ?? null]))
     setBulkBusy(true)
     try {
       const { updated } = await api.patch('/api/leads/bulk', { ids: [...selected], patch: { associateId } })
-      toast(`Reassigned ${updated} lead${updated === 1 ? '' : 's'}`)
+      toast(`Reassigned ${updated} lead${updated === 1 ? '' : 's'}`, 'success',
+        Object.keys(before).length ? { action: { label: 'Undo', onClick: restorePrevious('associateId', before) } } : {})
       clearSelection(); refreshData()
     } catch (e) { toast(e.message, 'error') }
     setBulkBusy(false)
@@ -553,7 +653,34 @@ export default function Leads({ initialSearch = '' }) {
   }
 
   const pages = Math.max(1, Math.ceil((data?.total || 0) / pageSize))
-  const items = data?.items || []
+  const rawItems = data?.items || []
+  const items = React.useMemo(
+    () => Object.keys(pendingPatches).length
+      ? rawItems.map(l => (pendingPatches[l.id] ? { ...l, ...pendingPatches[l.id] } : l))
+      : rawItems,
+    [rawItems, pendingPatches]
+  )
+
+  // Once a refetch returns the same value the overlay was holding, the
+  // overlay has served its purpose — drop it so it can't mask later edits.
+  React.useEffect(() => {
+    if (!Object.keys(pendingPatches).length || !rawItems.length) return
+    const byId = Object.fromEntries(rawItems.map(l => [l.id, l]))
+    setPendingPatches(prev => {
+      let changed = false
+      const next = {}
+      for (const [id, patch] of Object.entries(prev)) {
+        const server = byId[id]
+        if (!server) { next[id] = patch; continue }
+        const unresolved = Object.fromEntries(
+          Object.entries(patch).filter(([k, v]) => (server[k] ?? null) !== (v ?? null))
+        )
+        if (Object.keys(unresolved).length) next[id] = unresolved
+        if (Object.keys(unresolved).length !== Object.keys(patch).length) changed = true
+      }
+      return changed ? next : prev
+    })
+  }, [rawItems])
 
   const cadenceDays = boot?.settings?.cadence?.outreachDays || 7
   const missedLeads = items.filter(l => l.fu?.missedCount > 0)
@@ -594,40 +721,68 @@ export default function Leads({ initialSearch = '' }) {
       {/* bulk selection toolbar */}
       {selected.size > 0 && (
         <div className="card p-3 flex flex-wrap items-center gap-3 border-rose-400/25" style={{ animation: 'fadeIn .15s ease' }}>
-          <span className="chip bg-rose-500/15 border border-rose-400/30 text-rose-300 !px-2.5 !py-1 text-[12px] font-semibold">
+          <span className="chip bg-rose-500/15 border border-rose-400/30 text-rose-300 !px-2.5 !py-1 text-sm font-semibold">
             {selectAllMatching ? `All ${selected.size} matching leads selected` : `${selected.size} selected`}
           </span>
           {!selectAllMatching && selected.size === items.length && (data?.total || 0) > items.length && (
-            <button className="btn btn-ghost !py-1.5 !text-[12.5px] text-rose-300" disabled={selectAllBusy} onClick={selectAllMatchingFilter}>
+            <button className="btn btn-ghost !py-1.5 !text-sm text-rose-300" disabled={selectAllBusy} onClick={selectAllMatchingFilter}>
               {selectAllBusy ? 'Loading…' : `Select all ${data.total} matching leads`}
             </button>
           )}
-          <select className="input !w-auto !py-1.5 !text-[12.5px]" disabled={bulkBusy} defaultValue="" onChange={e => { bulkChangeStage(e.target.value); e.target.value = '' }}>
+          <select className="input !w-auto !py-1.5 !text-sm" disabled={bulkBusy} defaultValue="" onChange={e => { bulkChangeStage(e.target.value); e.target.value = '' }}>
             <option value="" disabled>Change stage…</option>
             {(boot?.stages || []).map(s => <option key={s} value={s}>{s}</option>)}
           </select>
-          <select className="input !w-auto !py-1.5 !text-[12.5px]" disabled={bulkBusy} defaultValue="" onChange={e => { bulkAssign(e.target.value); e.target.value = '' }}>
+          <select className="input !w-auto !py-1.5 !text-sm" disabled={bulkBusy} defaultValue="" onChange={e => { bulkAssign(e.target.value); e.target.value = '' }}>
             <option value="" disabled>Reassign owner…</option>
             {(boot?.associates || []).filter(a => a.active !== false).map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
           </select>
-          <select className="input !w-auto !py-1.5 !text-[12.5px]" disabled={bulkBusy} defaultValue="" onChange={e => { if (e.target.value) bulkPatchField({ sourceName: e.target.value }, 'Source updated'); e.target.value = '' }}>
+          <select className="input !w-auto !py-1.5 !text-sm" disabled={bulkBusy} defaultValue="" onChange={e => { if (e.target.value) bulkPatchField({ sourceName: e.target.value }, 'Source updated'); e.target.value = '' }}>
             <option value="" disabled>Change source…</option>
             {(boot?.sources || []).map(source => { const name = typeof source === 'string' ? source : source.name; return <option key={name} value={name}>{name}</option> })}
           </select>
-          <select className="input !w-auto !py-1.5 !text-[12.5px]" disabled={bulkBusy} defaultValue="" onChange={e => { if (e.target.value) bulkPatchField({ locationId: e.target.value }, 'Studio updated'); e.target.value = '' }}>
+          <select className="input !w-auto !py-1.5 !text-sm" disabled={bulkBusy} defaultValue="" onChange={e => { if (e.target.value) bulkPatchField({ locationId: e.target.value }, 'Studio updated'); e.target.value = '' }}>
             <option value="" disabled>Change studio…</option>
             {(boot?.locations || []).filter(location => location.active !== false).map(location => <option key={location.id} value={location.id}>{location.name}</option>)}
           </select>
           {role !== 'agent' && (
-            <button className="btn btn-ghost !py-1.5 !text-[12.5px] text-rose-300 hover:!bg-rose-500/10" disabled={bulkBusy} onClick={bulkDelete}>
+            <button className="btn btn-ghost !py-1.5 !text-sm text-rose-300 hover:!bg-rose-500/10" disabled={bulkBusy} onClick={bulkDelete}>
               <Trash2 size={13} /> Delete
             </button>
           )}
-          <button className="btn btn-ghost !py-1.5 !text-[12.5px] ml-auto" onClick={clearSelection}>
+          <button className="btn btn-ghost !py-1.5 !text-sm ml-auto" onClick={clearSelection}>
             <X size={13} /> Clear selection
           </button>
         </div>
       )}
+
+      {/* Quick views sit above the controls: the five questions this page
+          gets opened with, answered in one click each. */}
+      <div className="leads-quickviews" role="group" aria-label="Quick views">
+        <button
+          type="button"
+          className={`quickview ${!activeQuickView && !hasFilters ? 'is-active' : ''}`}
+          onClick={() => { setActiveQuickView(''); setFilters(DEFAULT_FILTERS); setOnlyMine(false); setPage(0) }}
+        >All open</button>
+        {myAssociateId && (
+          <button
+            type="button"
+            className={`quickview ${onlyMine ? 'is-active' : ''}`}
+            onClick={toggleOnlyMine}
+            title="Only leads assigned to you"
+          >My leads</button>
+        )}
+        {QUICK_VIEWS.map(v => (
+          <button
+            key={v.id}
+            type="button"
+            title={v.hint}
+            className={`quickview ${activeQuickView === v.id ? 'is-active' : ''}`}
+            onClick={() => applyQuickView(v)}
+          >{v.label}</button>
+        ))}
+        <span className="leads-quickviews-count">{data?.total ?? 0} leads</span>
+      </div>
 
       {/* toolbar — filters, owners, view controls in one cohesive bar */}
       <div className="leads-toolbar">
@@ -635,12 +790,7 @@ export default function Leads({ initialSearch = '' }) {
           <button className={`btn ${panelOpen ? 'btn-soft' : 'btn-ghost'} !py-2`} onClick={() => setPanelOpen(o => !o)}>
             <SlidersHorizontal size={14} /> Filters {hasFilters && <span className="filter-dot" />}
           </button>
-          {myAssociateId && (
-            <button className={`btn ${onlyMine ? 'btn-soft' : 'btn-ghost'} !py-2`} onClick={toggleOnlyMine}>
-              <UserPlus size={14} /> {onlyMine ? 'My leads' : 'All leads'}
-            </button>
-          )}
-          <Tip content={<span className="text-[11.5px] leading-relaxed"><b>Ctrl/Cmd+A</b> select all · <b>Ctrl/Cmd+C</b> copy selected rows · <b>Ctrl/Cmd+V</b> paste into remarks · <b>Ctrl/Cmd+Z</b> undo · <b>Ctrl/Cmd+Shift+Z</b> redo</span>}>
+          <Tip content={<span className="text-xs leading-relaxed"><b>Ctrl/Cmd+A</b> select all · <b>Ctrl/Cmd+C</b> copy selected rows · <b>Ctrl/Cmd+V</b> paste into remarks · <b>Ctrl/Cmd+Z</b> undo · <b>Ctrl/Cmd+Shift+Z</b> redo</span>}>
             <button type="button" className="btn btn-ghost !p-2" aria-label="Keyboard shortcuts"><Keyboard size={14} /></button>
           </Tip>
         </div>
@@ -730,8 +880,8 @@ export default function Leads({ initialSearch = '' }) {
                     </div>
                   </div>
                   <div className="flex items-center gap-2 mt-3">
-                    <button className="btn btn-ghost !py-1.5 !text-[12px]" onClick={jumpToTable}>View in table</button>
-                    <button className="btn btn-ghost !py-1.5 !text-[12px]" onClick={() => setAiAlertOpen(false)}>Close</button>
+                    <button className="btn btn-ghost !py-1.5 !text-sm" onClick={jumpToTable}>View in table</button>
+                    <button className="btn btn-ghost !py-1.5 !text-sm" onClick={() => setAiAlertOpen(false)}>Close</button>
                   </div>
                 </div>,
                 document.body
@@ -809,22 +959,22 @@ export default function Leads({ initialSearch = '' }) {
             <option value="1">Flagged only</option>
           </Filter>
           <div>
-            <label className="text-[10.5px] uppercase tracking-wider text-slate-500 font-semibold mb-1 block">Min score</label>
+            <label className="text-xs uppercase tracking-wider text-slate-500 font-semibold mb-1 block">Min score</label>
             <input className="input !py-1.5" type="number" min={0} max={100} placeholder="e.g. 70" value={filters.minScore} onChange={setF('minScore')} />
           </div>
           <div>
-            <label className="text-[10.5px] uppercase tracking-wider text-slate-500 font-semibold mb-1 block">Created in last</label>
+            <label className="text-xs uppercase tracking-wider text-slate-500 font-semibold mb-1 block">Created in last</label>
             <select className="input !py-1.5" value={filters.createdWithinDays} onChange={setF('createdWithinDays')}>
               <option value="">Any time</option>
               <option value="7">7 days</option><option value="30">30 days</option><option value="90">90 days</option>
             </select>
           </div>
           <div>
-            <label className="text-[10.5px] uppercase tracking-wider text-slate-500 font-semibold mb-1 block">Created from</label>
+            <label className="text-xs uppercase tracking-wider text-slate-500 font-semibold mb-1 block">Created from</label>
             <input className="input !py-1.5" type="date" value={filters.dateFrom} onChange={setF('dateFrom')} />
           </div>
           <div>
-            <label className="text-[10.5px] uppercase tracking-wider text-slate-500 font-semibold mb-1 block">Created to</label>
+            <label className="text-xs uppercase tracking-wider text-slate-500 font-semibold mb-1 block">Created to</label>
             <input className="input !py-1.5" type="date" value={filters.dateTo} onChange={setF('dateTo')} />
           </div>
         </div>
@@ -850,12 +1000,13 @@ export default function Leads({ initialSearch = '' }) {
           )}
           {view === 'cards' && <CardsView items={items} lookup={lookup} openLead={openLead} grouped={grouped} collapsed={collapsed} toggleGroup={toggleGroup} boot={boot} onMessage={setComposeLead} onTemplateMessage={setTemplateLead} />}
           {view === 'compact' && <CompactView items={items} lookup={lookup} openLead={openLead} boot={boot} onMessage={setComposeLead} onTemplateMessage={setTemplateLead} />}
+          {loading && !items.length && <TableSkeleton rows={Math.min(pageSize, 10)} cols={Math.min(columns.filter(c => c.visible !== false).length || 7, 9)} />}
           {!loading && !items.length && <Empty icon={<Search size={20} />} title="No leads match your filters" subtitle="Try adjusting the filters, or import a CSV of leads." />}
         </div>
       )}
 
       {/* pagination */}
-      <div className="flex items-center justify-between text-[12.5px] text-slate-400">
+      <div className="flex items-center justify-between text-sm text-slate-400">
         <span>Showing {items.length} of {data?.total || 0} leads</span>
         <div className="flex items-center gap-2">
           <label className="flex items-center gap-2 mr-2">Rows
@@ -1009,12 +1160,12 @@ function QuickActionModal({ lead, mode, classType, amount, name, sessionId, memb
         </aside>
       </div>}
       {!isPay && <>
-        <label className="block"><span className="text-[11px] text-slate-500">Studio Session</span><select className="input mt-1" value={sessionId} onChange={e => { setSessionId(e.target.value); setMembershipId('') }} disabled={loadingOptions}><option value="">{loadingOptions ? 'Loading classes…' : 'Choose a class'}</option>{sessions.map(s => <option key={s.id} value={s.id}>{new Date(s.startsAt).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })} · {s.name} · {s.inPersonLocation?.name || 'Studio'}</option>)}</select></label>
-        <label className="block"><span className="text-[11px] text-slate-500">Active membership</span><select className="input mt-1" value={membershipId} onChange={e => { setMembershipId(e.target.value); setPurchaseMembershipId('') }} disabled={!sessionId}><option value="">{sessionId ? (activeMemberships.length ? 'Choose active membership' : 'No active membership — choose POS below') : 'Select a class first'}</option>{activeMemberships.map(m => <option key={m.bookingMembershipId || m.id} value={m.bookingMembershipId || m.id}>{m.name || m.membership?.name || 'Active membership'}{m.classesLeft != null ? ` · ${m.classesLeft} classes left` : ''}</option>)}</select></label>
+        <label className="block"><span className="text-xs text-slate-500">Studio Session</span><select className="input mt-1" value={sessionId} onChange={e => { setSessionId(e.target.value); setMembershipId('') }} disabled={loadingOptions}><option value="">{loadingOptions ? 'Loading classes…' : 'Choose a class'}</option>{sessions.map(s => <option key={s.id} value={s.id}>{new Date(s.startsAt).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })} · {s.name} · {s.inPersonLocation?.name || 'Studio'}</option>)}</select></label>
+        <label className="block"><span className="text-xs text-slate-500">Active membership</span><select className="input mt-1" value={membershipId} onChange={e => { setMembershipId(e.target.value); setPurchaseMembershipId('') }} disabled={!sessionId}><option value="">{sessionId ? (activeMemberships.length ? 'Choose active membership' : 'No active membership — choose POS below') : 'Select a class first'}</option>{activeMemberships.map(m => <option key={m.bookingMembershipId || m.id} value={m.bookingMembershipId || m.id}>{m.name || m.membership?.name || 'Active membership'}{m.classesLeft != null ? ` · ${m.classesLeft} classes left` : ''}</option>)}</select></label>
       </>}
       {!isPay && !membershipId && <><section className="quick-sale-section quick-sale-cart"><span>Cart</span><div className="quick-sale-item"><b>Membership</b><select className="input" value={purchaseMembershipId} onChange={e => setPurchaseMembershipId(e.target.value)}><option value="">Select featured membership</option>{catalog.map(m => { const price = Number(m.price ?? m.priceInCurrency ?? m.defaultPrice ?? 0); return <option key={m.id} value={m.id}>{m.name} · ₹{price.toLocaleString('en-IN')}</option> })}</select>{selectedCatalogItem && <div><strong>{selectedCatalogItem.name}</strong><small>Featured Momence membership</small><b>₹{selectedPrice.toLocaleString('en-IN')}</b></div>}</div></section><div className="quick-sale-summary"><section className="quick-sale-section"><span>Discounts</span><small>Discount eligibility is validated by Momence during checkout.</small></section><section className="quick-sale-section"><span>Totals</span><div><small>Selected item</small><strong>₹{selectedPrice.toLocaleString('en-IN')}</strong></div><div><small>Total submitted to Momence POS</small><strong>₹{selectedPrice.toLocaleString('en-IN')}</strong></div></section></div><section className="quick-sale-section"><span>Payment</span><div className="quick-sale-payment-tabs"><button type="button" className="active">Other</button></div><select className="input" value={paymentMethodId} onChange={e => setPaymentMethodId(e.target.value)}><option value="">Select payment method</option>{paymentMethods.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}</select></section></>}
-      {url && <div className="rounded-xl border border-emerald-400/25 bg-emerald-500/10 p-3 text-[12px]"><strong className="block text-emerald-400">Payment link created</strong><a className="break-all text-slate-300 underline" href={url} target="_blank" rel="noreferrer">{url}</a></div>}
-      {status && !url && <div className="rounded-xl border border-emerald-400/25 bg-emerald-500/10 p-3 text-[12px] text-emerald-400">{isPay ? 'Checkout' : 'Booking'} status: {status}</div>}
+      {url && <div className="rounded-xl border border-emerald-400/25 bg-emerald-500/10 p-3 text-sm"><strong className="block text-emerald-400">Payment link created</strong><a className="break-all text-slate-300 underline" href={url} target="_blank" rel="noreferrer">{url}</a></div>}
+      {status && !url && <div className="rounded-xl border border-emerald-400/25 bg-emerald-500/10 p-3 text-sm text-emerald-400">{isPay ? 'Checkout' : 'Booking'} status: {status}</div>}
       <div className="flex justify-end gap-2"><button className="btn btn-ghost" onClick={onClose}>Cancel</button>{url && <button className="btn btn-soft" onClick={() => navigator.clipboard?.writeText(url)}><Copy size={13} /> Copy link</button>}<button className="btn btn-primary" disabled={isPay ? ((!stripeItems.length && !(Number(amount) > 0)) || (stripeOptions.promotionMode === 'auto' && !stripeOptions.promotionCodeId) || (stripeOptions.afterCompletion === 'redirect' && !stripeOptions.redirectUrl)) : (!sessionId || (!membershipId && (!purchaseMembershipId || !paymentMethodId)))} onClick={onSubmit}>{isPay ? 'Create payment link' : purchaseMembershipId ? 'Confirm purchase & book' : 'Book member'}</button></div>
     </div>
   </Modal>
@@ -1039,7 +1190,7 @@ function groupKey(l, by, lookup) {
 }
 
 function ColumnsToggleIcon({ pinned }) {
-  return <span className={`inline-flex w-4 h-4 rounded border items-center justify-center text-[9px] ${pinned ? 'bg-rose-500/20 border-rose-400/30 text-rose-300' : 'bg-white/5 border-white/10 text-slate-400'}`}>▥</span>
+  return <span className={`inline-flex w-4 h-4 rounded border items-center justify-center text-2xs ${pinned ? 'bg-rose-500/20 border-rose-400/30 text-rose-300' : 'bg-white/5 border-white/10 text-slate-400'}`}>▥</span>
 }
 
 function OwnerFilter({ associates, selected, onSelect }) {
@@ -1341,6 +1492,43 @@ function TableGrid({ items, boot, lookup, openLead, openQuickAction, changeStage
   }
   const py = ''
   const [scoreTip, setScoreTip] = useState(null)
+  // Keyboard triage: j/k or arrows walk the rows, Enter opens the drawer,
+  // x selects. Typing into an input or select never steals these keys.
+  const [cursorIndex, setCursorIndex] = useState(-1)
+  const rowCount = displayedItems.length
+  useEffect(() => { if (cursorIndex >= rowCount) setCursorIndex(rowCount - 1) }, [rowCount, cursorIndex])
+  useEffect(() => {
+    const onKey = (e) => {
+      const el = e.target
+      if (el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName))) return
+      if (e.metaKey || e.ctrlKey || e.altKey) return
+      const key = e.key
+      if (key === 'j' || key === 'ArrowDown') { e.preventDefault(); setCursorIndex(i => Math.min(i + 1, rowCount - 1)) }
+      else if (key === 'k' || key === 'ArrowUp') { e.preventDefault(); setCursorIndex(i => Math.max(i - 1, 0)) }
+      else if (key === 'Enter' && cursorIndex >= 0) { e.preventDefault(); openLead(displayedItems[cursorIndex]?.id) }
+      else if (key === 'x' && cursorIndex >= 0) { e.preventDefault(); toggleSelect(displayedItems[cursorIndex]?.id) }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [rowCount, cursorIndex, displayedItems, openLead, toggleSelect])
+
+  useEffect(() => {
+    if (cursorIndex < 0) return
+    document.querySelector(`[data-row-index="${cursorIndex}"]`)?.scrollIntoView({ block: 'nearest' })
+  }, [cursorIndex])
+
+  // Left-rail heat: how long an open lead has gone untouched. Turns the
+  // directory into a worklist you can triage without reading a single cell.
+  // Won and lost rows are done, so they never carry heat.
+  const stalenessOf = (lead) => {
+    if (lead.status !== 'open') return 'none'
+    const idle = Number(lead.fu?.lastOutreachDays ?? 0)
+    if ((lead.fu?.missedCount || 0) > 1 || idle > cadenceDays * 3) return 'critical'
+    if ((lead.fu?.missedCount || 0) > 0 || idle > cadenceDays) return 'warn'
+    if (idle > cadenceDays / 2) return 'soon'
+    return 'ok'
+  }
+
   const requiredMinWidths = { stage: 178, source: 194, owner: 260, location: 280, status: 146, statusGroup: 180, score: 92 }
   const widthOf = (id, fallback) => Math.max(requiredMinWidths[id] || 0, Number(colWidths[id]) || fallback)
   const selectW = widthOf('select', 76)
@@ -1391,12 +1579,12 @@ function TableGrid({ items, boot, lookup, openLead, openQuickAction, changeStage
       {focusLeadIds.length > 0 && (
         <div className="px-4 pt-4 pb-3 flex items-center gap-2">
           <span className="chip bg-rose-500/15 border border-rose-400/25 text-rose-300">{focusLeadIds.length} highlighted lead{focusLeadIds.length === 1 ? '' : 's'}</span>
-          <button className="btn btn-ghost !py-1.5 !text-[12px]" onClick={clearFocus}>Show all leads</button>
+          <button className="btn btn-ghost !py-1.5 !text-sm" onClick={clearFocus}>Show all leads</button>
         </div>
       )}
       <table className={`data-table leads-data-table is-${density} ${fixedCols ? 'has-sticky-cols' : ''}`} style={{ '--lead-row-height': `${rowHeight}px`, '--col-select-width': `${selectW}px`, '--col-lead-width': `${leadW}px`, '--col-stage-width': `${stageW}px` }}>
         <thead className={headerPinned ? 'is-pinned' : 'is-unpinned'}>
-          <tr className="text-[10.5px] uppercase tracking-wider text-slate-500 border-b border-white/8">
+          <tr className="text-xs uppercase tracking-wider text-slate-500 border-b border-white/8">
             <th className={`resizable-th sticky-col sticky-col-select px-3 py-3 font-semibold`} style={{ width: selectW, minWidth: selectW }}>
               <button className="flex items-center justify-center text-slate-400 hover:text-white" onClick={toggleSelectAll}>
                 {allChecked ? <CheckSquare size={15} className="text-rose-400" /> : <Square size={15} />}
@@ -1434,7 +1622,15 @@ function TableGrid({ items, boot, lookup, openLead, openQuickAction, changeStage
             const rowManualFlags = manualFlagOverrides[l.id] || l.manualFlags || []
             const rowFlagged = rowManualFlags.some(f => f.id === 'focus')
             return (
-              <tr key={l.id} className={`border-b border-white/5 hover:bg-white/[0.035] cursor-pointer transition-colors ${selected?.has(l.id) ? 'is-selected' : ''} ${focusLeadIds.includes(l.id) ? 'is-focused' : ''}`} style={{ '--row-index': idx }} onClick={() => openLead(l.id)}>
+              <tr
+                key={l.id}
+                data-row-index={idx}
+                data-lead-id={l.id}
+                tabIndex={-1}
+                className={`border-b border-white/5 hover:bg-white/[0.035] cursor-pointer transition-colors ${selected?.has(l.id) ? 'is-selected' : ''} ${focusLeadIds.includes(l.id) ? 'is-focused' : ''} ${cursorIndex === idx ? 'is-cursor' : ''} stale-${stalenessOf(l)}`}
+                style={{ '--row-index': idx }}
+                onClick={() => openLead(l.id)}
+              >
                 <td className={`sticky-col sticky-col-select px-3 ${py}`} style={{ width: selectW, minWidth: selectW }} onClick={e => e.stopPropagation()}>
                   <div className="flex items-center gap-2">
                     <button className="flex items-center justify-center text-slate-400 hover:text-white" onClick={() => toggleSelect(l.id)}>
@@ -1451,7 +1647,7 @@ function TableGrid({ items, boot, lookup, openLead, openQuickAction, changeStage
                       {properName(l.fullName)}
                       {l.stripePayment && <Tip content={l.stripePayment.status === 'paid' ? `Payment captured${l.stripePayment.paidAt ? ` · ${new Date(l.stripePayment.paidAt).toLocaleDateString('en-IN')}` : ''}` : `Payment link · ${l.stripePayment.status}`}><button type="button" className={`lead-payment-indicator ${l.stripePayment.status === 'paid' ? 'is-paid' : 'is-pending'}`} onClick={event => { event.stopPropagation(); openQuickAction(l, 'stripe') }} aria-label={`Stripe payment ${l.stripePayment.status}`}><IndianRupee size={11} /></button></Tip>}
                       {[...rowManualFlags, ...(l.flags || [])].map(f => (
-                        <span key={f.id} title={f.name} className="chip !px-1.5 !py-0 text-[9px]" style={{ background: `${f.color}22`, color: f.color, border: `1px solid ${f.color}44` }}>{f.label}</span>
+                        <span key={f.id} title={f.name} className="chip !px-1.5 !py-0 text-2xs" style={{ background: `${f.color}22`, color: f.color, border: `1px solid ${f.color}44` }}>{f.label}</span>
                       ))}
                     </div>
                     {density === 'compact' && <div className="lead-compact-meta"><span>{l.sourceName || 'No source'}</span><span>{owner?.name || 'Unassigned'}</span></div>}
@@ -1482,7 +1678,7 @@ function TableGrid({ items, boot, lookup, openLead, openQuickAction, changeStage
                 <td className={`px-4 ${py} lead-date-cell`} style={{ width: widthOf('createdAt', 180), minWidth: widthOf('createdAt', 180) }}>
                   {l.createdAt
                     ? (
-                      <Tip content={<span className="text-[11.5px]">{fmtDate(l.createdAt)}</span>}>
+                      <Tip content={<span className="text-xs">{fmtDate(l.createdAt)}</span>}>
                         <span className="lead-date-value"><Calendar size={12} /> {fmtDateCompact(l.createdAt)}</span>
                       </Tip>
                     )
@@ -1491,7 +1687,7 @@ function TableGrid({ items, boot, lookup, openLead, openQuickAction, changeStage
                 {visibleCols.map(c => {
                   if (c.field === 'phone') {
                     return (
-                      <td key={c.id} className={`px-4 ${py} text-[12.5px] mono text-slate-400`}>
+                      <td key={c.id} className={`px-4 ${py} text-sm mono text-slate-400`}>
                         {l.phone
                           ? <span className="inline-flex items-center gap-1.5"><span aria-hidden="true">{phoneCountryFlag(l.phone)}</span>{l.phone}</span>
                           : <span className="table-empty-icon" title="No phone number"><PhoneOff size={13} /></span>}
@@ -1507,7 +1703,7 @@ function TableGrid({ items, boot, lookup, openLead, openQuickAction, changeStage
                       <td key={c.id} className={`px-4 ${py} lead-date-cell`}>
                         {raw
                           ? (
-                            <Tip content={<span className="text-[11.5px]">{fmtDate(raw)}</span>}>
+                            <Tip content={<span className="text-xs">{fmtDate(raw)}</span>}>
                               <span className="lead-date-value"><CalendarDays size={12} /> {fmtDateCompact(raw)}</span>
                             </Tip>
                           )
@@ -1517,7 +1713,7 @@ function TableGrid({ items, boot, lookup, openLead, openQuickAction, changeStage
                   }
                   if (c.field === 'source') {
                     return (
-                      <td key={c.id} className={`px-4 ${py} text-[12.5px] text-slate-400 truncate`}>
+                      <td key={c.id} className={`px-4 ${py} text-sm text-slate-400 truncate`}>
                         <select className="table-inline-select" value={l.sourceName || ''} onClick={e => e.stopPropagation()} onChange={e => changeLeadFieldConfirmed(l, { sourceName: e.target.value }, 'source')}>
                           <option value="">No source</option>
                           {(boot?.sources || []).map(source => { const name = typeof source === 'string' ? source : source.name; return <option key={typeof source === 'string' ? source : source.id || name} value={name}>{name}</option> })}
@@ -1539,11 +1735,11 @@ function TableGrid({ items, boot, lookup, openLead, openQuickAction, changeStage
                     return <td key={c.id} className={`px-4 ${py}`}><span className={`status-readonly status-${l.status || 'open'}`}>{l.status || 'open'}</span></td>
                   }
                   if (c.field === 'statusGroup') {
-                    return <td key={c.id} className={`px-4 ${py} text-[12.5px] text-left ${l.statusGroup === 'Membership Sold' ? 'text-emerald-400' : l.statusGroup === 'Trial Completed' ? 'text-sky-400' : 'text-slate-400'}`}>{l.statusGroup || 'Pre-Trial'}</td>
+                    return <td key={c.id} className={`px-4 ${py} text-sm text-left ${l.statusGroup === 'Membership Sold' ? 'text-emerald-400' : l.statusGroup === 'Trial Completed' ? 'text-sky-400' : 'text-slate-400'}`}>{l.statusGroup || 'Pre-Trial'}</td>
                   }
                   if (c.field === 'score') {
                     return (
-                      <td key={c.id} className={`px-4 ${py} text-[12.5px] mono text-slate-300`} onClick={e => e.stopPropagation()}>
+                      <td key={c.id} className={`px-4 ${py} text-sm mono text-slate-300`} onClick={e => e.stopPropagation()}>
                         <button className="score-detail-trigger" onClick={(e) => setScoreTip({ lead: l, x: e.clientX, y: e.clientY })} title="View score calculation">
                           <ScorePill score={l.ai?.score || 0} />
                         </button>
@@ -1553,7 +1749,7 @@ function TableGrid({ items, boot, lookup, openLead, openQuickAction, changeStage
                   const val = getColumnValue(c, l, lookup)
                   const formatted = formatColumnValue(val, c)
                   return (
-                    <td key={c.id} className={`px-4 ${py} text-[12.5px] ${c.type === 'number' || c.type === 'currency' || c.type === 'percent' ? 'mono text-slate-300' : 'text-slate-400'}`}>
+                    <td key={c.id} className={`px-4 ${py} text-sm ${c.type === 'number' || c.type === 'currency' || c.type === 'percent' ? 'mono text-slate-300' : 'text-slate-400'}`}>
                       {formatted === '—' ? <EmptyCell /> : <span className="table-cell-fit" title={String(formatted ?? '')} style={{ maxWidth: '100%' }}>{formatted}</span>}
                     </td>
                   )
@@ -1837,8 +2033,8 @@ function ScoreDetailsPopover({ tip, onClose }) {
         <div className="flex items-center gap-2 mb-2">
           <ScorePill score={lead.ai?.score || 0} />
           <div className="min-w-0">
-            <div className="text-[13px] font-bold text-white truncate">{lead.fullName}</div>
-            <div className="text-[11px] text-slate-500">Score calculation details</div>
+            <div className="text-base font-bold text-white truncate">{lead.fullName}</div>
+            <div className="text-xs text-slate-500">Score calculation details</div>
           </div>
           <button className="ml-auto btn btn-ghost !p-1.5" onClick={onClose}><X size={12} /></button>
         </div>
@@ -1851,7 +2047,7 @@ function ScoreDetailsPopover({ tip, onClose }) {
             </div>
           ))}
         </div>
-        {lead.ai?.summary && <p className="mt-2 text-[11.5px] text-slate-400 leading-relaxed">{lead.ai.summary}</p>}
+        {lead.ai?.summary && <p className="mt-2 text-xs text-slate-400 leading-relaxed">{lead.ai.summary}</p>}
       </div>
     </div>,
     document.body
@@ -1977,7 +2173,7 @@ function QuickFollowUpPopover({ lead, fuIndex, followUpItem, pos, onClose }) {
         style={{ width: 290, background: 'var(--tt-bg)', animation: 'fadeIn .12s ease' }}
       >
         <div className="flex items-center gap-2">
-          <span className="text-[11.5px] font-semibold text-white flex-1">Log follow-up</span>
+          <span className="text-xs font-semibold text-white flex-1">Log follow-up</span>
           <button type="button" className="text-slate-500 hover:text-white" onClick={onClose}><X size={13} /></button>
         </div>
         <div className="flex gap-1.5">
@@ -2000,12 +2196,12 @@ function QuickFollowUpPopover({ lead, fuIndex, followUpItem, pos, onClose }) {
         </div>
         <input
           autoFocus
-          className="input !py-1.5 !text-[12px]"
+          className="input !py-1.5 !text-sm"
           placeholder="Note / outcome…"
           value={comments}
           onChange={e => setComments(e.target.value)}
         />
-        <button className="btn btn-primary !py-1.5 !text-[12px] w-full" type="submit" disabled={saving || !comments.trim()}>
+        <button className="btn btn-primary !py-1.5 !text-sm w-full" type="submit" disabled={saving || !comments.trim()}>
           {saving ? 'Saving…' : 'Log follow-up'}
         </button>
       </form>
@@ -2024,12 +2220,12 @@ function FuTip({ lead, followUpItem, isMissed }) {
         <span className="w-6 h-6 rounded-lg flex items-center justify-center" style={{ background: `${meta.color}1e`, color: meta.color }}>
           <meta.icon size={12} />
         </span>
-        <span className="text-[12px] font-bold text-white">{meta.label}</span>
-        {isMissed && <span className="chip !px-1.5 !py-0.5 text-[9px] bg-rose-500/20 text-rose-300">missed</span>}
-        {comments && !isMissed && <span className="chip !px-1.5 !py-0.5 text-[9px] bg-emerald-500/15 text-emerald-300">done</span>}
-        {date && <span className="ml-auto text-[11px] text-slate-500 mono">{fmtDate(date)}</span>}
+        <span className="text-sm font-bold text-white">{meta.label}</span>
+        {isMissed && <span className="chip !px-1.5 !py-0.5 text-2xs bg-rose-500/20 text-rose-300">missed</span>}
+        {comments && !isMissed && <span className="chip !px-1.5 !py-0.5 text-2xs bg-emerald-500/15 text-emerald-300">done</span>}
+        {date && <span className="ml-auto text-xs text-slate-500 mono">{fmtDate(date)}</span>}
       </div>
-      <div className="text-[11.5px] text-slate-400 leading-relaxed">{comments || `No ${meta.label} follow-up logged yet.`}</div>
+      <div className="text-xs text-slate-400 leading-relaxed">{comments || `No ${meta.label} follow-up logged yet.`}</div>
     </div>
   )
 }
@@ -2045,22 +2241,22 @@ function CardsView({ items, lookup, openLead, grouped, collapsed, toggleGroup, b
             <div className="flex items-center gap-2.5 mb-2">
               <Avatar name={l.fullName} color={owner?.color} size={34} />
               <div className="flex-1 min-w-0">
-                <div className="text-[13px] font-semibold text-white truncate flex items-center gap-1.5">
+                <div className="text-base font-semibold text-white truncate flex items-center gap-1.5">
                   {l.fullName}
-                  {(l.flags || []).map(f => <span key={f.id} title={f.name} className="chip !px-1.5 !py-0 text-[9px]" style={{ background: `${f.color}22`, color: f.color, border: `1px solid ${f.color}44` }}>{f.label}</span>)}
+                  {(l.flags || []).map(f => <span key={f.id} title={f.name} className="chip !px-1.5 !py-0 text-2xs" style={{ background: `${f.color}22`, color: f.color, border: `1px solid ${f.color}44` }}>{f.label}</span>)}
                 </div>
-                <div className="text-[11px] text-slate-500 truncate">{lookup.locById[l.locationId]?.name?.split(',')[0] || '—'}</div>
+                <div className="text-xs text-slate-500 truncate">{lookup.locById[l.locationId]?.name?.split(',')[0] || '—'}</div>
               </div>
               <ScorePill score={l.ai.score} />
             </div>
             <div className="flex flex-wrap items-center gap-1.5 mb-2.5">
-              <span className={`chip !py-0.5 !px-2 text-[10px] ${riskClass(l.ai.risk)}`}>{l.ai.risk}</span>
-              <span className={`chip stage-badge !py-0.5 !px-2 !w-auto !h-auto text-[10px]`} style={stageBadgeStyle(l.stage)}>{l.stage}</span>
-              <span className="chip bg-white/5 border border-white/10 text-slate-400 !py-0.5 !px-2 text-[10px]">{l.sourceName}</span>
+              <span className={`chip !py-0.5 !px-2 text-xs ${riskClass(l.ai.risk)}`}>{l.ai.risk}</span>
+              <span className={`chip stage-badge !py-0.5 !px-2 !w-auto !h-auto text-xs`} style={stageBadgeStyle(l.stage)}>{l.stage}</span>
+              <span className="chip bg-white/5 border border-white/10 text-slate-400 !py-0.5 !px-2 text-xs">{l.sourceName}</span>
             </div>
-            <div className="text-[11.5px] text-slate-400 truncate mb-2.5">{l.ai?.nextAction?.text}</div>
+            <div className="text-xs text-slate-400 truncate mb-2.5">{l.ai?.nextAction?.text}</div>
             <div className="flex items-center gap-2 border-t border-white/6 pt-2">
-              <span className="text-[11px] text-slate-500 truncate flex-1">{owner ? owner.name : 'Unassigned'}</span>
+              <span className="text-xs text-slate-500 truncate flex-1">{owner ? owner.name : 'Unassigned'}</span>
               {Object.keys(CHANNELS).map(ch => {
                 const filled = !!l.fu?.outreach?.[ch]?.filled
                 const Icon = CHANNELS[ch].icon
@@ -2070,7 +2266,7 @@ function CardsView({ items, lookup, openLead, grouped, collapsed, toggleGroup, b
                   </span>
                 )
               })}
-              {nextFu && <span className="text-[11px] mono text-slate-500">{fmtDate(nextFu.date)}</span>}
+              {nextFu && <span className="text-xs mono text-slate-500">{fmtDate(nextFu.date)}</span>}
               <span role="button" tabIndex={0} className="inline-flex w-6 h-6 rounded-md items-center justify-center border border-emerald-400/40 bg-emerald-400/10 text-emerald-400 hover:bg-emerald-400/20" title="Message via Respond.io" onClick={e => { e.stopPropagation(); onMessage(l) }}>
                 <MessageCircle size={11} />
               </span>
@@ -2093,7 +2289,7 @@ function CardsView({ items, lookup, openLead, grouped, collapsed, toggleGroup, b
             <div key={g.key}>
               <button className="w-full flex flex-wrap items-center gap-3 px-4 py-3 bg-white/[0.025] hover:bg-white/[0.045] border-b border-white/8 text-left transition-colors" onClick={() => toggleGroup(g.key)}>
                 <ChevronRight size={14} className={`text-slate-500 transition-transform shrink-0 ${isOpen ? 'rotate-90' : ''}`} />
-                <span className="font-display text-[13.5px] font-semibold text-white shrink-0">{g.key}</span>
+                <span className="font-display text-base font-semibold text-white shrink-0">{g.key}</span>
                 <GroupSummary list={g.list} />
               </button>
               {isOpen && inner(g.list)}
@@ -2116,12 +2312,12 @@ function CompactView({ items, lookup, openLead, boot, onMessage, onTemplateMessa
           <button key={l.id} className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-white/[0.03] text-left transition-colors" onClick={() => openLead(l.id)}>
             <Avatar name={l.fullName} color={owner?.color} size={28} />
             <div className="min-w-0 w-[200px]">
-              <div className="text-[12.5px] font-semibold text-white truncate">{l.fullName}</div>
-              <div className="text-[10.5px] text-slate-500 truncate">{l.phone}</div>
+              <div className="text-sm font-semibold text-white truncate">{l.fullName}</div>
+              <div className="text-xs text-slate-500 truncate">{l.phone}</div>
             </div>
-            <span className={`chip !py-0.5 !px-2 text-[10px] hidden sm:inline-flex ${riskClass(l.ai.risk)}`}>{l.ai.risk}</span>
-            <span className="text-[12px] text-slate-400 w-[130px] truncate hidden md:block">{l.stage}</span>
-            <span className="text-[12px] text-slate-400 w-[120px] truncate hidden lg:block">{owner?.name || 'Unassigned'}</span>
+            <span className={`chip !py-0.5 !px-2 text-xs hidden sm:inline-flex ${riskClass(l.ai.risk)}`}>{l.ai.risk}</span>
+            <span className="text-sm text-slate-400 w-[130px] truncate hidden md:block">{l.stage}</span>
+            <span className="text-sm text-slate-400 w-[120px] truncate hidden lg:block">{owner?.name || 'Unassigned'}</span>
             <div className="flex items-center gap-1.5 ml-auto">
               {Object.keys(CHANNELS).map(ch => {
                 const filled = !!l.fu?.outreach?.[ch]?.filled
@@ -2132,7 +2328,7 @@ function CompactView({ items, lookup, openLead, boot, onMessage, onTemplateMessa
                   </span>
                 )
               })}
-              {nextFu && <span className={`text-[11px] mono ml-1 ${daysFromNow(nextFu.date) < 0 ? 'text-rose-400' : 'text-slate-500'}`}>{fmtDate(nextFu.date)}</span>}
+              {nextFu && <span className={`text-xs mono ml-1 ${daysFromNow(nextFu.date) < 0 ? 'text-rose-400' : 'text-slate-500'}`}>{fmtDate(nextFu.date)}</span>}
               <ScorePill score={l.ai.score} />
               <span role="button" tabIndex={0} className="inline-flex w-6 h-6 rounded-md items-center justify-center border border-emerald-400/40 bg-emerald-400/10 text-emerald-400 hover:bg-emerald-400/20" title="Message via Respond.io" onClick={e => { e.stopPropagation(); onMessage(l) }}>
                 <MessageCircle size={11} />
@@ -2173,28 +2369,28 @@ function SummaryView({ items, boot, lookup }) {
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
       <div className="card p-4">
-        <h3 className="font-display font-semibold text-white text-[13px] mb-3">Pipeline value</h3>
+        <h3 className="font-display font-semibold text-white text-base mb-3">Pipeline value</h3>
         <div className="grid grid-cols-2 gap-2 mb-4">
           <Mini label="Open leads" value={open} color="#06b6d4" />
           <Mini label="Hot right now" value={hot} color="#fb7185" />
           <Mini label="Won" value={won} color="#34d399" />
           <Mini label="Lost" value={lost} color="#94a3b8" />
         </div>
-        <div className="flex items-center justify-between text-[12px]">
+        <div className="flex items-center justify-between text-sm">
           <span className="text-slate-400">Est. pipeline</span>
           <span className="font-display font-bold text-white mono">{money(estValue)}</span>
         </div>
-        <div className="flex items-center justify-between text-[12px] mt-1.5">
+        <div className="flex items-center justify-between text-sm mt-1.5">
           <span className="text-slate-400">Avg intent score</span>
           <span className="mono text-fuchsia-300 font-semibold">{avgScore}</span>
         </div>
       </div>
 
       <div className="card p-4">
-        <h3 className="font-display font-semibold text-white text-[13px] mb-3">Stage distribution</h3>
+        <h3 className="font-display font-semibold text-white text-base mb-3">Stage distribution</h3>
         <div className="space-y-2">
           {Object.entries(byStage).map(([stage, count]) => (
-            <div key={stage} className="flex items-center gap-2 text-[12px]">
+            <div key={stage} className="flex items-center gap-2 text-sm">
               <span className="w-[120px] text-slate-400 truncate">{stage}</span>
               <div className="flex-1 h-2 rounded-full bg-white/5 overflow-hidden">
                 <div className="h-full rounded-full" style={{ width: `${(count / maxStage) * 100}%`, background: colorForStage(stage) }} />
@@ -2206,10 +2402,10 @@ function SummaryView({ items, boot, lookup }) {
       </div>
 
       <div className="card p-4">
-        <h3 className="font-display font-semibold text-white text-[13px] mb-3">Source mix</h3>
+        <h3 className="font-display font-semibold text-white text-base mb-3">Source mix</h3>
         <div className="space-y-2">
           {Object.entries(bySource).sort((a, b) => b[1] - a[1]).map(([src, count]) => (
-            <div key={src} className="flex items-center gap-2 text-[12px]">
+            <div key={src} className="flex items-center gap-2 text-sm">
               <span className="w-[140px] text-slate-400 truncate">{src}</span>
               <div className="flex-1 h-2 rounded-full bg-white/5 overflow-hidden">
                 <div className="h-full rounded-full bg-violet-400/70" style={{ width: `${(count / Math.max(1, ...Object.values(bySource))) * 100}%` }} />
@@ -2221,10 +2417,10 @@ function SummaryView({ items, boot, lookup }) {
       </div>
 
       <div className="card p-4 md:col-span-2 xl:col-span-1">
-        <h3 className="font-display font-semibold text-white text-[13px] mb-3">Owner load</h3>
+        <h3 className="font-display font-semibold text-white text-base mb-3">Owner load</h3>
         <div className="space-y-2">
           {Object.entries(byOwner).sort((a, b) => b[1] - a[1]).map(([name, count]) => (
-            <div key={name} className="flex items-center gap-2 text-[12px]">
+            <div key={name} className="flex items-center gap-2 text-sm">
               <span className="w-[140px] text-slate-400 truncate">{name}</span>
               <div className="flex-1 h-2 rounded-full bg-white/5 overflow-hidden">
                 <div className="h-full rounded-full bg-emerald-400/70" style={{ width: `${(count / Math.max(1, ...Object.values(byOwner))) * 100}%` }} />
@@ -2241,8 +2437,8 @@ function SummaryView({ items, boot, lookup }) {
 function Mini({ label, value, color }) {
   return (
     <div className="rounded-xl bg-white/[0.03] border border-white/6 px-3 py-2">
-      <div className="font-display text-[19px] font-bold mono" style={{ color }}>{value}</div>
-      <div className="text-[10px] uppercase tracking-wider text-slate-500 mt-0.5">{label}</div>
+      <div className="font-display text-lg font-bold mono" style={{ color }}>{value}</div>
+      <div className="text-xs uppercase tracking-wider text-slate-500 mt-0.5">{label}</div>
     </div>
   )
 }
@@ -2279,7 +2475,7 @@ function KanbanView({ items, boot, lookup, openLead, changeStage, changeLeadFiel
           onDrop={e => { e.preventDefault(); const leadId = e.dataTransfer.getData('text/lead-id'); setDragOver(''); moveLead(leadId, col.value) }}>
           <div className="px-3 py-2.5 flex items-center gap-2">
             <span className={`pipeline-stage-badge ${field === 'stage' ? stageClass(col.label) : ''}`} style={field === 'stage' ? stageBadgeStyle(col.label) : undefined} title={col.label}>{col.label}</span>
-            <span className="ml-auto chip bg-white/6 border border-white/10 text-slate-400 mono !py-0.5 !px-2 text-[11px]">{col.leads.length}</span>
+            <span className="ml-auto chip bg-white/6 border border-white/10 text-slate-400 mono !py-0.5 !px-2 text-xs">{col.leads.length}</span>
           </div>
           <div className="flex-1 px-2 pb-2 space-y-2 max-h-[560px] overflow-y-auto scrollbar-thin">
             {col.leads.map(l => {
@@ -2289,11 +2485,11 @@ function KanbanView({ items, boot, lookup, openLead, changeStage, changeLeadFiel
                   <div className="flex items-center gap-2 mb-1.5">
                     <Avatar name={l.fullName} color={owner?.color} size={26} />
                     <div className="flex-1 min-w-0">
-                      <div className="text-[12.5px] font-semibold text-white truncate flex items-center gap-1">
+                      <div className="text-sm font-semibold text-white truncate flex items-center gap-1">
                         {l.fullName}
-                        {(l.flags || []).map(f => <span key={f.id} title={f.name} className="chip !px-1 !py-0 text-[8.5px]" style={{ background: `${f.color}22`, color: f.color, border: `1px solid ${f.color}44` }}>{f.label}</span>)}
+                        {(l.flags || []).map(f => <span key={f.id} title={f.name} className="chip !px-1 !py-0 text-2xs" style={{ background: `${f.color}22`, color: f.color, border: `1px solid ${f.color}44` }}>{f.label}</span>)}
                       </div>
-                      <div className="text-[10.5px] text-slate-500 truncate">{owner?.name || 'Unassigned'}</div>
+                      <div className="text-xs text-slate-500 truncate">{owner?.name || 'Unassigned'}</div>
                     </div>
                     <ScorePill score={l.ai.score} />
                   </div>
@@ -2311,7 +2507,7 @@ function KanbanView({ items, boot, lookup, openLead, changeStage, changeLeadFiel
                 </div>
               )
             })}
-            {!col.leads.length && <div className="text-[11px] text-slate-600 text-center py-5">No leads</div>}
+            {!col.leads.length && <div className="text-xs text-slate-600 text-center py-5">No leads</div>}
           </div>
         </div>
       ))}
@@ -2335,7 +2531,7 @@ function TimelineView({ items, lookup, openLead }) {
       {groups.map(([month, list]) => (
         <div key={month} className="card p-4">
           <div className="flex items-center gap-3 mb-3">
-            <span className="font-display font-semibold text-white text-[13px]">{new Date(month + '-01').toLocaleString('en-US', { month: 'long', year: 'numeric' })}</span>
+            <span className="font-display font-semibold text-white text-base">{new Date(month + '-01').toLocaleString('en-US', { month: 'long', year: 'numeric' })}</span>
             <span className="chip bg-white/5 border border-white/10 text-slate-400 !px-2 !py-0.5">{list.length} leads</span>
             <span className="chip bg-emerald-500/10 text-emerald-300 border border-emerald-400/20 !px-2 !py-0.5">{list.filter(l => l.status === 'won').length} won</span>
           </div>
@@ -2346,11 +2542,11 @@ function TimelineView({ items, lookup, openLead }) {
                 <button key={l.id} className="w-full flex items-center gap-3 px-3 py-2 rounded-xl hover:bg-white/[0.04] text-left transition-colors" onClick={() => openLead(l.id)}>
                   <Avatar name={l.fullName} color={owner?.color} size={26} />
                   <div className="flex-1 min-w-0">
-                    <div className="text-[12.5px] font-semibold text-white truncate">{l.fullName}</div>
-                    <div className="text-[11px] text-slate-500 truncate">{l.ai?.nextAction?.text}</div>
+                    <div className="text-sm font-semibold text-white truncate">{l.fullName}</div>
+                    <div className="text-xs text-slate-500 truncate">{l.ai?.nextAction?.text}</div>
                   </div>
-                  <span className={`chip !py-0.5 !px-2 text-[10px] ${stageClass(l.stage)}`} style={stageBadgeStyle(l.stage)}>{l.stage}</span>
-                  <span className="text-[11px] text-slate-500 mono hidden sm:block">{fmtDate(l.createdAt)}</span>
+                  <span className={`chip !py-0.5 !px-2 text-xs ${stageClass(l.stage)}`} style={stageBadgeStyle(l.stage)}>{l.stage}</span>
+                  <span className="text-xs text-slate-500 mono hidden sm:block">{fmtDate(l.createdAt)}</span>
                 </button>
               )
             })}
@@ -2364,7 +2560,7 @@ function TimelineView({ items, lookup, openLead }) {
 function Filter({ label, value, onChange, children, disabled }) {
   return (
     <div>
-      <label className="text-[10.5px] uppercase tracking-wider text-slate-500 font-semibold mb-1 block">{label}</label>
+      <label className="text-xs uppercase tracking-wider text-slate-500 font-semibold mb-1 block">{label}</label>
       <select className="input !py-1.5" value={value} onChange={onChange} disabled={disabled}>{children}</select>
     </div>
   )

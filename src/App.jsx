@@ -23,66 +23,85 @@ import SettingsPage from './pages/Settings.jsx'
 import MomenceSchedule, { formatTone, personName, time as fmtSessionTime } from './pages/MomenceSchedule.jsx'
 import LeadDrawer from './components/LeadDrawer.jsx'
 import AddLeadModal from './components/AddLeadModal.jsx'
+import CommandPalette from './components/CommandPalette.jsx'
 import AlertsDropdown from './components/AlertsDropdown.jsx'
 import Logo from './components/Logo.jsx'
 import { AppLoader } from './ui.jsx'
 
-const NAV = [
-  { id: 'dashboard', label: 'Dashboard', title: 'Executive Overview', icon: LayoutDashboard },
-  { id: 'performance', label: 'Performance', title: 'Sales Performance', icon: BarChart3 },
-  { id: 'studio-weekly', label: 'Weekly studio report', title: 'Weekly Studio Pulse', icon: CalendarDays },
-  { id: 'studio-monthly', label: 'Monthly studio report', title: 'Monthly Studio Review', icon: CalendarRange },
-  { id: 'pipeline', label: 'Pipeline', title: 'Sales Pipeline', icon: KanbanSquare },
-  { id: 'leads', label: 'Leads', title: 'Lead Directory', icon: Users },
-  { id: 'inbox', label: 'Inbox', title: 'Unified Inbox', icon: InboxIcon },
-  { id: 'momence-schedule', label: 'Class schedule', title: 'Momence Class Schedule', icon: CalendarClock },
-  { id: 'import', label: 'Import CSV', title: 'Lead Import Centre', icon: UploadCloud },
-  { id: 'team', label: 'Team & Studios', title: 'Studios & Sales Team', icon: Users },
-  { id: 'settings', label: 'Settings', title: 'Workspace Settings', icon: Settings }
+// Grouped because the sidebar's eleven destinations are not one flat list:
+// two are standing overviews, two are periodic reports, four are the daily
+// worklist, and three are administration. The labels encode that, and the
+// grouping is what keeps a tall column from reading as a dead run of links.
+const NAV_GROUPS = [
+  { label: 'Overview', items: [
+    { id: 'dashboard', label: 'Dashboard', title: 'Executive Overview', icon: LayoutDashboard },
+    { id: 'performance', label: 'Performance', title: 'Sales Performance', icon: BarChart3 }
+  ] },
+  { label: 'Reports', items: [
+    { id: 'studio-weekly', label: 'Weekly studio report', title: 'Weekly Studio Pulse', icon: CalendarDays },
+    { id: 'studio-monthly', label: 'Monthly studio report', title: 'Monthly Studio Review', icon: CalendarRange }
+  ] },
+  { label: 'Work', items: [
+    { id: 'pipeline', label: 'Pipeline', title: 'Sales Pipeline', icon: KanbanSquare },
+    { id: 'leads', label: 'Leads', title: 'Lead Directory', icon: Users },
+    { id: 'inbox', label: 'Inbox', title: 'Unified Inbox', icon: InboxIcon },
+    { id: 'momence-schedule', label: 'Class schedule', title: 'Momence Class Schedule', icon: CalendarClock }
+  ] },
+  { label: 'Manage', items: [
+    { id: 'import', label: 'Import CSV', title: 'Lead Import Centre', icon: UploadCloud },
+    { id: 'team', label: 'Team & Studios', title: 'Studios & Sales Team', icon: Users },
+    { id: 'settings', label: 'Settings', title: 'Workspace Settings', icon: Settings }
+  ] }
 ]
+
+const NAV = NAV_GROUPS.flatMap(g => g.items)
 
 function Sidebar() {
   const { view, navigate, boot, alerts, sidebarCollapsed, toggleSidebar, role } = useApp()
   const momenceOn = boot?.integrations?.momence
   const rrEnabled = boot?.settings?.roundRobin?.enabled
   const highCount = alerts.filter(a => a.level === 'high').length
-  const visibleNav = NAV.filter(item => role === 'admin' || item.id !== 'import')
 
   return (
-    <aside className={`${sidebarCollapsed ? 'w-[72px]' : 'w-[248px]'} shrink-0 h-full flex flex-col border-r border-white/6 bg-[#0c0c0c]/80 backdrop-blur-xl transition-[width] duration-200`}>
+    <aside className={`${sidebarCollapsed ? 'w-[72px]' : 'w-[248px]'} shrink-0 h-full flex flex-col app-sidebar transition-[width] duration-200`}>
       <div className={`px-5 pt-6 pb-5 flex items-center gap-3 ${sidebarCollapsed ? '!px-0 justify-center' : ''}`}>
         <button type="button" onClick={() => navigate('dashboard')} className="rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-400" aria-label="Go to dashboard" title="Home">
           <Logo size={40} />
         </button>
         {!sidebarCollapsed && (
           <div className="min-w-0">
-            <div className="font-display font-bold text-white leading-tight text-[15px] truncate">{boot?.settings?.org?.name || 'Lead Studio'}</div>
-            <div className="text-[11px] text-slate-400 -mt-0.5 tracking-wide truncate">{boot?.settings?.org?.brand || 'PHYSIQUE 57'}</div>
+            <div className="font-display font-bold text-white leading-tight text-md truncate">{boot?.settings?.org?.name || 'Lead Studio'}</div>
+            <div className="text-xs text-slate-400 -mt-0.5 tracking-wide truncate">{boot?.settings?.org?.brand || 'PHYSIQUE 57'}</div>
           </div>
         )}
       </div>
 
-      <nav className="flex-1 px-3 space-y-1 overflow-y-auto scrollbar-thin">
-        {visibleNav.map(item => {
-          const Icon = item.icon
-          const active = view === item.id
+      <nav className="app-nav flex-1 px-3 overflow-y-auto scrollbar-thin">
+        {NAV_GROUPS.map(group => {
+          const groupItems = group.items.filter(item => role === 'admin' || item.id !== 'import')
+          if (!groupItems.length) return null
           return (
-            <button
-              key={item.id}
-              onClick={() => navigate(item.id)}
-              title={sidebarCollapsed ? item.label : undefined}
-              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-[13px] font-medium transition-all ${sidebarCollapsed ? 'justify-center !px-0' : ''} ${
-                  active
-                  ? 'accent-nav text-white'
-                  : 'text-slate-400 hover:text-slate-100 hover:bg-white/5 border border-transparent'
-              }`}
-            >
-              <Icon size={17} className={active ? 'text-rose-400' : ''} />
-              {!sidebarCollapsed && <span className="flex-1 text-left">{item.label}</span>}
-              {!sidebarCollapsed && item.id === 'dashboard' && highCount > 0 && (
-                <span className="chip notification-count !px-1.5 !py-0.5 text-[10px]">{highCount}</span>
-              )}
-            </button>
+            <div className="app-nav-group" key={group.label}>
+              {!sidebarCollapsed && <div className="app-nav-group-label">{group.label}</div>}
+              {groupItems.map(item => {
+                const Icon = item.icon
+                const active = view === item.id
+                return (
+                  <button
+                    key={item.id}
+                    onClick={() => navigate(item.id)}
+                    title={sidebarCollapsed ? item.label : undefined}
+                    className={`app-nav-item ${sidebarCollapsed ? 'is-collapsed' : ''} ${active ? 'is-active' : ''}`}
+                  >
+                    <Icon size={16} />
+                    {!sidebarCollapsed && <span className="flex-1 text-left">{item.label}</span>}
+                    {!sidebarCollapsed && item.id === 'dashboard' && highCount > 0 && (
+                      <span className="app-nav-count">{highCount}</span>
+                    )}
+                  </button>
+                )
+              })}
+            </div>
           )
         })}
       </nav>
@@ -95,13 +114,13 @@ function Sidebar() {
             title="Open Round-robin settings"
             className="card !rounded-xl p-3 w-full text-left hover:bg-white/5 transition-colors"
           >
-            <div className="flex items-center gap-2 text-[11px] font-semibold text-slate-300 mb-1.5">
+            <div className="flex items-center gap-2 text-xs font-semibold text-slate-300 mb-1.5">
               <Zap size={13} className={rrEnabled ? 'text-amber-400' : 'text-slate-500'} />
               Round-robin assignment
             </div>
             <div className="flex items-center gap-2">
               <span className={`w-1.5 h-1.5 rounded-full ${rrEnabled ? 'bg-emerald-400' : 'bg-slate-500'}`} />
-              <span className="text-[11.5px] text-slate-400">{rrEnabled ? 'Auto-assigning new leads' : 'Manual assignment'}</span>
+              <span className="text-xs text-slate-400">{rrEnabled ? 'Auto-assigning new leads' : 'Manual assignment'}</span>
             </div>
           </button>
           <button
@@ -112,15 +131,15 @@ function Sidebar() {
           >
             {momenceOn ? <Link2 size={15} className="text-emerald-400" /> : <ShieldCheck size={15} className="text-slate-500" />}
             <div>
-              <div className="text-[11.5px] font-semibold text-slate-300">{momenceOn ? 'Momence connected' : 'Momence not linked'}</div>
-              <div className="text-[10.5px] text-slate-500">Sales & class history sync</div>
+              <div className="text-xs font-semibold text-slate-300">{momenceOn ? 'Momence connected' : 'Momence not linked'}</div>
+              <div className="text-xs text-slate-500">Sales & class history sync</div>
             </div>
           </button>
         </div>
       )}
 
       <button
-        className="mx-3 mb-3 flex items-center justify-center gap-2 py-2 rounded-xl text-slate-400 hover:text-white hover:bg-white/5 border border-white/8 text-[11.5px] font-medium transition-colors"
+        className="mx-3 mb-3 flex items-center justify-center gap-2 py-2 rounded-xl text-slate-400 hover:text-white hover:bg-white/5 border border-white/8 text-xs font-medium transition-colors"
         onClick={toggleSidebar}
         title={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
       >
@@ -132,7 +151,6 @@ function Sidebar() {
 
 function Topbar({ onAdd }) {
   const { view, navigate, alerts, boot, theme, setTheme, refreshData, toast, signOut } = useApp()
-  const [query, setQuery] = useState('')
   const [refreshing, setRefreshing] = useState(false)
   const title = NAV.find(n => n.id === view)?.title || 'Executive Overview'
 
@@ -150,7 +168,7 @@ function Topbar({ onAdd }) {
   }
 
   return (
-    <header className="relative z-30 h-[74px] shrink-0 flex items-center gap-4 px-6 border-b border-white/6 bg-[#0a0a0a]/70 backdrop-blur-xl">
+    <header className="relative z-30 h-[74px] shrink-0 flex items-center gap-4 px-6 app-topbar">
       <div className="app-page-title flex-1" key={view}>
         <span className="app-page-title-icon"><Activity size={15} /></span>
         <div>
@@ -159,23 +177,20 @@ function Topbar({ onAdd }) {
         </div>
       </div>
 
-      <div className="relative w-[300px]">
-        <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
-        <input
-          className="input !pl-9 !py-2 !rounded-xl"
-          placeholder="Search leads, phone, email…"
-          value={query}
-          onChange={e => setQuery(e.target.value)}
-          onKeyDown={e => {
-            if (e.key === 'Enter' && query.trim()) {
-              navigate('leads', { search: query.trim() })
-            }
-          }}
-        />
-      </div>
+      {/* One search entry point. The palette handles leads, pages and
+          actions, so the topbar only needs to point at it. */}
+      <button
+        type="button"
+        className="topbar-search"
+        onClick={() => window.dispatchEvent(new CustomEvent('p57:open-palette'))}
+      >
+        <Search size={15} />
+        <span>Search leads, pages, actions</span>
+        <kbd>⌘K</kbd>
+      </button>
 
       <button
-        className="btn btn-ghost !h-9 !py-0 !px-3 text-[12px]"
+        className="btn btn-ghost !h-9 !py-0 !px-3 text-sm"
         onClick={doRefresh}
         disabled={refreshing}
         title="Refresh workspace data"
@@ -352,6 +367,14 @@ export default function App() {
     return () => sub.subscription.unsubscribe()
   }, [])
 
+  // The command palette lives below AppProvider and can't reach this state
+  // directly, so "Add lead" is dispatched as an event and handled here.
+  useEffect(() => {
+    const open = () => setAddOpen(true)
+    window.addEventListener('p57:add-lead', open)
+    return () => window.removeEventListener('p57:add-lead', open)
+  }, [])
+
   if (authLoading) return <AppLoader />
   if (!session) return <LoginPage />
 
@@ -371,6 +394,7 @@ export default function App() {
       </BootstrapGate>
       <LeadDrawer />
       <AddLeadModal open={addOpen} onClose={() => setAddOpen(false)} />
+      <CommandPalette />
       <Toasts />
     </AppProvider>
   )
@@ -384,7 +408,7 @@ function Shell() {
     case 'studio-weekly': return <StudioWeekly />
     case 'studio-monthly': return <StudioMonthly />
     case 'pipeline': return <Pipeline />
-    case 'leads': return <Leads initialSearch={viewParams.search} />
+    case 'leads': return <Leads initialSearch={viewParams.search} initialAssociateId={viewParams.associateId} />
     case 'inbox': return <Inbox />
     case 'momence-schedule': return <MomenceSchedule />
     case 'import': return <Import />

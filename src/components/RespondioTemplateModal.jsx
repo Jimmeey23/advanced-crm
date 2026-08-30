@@ -141,8 +141,8 @@ export default function RespondioTemplateModal({ open, onClose, lead }) {
         <div className="flex items-center gap-2.5 mb-4">
           <Avatar name={lead.fullName} size={30} />
           <div className="min-w-0 flex-1">
-            <div className="text-[13px] font-semibold text-white truncate">{lead.fullName}</div>
-            <div className="text-[11px] text-slate-500 truncate flex items-center gap-1.5"><MessageCircle size={11} /> {lead.phone || lead.email}</div>
+            <div className="text-base font-semibold text-white truncate">{lead.fullName}</div>
+            <div className="text-xs text-slate-500 truncate flex items-center gap-1.5"><MessageCircle size={11} /> {lead.phone || lead.email}</div>
           </div>
           {firstMessage && <span className="chip bg-emerald-500/10 text-emerald-400 border border-emerald-400/20">first message</span>}
         </div>
@@ -150,30 +150,30 @@ export default function RespondioTemplateModal({ open, onClose, lead }) {
 
       <div className="space-y-3">
         <div>
-          <label className="text-[10.5px] uppercase tracking-wider text-slate-500 font-semibold mb-1 block">Template</label>
+          <label className="text-xs uppercase tracking-wider text-slate-500 font-semibold mb-1 block">Template</label>
           <select className="input select-strong" value={templateId} onChange={e => setTemplateId(e.target.value)}>
             {templates.map(t => <option key={t.id} value={t.id}>{t.label || t.name}</option>)}
           </select>
-          <div className="text-[11px] text-slate-500 mt-1 flex items-center gap-1.5 flex-wrap">
+          <div className="text-xs text-slate-500 mt-1 flex items-center gap-1.5 flex-wrap">
             <Sparkles size={11} />
             {apiTemplates?.length ? 'Live approved templates from your Respond.io WhatsApp channel' : 'Manually configured in Settings > Integrations'}
           </div>
-          {loadError && !apiTemplates?.length && <p className="text-[11px] text-amber-500 mt-1">{loadError}</p>}
+          {loadError && !apiTemplates?.length && <p className="text-xs text-amber-500 mt-1">{loadError}</p>}
         </div>
 
         <div className="space-y-2">
           {(selected?.parameters || []).map((label, idx) => (
             <div key={idx}>
-              <label className="text-[10.5px] uppercase tracking-wider text-slate-500 font-semibold mb-1 block">Parameter {idx + 1}{label ? ` — ${label}` : ''}</label>
+              <label className="text-xs uppercase tracking-wider text-slate-500 font-semibold mb-1 block">Parameter {idx + 1}{label ? ` — ${label}` : ''}</label>
               <input className="input !bg-white/[0.06]" value={values[idx] || ''} onChange={e => setValue(idx, e.target.value)} placeholder={label || `Value ${idx + 1}`} />
             </div>
           ))}
-          {!selected?.parameters?.length && <p className="text-[12px] text-slate-500">This template has no parameters.</p>}
+          {!selected?.parameters?.length && <p className="text-sm text-slate-500">This template has no parameters.</p>}
         </div>
 
-        {error && <p className="text-[12px] text-rose-400">{error}</p>}
+        {error && <p className="text-sm text-rose-400">{error}</p>}
 
-        <div className="flex justify-end gap-2 pt-1">
+        <div className="modal-footer">
           <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
           <button className="btn btn-primary" onClick={send} disabled={sending || !selected}>
             {sending ? <Spinner size={14} /> : <Send size={14} />} Send template

@@ -90,16 +90,16 @@ export default function FieldMappingEditor({
     <>
       {aliasReference && (
         <div>
-          <div className="text-[10.5px] uppercase tracking-wider text-slate-500 font-semibold mb-1.5">Auto-recognized — no mapping needed for these</div>
+          <div className="text-xs uppercase tracking-wider text-slate-500 font-semibold mb-1.5">Auto-recognized — no mapping needed for these</div>
           <div className="max-h-32 overflow-y-auto space-y-1 rounded-lg bg-white/[0.02] border border-white/6 p-2">
             {aliasReference.map(f => (
-              <div key={f.field} className="flex items-start gap-2 text-[11px]">
+              <div key={f.field} className="flex items-start gap-2 text-xs">
                 <span className="text-slate-300 mono w-28 shrink-0">{fieldOptions.find(o => o.id === f.field)?.label || f.field}</span>
                 <span className="text-slate-500 mono truncate">{f.aliases.join(', ')}</span>
               </div>
             ))}
           </div>
-          <p className="text-[10.5px] text-slate-600 mt-1">Only add a mapping row below for keys your source sends that aren't already listed here.</p>
+          <p className="text-xs text-slate-600 mt-1">Only add a mapping row below for keys your source sends that aren't already listed here.</p>
         </div>
       )}
 
@@ -110,7 +110,7 @@ export default function FieldMappingEditor({
       )}
 
       <div>
-        <div className="text-[10.5px] uppercase tracking-wider text-slate-500 font-semibold mb-1.5">Field mapping — {keyLabel} → lead field</div>
+        <div className="text-xs uppercase tracking-wider text-slate-500 font-semibold mb-1.5">Field mapping — {keyLabel} → lead field</div>
         <div className="space-y-1.5">
           {mapping.map((r, i) => (
             <div key={i} className="flex items-center gap-2">
@@ -118,45 +118,45 @@ export default function FieldMappingEditor({
                 <button className="btn btn-ghost !p-0.5 !min-h-0 disabled:opacity-20" onClick={() => moveRow(i, -1)} disabled={i === 0} title="Move up"><ChevronUp size={11} /></button>
                 <button className="btn btn-ghost !p-0.5 !min-h-0 disabled:opacity-20" onClick={() => moveRow(i, 1)} disabled={i === mapping.length - 1} title="Move down"><ChevronDown size={11} /></button>
               </div>
-              <input className="input !py-1.5 !text-[12px] flex-1" placeholder={keyPlaceholder} value={r.key} onChange={e => updateRow(i, { key: e.target.value })}
+              <input className="input !py-1.5 !text-sm flex-1" placeholder={keyPlaceholder} value={r.key} onChange={e => updateRow(i, { key: e.target.value })}
                 {...(aliasReference ? { list: datalistId } : {})} />
               {aliasReference && mappedKeys.has(r.key.trim()) && knownKeys.includes(r.key.trim()) && (
-                <span className="text-[10px] text-amber-400/80 shrink-0" title="This key is already auto-recognized — this row overrides which field it maps to">override</span>
+                <span className="text-xs text-amber-400/80 shrink-0" title="This key is already auto-recognized — this row overrides which field it maps to">override</span>
               )}
-              <span className="text-slate-600 text-[11px]">→</span>
-              <select className="input !py-1.5 !text-[12px] !w-auto" value={r.field} onChange={e => updateRow(i, { field: e.target.value })}>
+              <span className="text-slate-600 text-xs">→</span>
+              <select className="input !py-1.5 !text-sm !w-auto" value={r.field} onChange={e => updateRow(i, { field: e.target.value })}>
                 {fieldOptions.map(f => <option key={f.id} value={f.id}>{f.label}</option>)}
               </select>
               <button className="btn btn-ghost !p-1.5 text-rose-400" onClick={() => removeRow(i)}><X size={12} /></button>
             </div>
           ))}
-          {!mapping.length && <p className="text-[11px] text-slate-600">No manual mapping — common key spellings (name/full_name, phone/mobile, email, etc.) are auto-detected.</p>}
-          {mapping.length > 1 && <p className="text-[10.5px] text-slate-600">Order matters if two rows target the same lead field — the top one wins. Use the arrows to reorder.</p>}
+          {!mapping.length && <p className="text-xs text-slate-600">No manual mapping — common key spellings (name/full_name, phone/mobile, email, etc.) are auto-detected.</p>}
+          {mapping.length > 1 && <p className="text-xs text-slate-600">Order matters if two rows target the same lead field — the top one wins. Use the arrows to reorder.</p>}
         </div>
         <div className="flex items-center gap-2 mt-2">
-          <button className="btn btn-ghost !py-1.5 !text-[12px]" onClick={addRow}><Plus size={12} /> Add field</button>
-          {mappingDirty && <button className="btn btn-soft !py-1.5 !text-[12px]" onClick={saveMapping}><Save size={12} /> Save mapping</button>}
+          <button className="btn btn-ghost !py-1.5 !text-sm" onClick={addRow}><Plus size={12} /> Add field</button>
+          {mappingDirty && <button className="btn btn-soft !py-1.5 !text-sm" onClick={saveMapping}><Save size={12} /> Save mapping</button>}
         </div>
       </div>
 
       <div>
-        <div className="text-[10.5px] uppercase tracking-wider text-slate-500 font-semibold mb-1.5">Default values — used when the source omits a field</div>
+        <div className="text-xs uppercase tracking-wider text-slate-500 font-semibold mb-1.5">Default values — used when the source omits a field</div>
         <div className="space-y-1.5">
           {defs.map((r, i) => (
             <div key={i} className="flex items-center gap-2">
-              <select className="input !py-1.5 !text-[12px] !w-auto" value={r.field} onChange={e => updateDefault(i, { field: e.target.value })}>
+              <select className="input !py-1.5 !text-sm !w-auto" value={r.field} onChange={e => updateDefault(i, { field: e.target.value })}>
                 {fieldOptions.map(f => <option key={f.id} value={f.id}>{f.label}</option>)}
               </select>
-              <span className="text-slate-600 text-[11px]">=</span>
-              <input className="input !py-1.5 !text-[12px] flex-1" placeholder="fixed value" value={r.value} onChange={e => updateDefault(i, { value: e.target.value })} />
+              <span className="text-slate-600 text-xs">=</span>
+              <input className="input !py-1.5 !text-sm flex-1" placeholder="fixed value" value={r.value} onChange={e => updateDefault(i, { value: e.target.value })} />
               <button className="btn btn-ghost !p-1.5 text-rose-400" onClick={() => removeDefault(i)}><X size={12} /></button>
             </div>
           ))}
-          {!defs.length && <p className="text-[11px] text-slate-600">No defaults set.</p>}
+          {!defs.length && <p className="text-xs text-slate-600">No defaults set.</p>}
         </div>
         <div className="flex items-center gap-2 mt-2">
-          <button className="btn btn-ghost !py-1.5 !text-[12px]" onClick={addDefault}><Plus size={12} /> Add default</button>
-          {defaultsDirty && <button className="btn btn-soft !py-1.5 !text-[12px]" onClick={saveDefaults}><Save size={12} /> Save defaults</button>}
+          <button className="btn btn-ghost !py-1.5 !text-sm" onClick={addDefault}><Plus size={12} /> Add default</button>
+          {defaultsDirty && <button className="btn btn-soft !py-1.5 !text-sm" onClick={saveDefaults}><Save size={12} /> Save defaults</button>}
         </div>
       </div>
     </>

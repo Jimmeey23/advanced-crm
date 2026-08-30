@@ -66,7 +66,7 @@ export default function PerformanceModal({ open, onClose, range = 'week', studio
           </div>
 
           <div className="card p-4">
-            <div className="flex items-center gap-4 text-[11px] text-slate-500 mb-3">
+            <div className="flex items-center gap-4 text-xs text-slate-500 mb-3">
               <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm" style={{ background: COLORS.newLeads }} /> New</span>
               <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm" style={{ background: COLORS.won }} /> Won</span>
               <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm" style={{ background: COLORS.missed }} /> Missed FU</span>
@@ -87,13 +87,13 @@ export default function PerformanceModal({ open, onClose, range = 'week', studio
           </div>
 
           <div className="card overflow-hidden">
-            <div className="px-5 py-3 border-b border-slate-200 flex items-center gap-2 text-[12.5px] font-semibold text-slate-700">
+            <div className="px-5 py-3 border-b border-slate-200 flex items-center gap-2 text-sm font-semibold text-slate-700">
               <CalendarClock size={13} className="text-blue-400" /> Bucket breakdown
             </div>
             <div className="overflow-x-auto scrollbar-thin">
               <table className="w-full text-left">
                 <thead>
-                  <tr className="text-[10.5px] uppercase tracking-wider text-slate-500 border-b border-slate-200">
+                  <tr className="text-xs uppercase tracking-wider text-slate-500 border-b border-slate-200">
                     <th className="px-4 py-2.5 font-semibold">Period</th>
                     <th className="px-3 py-2.5 font-semibold text-center">New</th>
                     <th className="px-3 py-2.5 font-semibold text-center">Won</th>
@@ -110,11 +110,11 @@ export default function PerformanceModal({ open, onClose, range = 'week', studio
                     return (
                       <React.Fragment key={b.key}>
                         <tr className="border-b border-slate-200 hover:bg-slate-50 cursor-pointer" onClick={() => hasDetail && setOpenIdx(isOpen ? null : i)}>
-                          <td className="px-4 py-2.5 text-[12.5px] text-slate-700">{b.label}</td>
-                          <td className="px-3 py-2.5 text-center text-[12.5px] text-blue-400 mono">{b.newLeads || 0}</td>
-                          <td className="px-3 py-2.5 text-center text-[12.5px] text-emerald-400 mono">{b.won || 0}</td>
-                          <td className="px-3 py-2.5 text-center text-[12.5px] mono">{b.missed ? <span className="text-rose-400">{b.missed}</span> : <span className="text-slate-500">0</span>}</td>
-                          <td className="px-3 py-2.5 text-center text-[12.5px] text-slate-900 mono">{money(b.revenue || 0)}</td>
+                          <td className="px-4 py-2.5 text-sm text-slate-700">{b.label}</td>
+                          <td className="px-3 py-2.5 text-center text-sm text-blue-400 mono">{b.newLeads || 0}</td>
+                          <td className="px-3 py-2.5 text-center text-sm text-emerald-400 mono">{b.won || 0}</td>
+                          <td className="px-3 py-2.5 text-center text-sm mono">{b.missed ? <span className="text-rose-400">{b.missed}</span> : <span className="text-slate-500">0</span>}</td>
+                          <td className="px-3 py-2.5 text-center text-sm text-slate-900 mono">{money(b.revenue || 0)}</td>
                           <td className="px-3 py-2.5 text-center">
                             <span className="inline-flex items-center justify-center w-6 h-6 rounded-lg bg-slate-50 border border-slate-200 text-slate-500">
                               <ChevronDown size={12} className={`transition-transform ${isOpen ? 'rotate-180' : ''}`} />
@@ -146,15 +146,15 @@ export default function PerformanceModal({ open, onClose, range = 'week', studio
 }
 
 function DetailList({ title, color, items, openLead, moneyValue }) {
-  if (!items.length) return <div className="text-[12px] text-slate-500">{title}: none</div>
+  if (!items.length) return <div className="text-sm text-slate-500">{title}: none</div>
   return (
     <div>
-      <div className="text-[10.5px] uppercase tracking-wider font-bold mb-1.5" style={{ color }}>{title} ({items.length})</div>
+      <div className="text-xs uppercase tracking-wider font-bold mb-1.5" style={{ color }}>{title} ({items.length})</div>
       <div className="space-y-1 max-h-[180px] overflow-y-auto scrollbar-thin">
         {items.map(it => (
-          <button key={it.id} className="w-full text-left flex items-center justify-between gap-2 text-[12px] text-slate-700 bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 hover:bg-slate-50 transition-colors" onClick={() => openLead(it.id)}>
+          <button key={it.id} className="w-full text-left flex items-center justify-between gap-2 text-sm text-slate-700 bg-pure-white border border-slate-200 rounded-lg px-2.5 py-1.5 hover:bg-slate-50 transition-colors" onClick={() => openLead(it.id)}>
             <span className="truncate">{it.fullName}</span>
-            {moneyValue && it.value ? <span className="mono text-emerald-500 shrink-0">{money(it.value)}</span> : it.comments ? <span className="text-slate-500 truncate max-w-[120px]">{it.comments}</span> : <span className="chip !px-1.5 !py-0.5 text-[9px] bg-slate-50 border border-slate-200 text-slate-500">{it.stage}</span>}
+            {moneyValue && it.value ? <span className="mono text-emerald-500 shrink-0">{money(it.value)}</span> : it.comments ? <span className="text-slate-500 truncate max-w-[120px]">{it.comments}</span> : <span className="chip !px-1.5 !py-0.5 text-2xs bg-slate-50 border border-slate-200 text-slate-500">{it.stage}</span>}
           </button>
         ))}
       </div>

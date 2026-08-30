@@ -33,19 +33,19 @@ export default function AlertsDropdown() {
       <button className="relative w-9 h-9 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center text-slate-300 hover:text-white hover:bg-white/10 transition-colors" onClick={() => setOpen(o => !o)}>
         <Bell size={16} />
         {high > 0 && (
-          <span className="notification-count absolute -top-1 -right-1 min-w-[17px] h-[17px] px-1 rounded-full bg-rose-500 text-white text-[10px] font-bold flex items-center justify-center">{high}</span>
+          <span className="notification-count absolute -top-1 -right-1 min-w-[17px] h-[17px] px-1 rounded-full bg-rose-500 text-pure-white text-xs font-bold flex items-center justify-center">{high}</span>
         )}
       </button>
 
       {open && (
         <div className="alerts-menu fixed right-5 top-[76px] w-[min(420px,calc(100vw-24px))] card z-[999] overflow-hidden shadow-2xl" style={{ background: 'var(--tt-bg)', animation: 'fadeIn .15s ease' }}>
           <div className="flex items-center justify-between px-4 py-3 border-b border-white/8">
-            <div className="font-display font-semibold text-white text-[14px]">Alerts & reminders</div>
+            <div className="font-display font-semibold text-white text-md">Alerts & reminders</div>
             <span className="chip bg-white/5 border border-white/10 text-slate-300">{alerts.length} active</span>
           </div>
           <div className="max-h-[min(620px,calc(100vh-150px))] overflow-y-auto scrollbar-thin">
             {alerts.length === 0 && (
-              <div className="px-4 py-10 text-center text-[13px] text-slate-500">All clear — no alerts right now.</div>
+              <div className="px-4 py-10 text-center text-base text-slate-500">All clear — no alerts right now.</div>
             )}
             {alerts.slice(0, 30).map(a => {
               const meta = KIND_META[a.kind] || KIND_META.overdue
@@ -58,11 +58,11 @@ export default function AlertsDropdown() {
                   </span>
                   <span className="flex-1 min-w-0">
                     <span className="flex items-center gap-2">
-                      <span className="text-[13px] font-semibold text-white truncate">{a.leadName}</span>
-                      <span className="chip !px-2 !py-0.5 text-[9.5px] uppercase tracking-wide" style={{ background: `${color}1e`, color }}>{meta.label}</span>
+                      <span className="text-base font-semibold text-white truncate">{a.leadName}</span>
+                      <span className="chip !px-2 !py-0.5 text-2xs uppercase tracking-wide" style={{ background: `${color}1e`, color }}>{meta.label}</span>
                     </span>
-                    <span className="block text-[12px] text-slate-400 mt-0.5">{a.title}</span>
-                    <span className="block text-[11.5px] text-slate-500 mt-0.5 truncate">{a.detail}</span>
+                    <span className="block text-sm text-slate-400 mt-0.5">{a.title}</span>
+                    <span className="block text-xs text-slate-500 mt-0.5 truncate">{a.detail}</span>
                   </span>
                   <ChevronRight size={14} className="mt-2 text-slate-600" />
                 </button>

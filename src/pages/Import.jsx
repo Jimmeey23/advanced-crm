@@ -94,14 +94,14 @@ export default function Import() {
   return (
     <div className="p-6 space-y-5 max-w-[1100px]">
       {/* steps indicator */}
-      <div className="flex items-center gap-2 text-[12.5px]">
+      <div className="flex items-center gap-2 text-sm">
         {[
           { n: 1, label: 'Upload CSV' }, { n: 2, label: 'Map columns' }, { n: 3, label: 'Import & verify' }
         ].map((s, i) => (
           <React.Fragment key={s.n}>
             {i > 0 && <ArrowRight size={14} className="text-slate-600" />}
             <span className={`flex items-center gap-2 chip ${step >= s.n ? 'bg-rose-500/15 text-rose-200 border border-rose-400/25' : 'bg-white/5 text-slate-500 border border-white/10'}`}>
-              <span className={`w-4 h-4 rounded-full flex items-center justify-center text-[9.5px] font-bold ${step >= s.n ? 'bg-rose-500 text-white' : 'bg-white/10'}`}>{s.n}</span>
+              <span className={`w-4 h-4 rounded-full flex items-center justify-center text-2xs font-bold ${step >= s.n ? 'bg-rose-500 text-white' : 'bg-white/10'}`}>{s.n}</span>
               {s.label}
             </span>
           </React.Fragment>
@@ -118,16 +118,16 @@ export default function Import() {
             onDrop={e => { e.preventDefault(); handleFile(e.dataTransfer.files?.[0]) }}
           >
             {uploading ? <Spinner size={26} /> : <div className="w-14 h-14 rounded-2xl bg-rose-500/10 border border-rose-400/25 flex items-center justify-center text-rose-400 mb-4"><UploadCloud size={26} /></div>}
-            <h3 className="font-display font-semibold text-white text-[16px]">Drop your CSV here, or click to browse</h3>
-            <p className="text-[12.5px] text-slate-500 mt-1.5 max-w-md">Headers are auto-detected — you can remap every column in the next step. Follow-up date/comment pairs (up to 4) are detected automatically.</p>
+            <h3 className="font-display font-semibold text-white text-lg">Drop your CSV here, or click to browse</h3>
+            <p className="text-sm text-slate-500 mt-1.5 max-w-md">Headers are auto-detected — you can remap every column in the next step. Follow-up date/comment pairs (up to 4) are detected automatically.</p>
             <input ref={fileRef} type="file" accept=".csv,.txt,text/csv" className="hidden" onChange={e => handleFile(e.target.files?.[0])} />
             <button className="btn btn-primary mt-5"><FileSpreadsheet size={15} /> Choose CSV file</button>
           </div>
 
           <div className="card p-4 mt-4">
-            <h4 className="font-display font-semibold text-white text-[13px] mb-2 flex items-center gap-2"><Download size={14} className="text-slate-400" /> Expected format</h4>
-            <p className="text-[11.5px] text-slate-500 mb-2">Recommended columns (tab or comma separated):</p>
-            <pre className="text-[10.5px] leading-relaxed text-slate-400 bg-black/30 rounded-lg p-3 overflow-x-auto scrollbar-thin">ID, Full Name, Phone Number, Email, Created At, Source ID, Source Name, Member ID, Converted To Customer At, Stage Name, Associate, Remarks, Follow Up 1 Date, Follow Up Comments (1), Follow Up 2 Date, Follow Up Comments (2), Follow Up 3 Date, Follow Up Comments (3), Follow Up 4 Date, Follow Up Comments (4), Center, Class Type, Host ID, Status, Channel, Period, Purchases Made, LTV, Visits, Trial Status, Conversion Status, Retention Status</pre>
+            <h4 className="font-display font-semibold text-white text-base mb-2 flex items-center gap-2"><Download size={14} className="text-slate-400" /> Expected format</h4>
+            <p className="text-xs text-slate-500 mb-2">Recommended columns (tab or comma separated):</p>
+            <pre className="text-xs leading-relaxed text-slate-400 bg-black/30 rounded-lg p-3 overflow-x-auto scrollbar-thin">ID, Full Name, Phone Number, Email, Created At, Source ID, Source Name, Member ID, Converted To Customer At, Stage Name, Associate, Remarks, Follow Up 1 Date, Follow Up Comments (1), Follow Up 2 Date, Follow Up Comments (2), Follow Up 3 Date, Follow Up Comments (3), Follow Up 4 Date, Follow Up Comments (4), Center, Class Type, Host ID, Status, Channel, Period, Purchases Made, LTV, Visits, Trial Status, Conversion Status, Retention Status</pre>
           </div>
         </div>
       )}
@@ -138,22 +138,22 @@ export default function Import() {
           <div className="card p-5">
             <div className="flex items-center justify-between mb-4">
               <div>
-                <h3 className="font-display font-semibold text-white text-[14px]">Map your columns</h3>
-                <p className="text-[11.5px] text-slate-500 mt-0.5">{parsed.fileName} · {parsed.total} rows · {parsed.columns.length} columns detected</p>
+                <h3 className="font-display font-semibold text-white text-md">Map your columns</h3>
+                <p className="text-xs text-slate-500 mt-0.5">{parsed.fileName} · {parsed.total} rows · {parsed.columns.length} columns detected</p>
               </div>
               <div className="flex items-center gap-3">
-                <label className="flex items-center gap-2 text-[12px] text-slate-300"><input type="checkbox" checked={options.autoAssign} className="accent-rose-500" onChange={e => setOptions(o => ({ ...o, autoAssign: e.target.checked }))} /> Auto-assign (round robin)</label>
+                <label className="flex items-center gap-2 text-sm text-slate-300"><input type="checkbox" checked={options.autoAssign} className="accent-rose-500" onChange={e => setOptions(o => ({ ...o, autoAssign: e.target.checked }))} /> Auto-assign (round robin)</label>
                 <select className="input !w-auto !py-1.5" value={options.locationId} onChange={e => setOptions(o => ({ ...o, locationId: e.target.value }))}>
                   {(boot?.locations || []).map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
                 </select>
-                <button className="btn btn-ghost !py-2 !text-[12px]" onClick={() => setMapping(parsed.autoMap)}><RefreshCcw size={13} /> Auto-map</button>
+                <button className="btn btn-ghost !py-2 !text-sm" onClick={() => setMapping(parsed.autoMap)}><RefreshCcw size={13} /> Auto-map</button>
               </div>
             </div>
 
             <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
               {FIELDS.map(f => (
                 <div key={f.key} className="grid grid-cols-[180px_minmax(0,1fr)] items-center gap-3">
-                  <span className="shrink-0 text-[12.5px] text-slate-300 leading-tight">
+                  <span className="shrink-0 text-sm text-slate-300 leading-tight">
                     {f.label} {f.required && <span className="text-rose-400">*</span>}
                   </span>
                   <select className="input !py-1.5 min-w-0" value={mapping[f.key] || ''} onChange={e => setMapField(f.key, e.target.value)}>
@@ -164,18 +164,18 @@ export default function Import() {
               ))}
             </div>
             <div className="mt-3">
-              <div className="text-[12.5px] text-slate-300 mb-2">Follow-up pairs (date + comments)</div>
+              <div className="text-sm text-slate-300 mb-2">Follow-up pairs (date + comments)</div>
               <div className="space-y-3">
                 {[1, 2, 3, 4].map(idx => {
                   const p = (mapping.followUps || []).find(x => x.index === idx)
                   return (
                     <div key={idx} className="grid grid-cols-[120px_minmax(0,1fr)_minmax(0,1fr)] gap-2 items-center">
-                      <span className="text-[11.5px] text-slate-500">Follow-up {idx}</span>
-                      <select className="input !py-1 !text-[11.5px] min-w-0" value={p?.date || ''} onChange={e => setFollowUp(idx, 'date', e.target.value)}>
+                      <span className="text-xs text-slate-500">Follow-up {idx}</span>
+                      <select className="input !py-1 !text-xs min-w-0" value={p?.date || ''} onChange={e => setFollowUp(idx, 'date', e.target.value)}>
                         <option value="">— date —</option>
                         {parsed.columns.map(c => <option key={c} value={c}>{c}</option>)}
                       </select>
-                      <select className="input !py-1 !text-[11.5px] min-w-0" value={p?.comments || ''} onChange={e => setFollowUp(idx, 'comments', e.target.value)}>
+                      <select className="input !py-1 !text-xs min-w-0" value={p?.comments || ''} onChange={e => setFollowUp(idx, 'comments', e.target.value)}>
                         <option value="">— comments —</option>
                         {parsed.columns.map(c => <option key={c} value={c}>{c}</option>)}
                       </select>
@@ -188,9 +188,9 @@ export default function Import() {
 
           {/* preview */}
           <div className="card overflow-hidden">
-            <div className="px-5 py-3 border-b border-white/8 text-[12.5px] text-slate-300 font-semibold">Preview (first 5 rows)</div>
+            <div className="px-5 py-3 border-b border-white/8 text-sm text-slate-300 font-semibold">Preview (first 5 rows)</div>
             <div className="overflow-x-auto scrollbar-thin">
-              <table className="w-full text-left text-[11.5px]">
+              <table className="w-full text-left text-xs">
                 <thead><tr className="text-slate-500 border-b border-white/8">{parsed.columns.map(c => <th key={c} className="px-3 py-2 font-semibold whitespace-nowrap">{c}</th>)}</tr></thead>
                 <tbody>
                   {parsed.preview.map((r, i) => (
@@ -216,12 +216,12 @@ export default function Import() {
       {step === 3 && result && (
         <div className="card p-8 text-center">
           <div className="w-14 h-14 rounded-2xl bg-emerald-500/10 border border-emerald-400/25 flex items-center justify-center text-emerald-400 mx-auto mb-4"><CheckCircle2 size={26} /></div>
-          <h3 className="font-display font-bold text-white text-[18px]">Import complete</h3>
-          <p className="text-[13px] text-slate-400 mt-2">Created <b className="text-emerald-400">{result.created}</b> new leads, skipped <b className="text-slate-300">{result.skipped}</b>{result.duplicates > 0 && <> ({result.duplicates} already existed by email/phone)</>}.</p>
+          <h3 className="font-display font-bold text-white text-lg">Import complete</h3>
+          <p className="text-base text-slate-400 mt-2">Created <b className="text-emerald-400">{result.created}</b> new leads, skipped <b className="text-slate-300">{result.skipped}</b>{result.duplicates > 0 && <> ({result.duplicates} already existed by email/phone)</>}.</p>
           {result.errors?.length > 0 && (
             <div className="mt-4 text-left max-w-md mx-auto">
-              <p className="text-[11.5px] text-amber-400 font-semibold mb-1">{result.errors.length} rows had issues:</p>
-              <div className="space-y-1">{result.errors.slice(0, 5).map((e, i) => <p key={i} className="text-[11px] text-slate-500">Row {e.row}: {e.message}</p>)}</div>
+              <p className="text-xs text-amber-400 font-semibold mb-1">{result.errors.length} rows had issues:</p>
+              <div className="space-y-1">{result.errors.slice(0, 5).map((e, i) => <p key={i} className="text-xs text-slate-500">Row {e.row}: {e.message}</p>)}</div>
             </div>
           )}
           <div className="flex justify-center gap-2 mt-6">
@@ -233,11 +233,11 @@ export default function Import() {
 
       {/* history */}
       <div className="card p-5">
-        <h4 className="font-display font-semibold text-white text-[13px] mb-3 flex items-center gap-2"><History size={14} className="text-slate-400" /> Import history</h4>
+        <h4 className="font-display font-semibold text-white text-base mb-3 flex items-center gap-2"><History size={14} className="text-slate-400" /> Import history</h4>
         {history?.length ? (
           <div className="space-y-2">
             {history.slice(0, 8).map(h => (
-              <div key={h.id} className="flex items-center gap-3 text-[12.5px] py-2 border-b border-white/5 last:border-0">
+              <div key={h.id} className="flex items-center gap-3 text-sm py-2 border-b border-white/5 last:border-0">
                 <FileSpreadsheet size={15} className="text-rose-400 shrink-0" />
                 <span className="text-slate-200 truncate flex-1">{h.fileName}</span>
                 <span className="text-emerald-400 mono">{h.created} created</span>
@@ -246,7 +246,7 @@ export default function Import() {
               </div>
             ))}
           </div>
-        ) : <p className="text-[12px] text-slate-500">No imports yet.</p>}
+        ) : <p className="text-sm text-slate-500">No imports yet.</p>}
       </div>
     </div>
   )

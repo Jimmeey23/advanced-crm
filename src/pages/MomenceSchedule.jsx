@@ -199,10 +199,10 @@ function PerfStat({ label, value, color, sub }) {
   return (
     <div className="perf-stat-card px-3.5 py-3 flex items-center justify-between">
       <div>
-        <div className="text-[11px] text-slate-400">{label}</div>
-        {sub && <div className="text-[10.5px] text-slate-600 mt-0.5">{sub}</div>}
+        <div className="text-xs text-slate-400">{label}</div>
+        {sub && <div className="text-xs text-slate-600 mt-0.5">{sub}</div>}
       </div>
-      <div className="font-display text-[17px] font-bold mono" style={{ color }}>{value}</div>
+      <div className="font-display text-lg font-bold mono" style={{ color }}>{value}</div>
     </div>
   )
 }
