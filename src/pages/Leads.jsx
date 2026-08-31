@@ -252,6 +252,41 @@ export default function Leads({ initialSearch = '', initialAssociateId = '' }) {
   const [aiAlertPosition, setAiAlertPosition] = useState(null)
   const [manualFlagOverrides, setManualFlagOverrides] = useState({})
   const tableJumpRef = useRef(null)
+  const [railAtEdge, setRailAtEdge] = useState(false)
+  // Docks the rail to the leads-table-shell's own right edge/height (in
+  // viewport px) so it renders as a sidebar right after the Actions column
+  // instead of a viewport-fixed strip floating over table cells.
+  const [railDock, setRailDock] = useState(null)
+  useEffect(() => {
+    const checkEdge = (el) => {
+      if (!el) return setRailAtEdge(false)
+      const atEdge = el.scrollWidth - el.clientWidth <= 4 || el.scrollLeft + el.clientWidth >= el.scrollWidth - 4
+      setRailAtEdge(atEdge)
+    }
+    const updateDock = () => {
+      const shell = tableJumpRef.current
+      if (!shell) return setRailDock(null)
+      const rect = shell.getBoundingClientRect()
+      setRailDock({ top: rect.top, height: rect.height, left: rect.right })
+    }
+    const onScroll = (event) => {
+      if (event.target?.classList?.contains('lead-table-scroll')) checkEdge(event.target)
+      updateDock()
+    }
+    document.addEventListener('scroll', onScroll, true)
+    window.addEventListener('resize', updateDock)
+    const el = document.querySelector('.lead-table-scroll')
+    checkEdge(el)
+    updateDock()
+    const resizeObserver = new ResizeObserver(() => { checkEdge(el); updateDock() })
+    if (el) resizeObserver.observe(el)
+    if (tableJumpRef.current) resizeObserver.observe(tableJumpRef.current)
+    return () => {
+      document.removeEventListener('scroll', onScroll, true)
+      window.removeEventListener('resize', updateDock)
+      resizeObserver.disconnect()
+    }
+  }, [view])
   const aiAlertRef = useRef(null)
   const remotePrefsHydrated = useRef(false)
   useEffect(() => {
@@ -733,7 +768,7 @@ export default function Leads({ initialSearch = '', initialAssociateId = '' }) {
 
   return (
     <div className="leads-workspace">
-      <LeadsIntegrationRail boot={boot} leads={items} refreshData={refreshData} toast={toast} />
+      <LeadsIntegrationRail boot={boot} leads={items} refreshData={refreshData} toast={toast} dockedVisible={railAtEdge} dock={railDock} />
       {/* bulk selection toolbar */}
       {selected.size > 0 && (
         <div className="card p-3 flex flex-wrap items-center gap-3 border-rose-400/25" style={{ animation: 'fadeIn .15s ease' }}>

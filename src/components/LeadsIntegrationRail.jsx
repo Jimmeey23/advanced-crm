@@ -21,7 +21,7 @@ function MomenceHub({ setTool }) {
   return <div className="leads-integration-hub">{tools.map(tool => { const Icon = tool.icon; return <button key={tool.id} onClick={() => setTool(tool.id)}><span><Icon size={17} /></span><div><b>{tool.label}</b><small>{tool.detail}</small></div></button> })}</div>
 }
 
-export default function LeadsIntegrationRail({ boot, leads, refreshData, toast }) {
+export default function LeadsIntegrationRail({ boot, leads, refreshData, toast, dockedVisible, dock }) {
   const [tool, setTool] = useState('')
   const [busy, setBusy] = useState('')
   const integrations = boot?.integrations || {}
@@ -54,7 +54,11 @@ export default function LeadsIntegrationRail({ boot, leads, refreshData, toast }
   const panelTitle = { momence: 'Momence', schedule: 'Momence class schedule', memberships: 'Memberships & packages', discounts: 'Discount codes', respondio: 'Respond.io inbox', stripe: 'Stripe payments', gpt: 'AI lead intelligence', mailtrap: 'Mailtrap email', sheets: 'Google Sheets', zoho: 'Zoho People', webhooks: 'Lead webhooks', supabase: 'Supabase sync' }[tool]
 
   return <>
-    <aside className="leads-integration-rail" aria-label="Active integrations">
+    <aside
+      className={`leads-integration-rail${dockedVisible || tool ? ' is-docked' : ''}`}
+      aria-label="Active integrations"
+      style={dock ? { top: dock.top, height: dock.height, left: dock.left } : undefined}
+    >
       <span className="leads-integration-rail-label">Apps</span>
       {active.map(item => { const Icon = item.icon; const selected = tool === item.id || (item.id === 'momence' && ['schedule', 'memberships', 'discounts'].includes(tool)); return <button key={item.id} className={selected ? 'is-active' : ''} onClick={() => setTool(current => current === item.id ? '' : item.id)} aria-label={item.label} title={item.label} aria-pressed={selected}><Icon size={17} /><span className="integration-live-dot" /></button> })}
     </aside>

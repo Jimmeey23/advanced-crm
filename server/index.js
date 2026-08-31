@@ -807,7 +807,10 @@ function createLeadFrom(payload) {
     sourceName,
     memberId: payload.memberId || null,
     convertedAt: payload.convertedAt || null,
-    stage: normalizeStage(payload.stage, db.stages) || db.stages[0],
+    // db.stages is an unordered admin-editable list (not a pipeline order),
+    // so stages[0] is arbitrary and has landed on stages like "Membership
+    // Sold" — always prefer the actual "new lead" stage when one exists.
+    stage: normalizeStage(payload.stage, db.stages) || (db.stages.includes('New Enquiry') ? 'New Enquiry' : db.stages[0]),
     status: normalizeStatus(payload.stage, payload.status),
     associateId: payload.associateId || null,
     locationId: payload.locationId || db.locations[0]?.id || null,
@@ -1252,7 +1255,14 @@ app.all('/api/webhooks/leads/:key', (req, res) => {
   // lead nobody can actually contact.
   if (!isValidEmail(email) && !isValidPhone(phone)) missing.push('a valid email or phone number')
   if (missing.length) {
-    logWebhookCall(integ.id, 'validation_failed', `Missing: ${missing.join(', ')}`)
+    // Include the raw keys (and a truncated snippet of the body) the sender
+    // actually posted — the alias dictionary only recognizes known key
+    // spellings, so most "fields are right there" reports turn out to be a
+    // key spelling/shape the dictionary doesn't know and need fieldMapping,
+    // not a code bug. Without this the logs only said "Missing: name, ..."
+    // with no way to see what was actually sent.
+    const bodySnippet = JSON.stringify(body).slice(0, 500)
+    logWebhookCall(integ.id, 'validation_failed', `Missing: ${missing.join(', ')}. Received keys: ${Object.keys(body).join(', ') || '(none)'}. Body: ${bodySnippet}`)
     return res.status(400).json({ error: `Missing required field(s): ${missing.join(', ')}` })
   }
 

@@ -1923,7 +1923,7 @@ function WebhookRow({ webhook, logs, logsOpen, onToggleLogs, onRename, onSaveMap
             <div key={l.id} className="flex items-center gap-2 text-xs py-1 border-b border-white/5 last:border-0">
               <span className="mono text-slate-500">{new Date(l.ts).toLocaleString()}</span>
               <OutcomeChip outcome={l.outcome} />
-              {l.detail && <span className="text-slate-500 truncate">{l.detail}</span>}
+              {l.detail && <span className="text-slate-500 truncate" title={l.detail}>{l.detail}</span>}
             </div>
           ))}
         </div>
