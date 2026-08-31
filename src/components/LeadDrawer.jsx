@@ -17,6 +17,15 @@ import RespondioTemplateModal from './RespondioTemplateModal.jsx'
 
 const R_CHANNELS = { whatsapp: '#34d399', sms: '#fbbf24', email: '#a78bfa', call: '#38bdf8' }
 const MIN_DRAWER_WIDTH = 560
+// Phone numbers arrive as "919773600001", "+91 97736 00001" or a bare
+// ten-digit local number. tel: and wa.me want digits only, with the country
+// code — a ten-digit number is Indian, which is the only market this app runs in.
+const digitsOf = (phone) => {
+  const digits = String(phone || '').replace(/\D/g, '')
+  if (!digits) return ''
+  return digits.length === 10 ? `91${digits}` : digits
+}
+
 const followUpText = value => {
   const text = String(value ?? '').trim()
   return text === '-' || text === '—' ? '' : text
@@ -384,6 +393,22 @@ export default function LeadDrawer() {
             role="slider"
           ><span aria-hidden="true" /></button>
 
+          {/* ── Intent spine ─────────────────────────────────────────
+              The one number that ranks this lead against every other, given a
+              permanent physical form: a column filled bottom-up to the score
+              and tinted by risk. It stays on screen while the panels scroll,
+              which a stat cell in the header could never do, and it is why
+              "Intent 77/100" is no longer one more fact in a grid. */}
+          <div
+            className={`ld-spine ${riskClass(lead.ai.risk)}`}
+            style={{ '--score': lead.ai.score }}
+            role="img"
+            aria-label={`Intent score ${lead.ai.score} of 100, ${lead.ai.risk} risk`}
+          >
+            <span className="ld-spine-fill" />
+            <span className="ld-spine-value">{lead.ai.score}</span>
+          </div>
+
           {/* ── Profile hero ─────────────────────────────────────────── */}
           <header className="ld-hero">
             <div className="ld-hero-top">
@@ -419,37 +444,63 @@ export default function LeadDrawer() {
               </div>
             </div>
 
-            <div className="ld-field-grid">
-              <div className="ld-field">
-                <span className="ld-field-label">Stage</span>
-                <select className={`input ld-chip-select ${stageClass(lead.stage)}`} style={stageBadgeStyle(lead.stage)} value={lead.stage} onChange={e => patch({ stage: e.target.value }, `Moved to ${e.target.value}`)}>
+            {/* ── Reach ────────────────────────────────────────────
+                The two things an associate actually uses mid-call, as real
+                actions rather than two more cells in a grid of facts. The
+                number stays editable underneath, because a wrong number is
+                found by trying to dial it. */}
+            <div className="ld-reach">
+              <a
+                className={`ld-reach-btn is-call ${digitsOf(lead.phone) ? '' : 'is-disabled'}`}
+                href={digitsOf(lead.phone) ? `tel:+${digitsOf(lead.phone)}` : undefined}
+                aria-disabled={!digitsOf(lead.phone)}
+              >
+                <Phone size={13} /> Call
+              </a>
+              <a
+                className={`ld-reach-btn is-whatsapp ${digitsOf(lead.phone) ? '' : 'is-disabled'}`}
+                href={digitsOf(lead.phone) ? `https://wa.me/${digitsOf(lead.phone)}` : undefined}
+                target="_blank" rel="noreferrer"
+                aria-disabled={!digitsOf(lead.phone)}
+              >
+                <MessageSquare size={13} /> WhatsApp
+              </a>
+              <a
+                className={`ld-reach-btn ${lead.email && lead.email !== '-' ? '' : 'is-disabled'}`}
+                href={lead.email && lead.email !== '-' ? `mailto:${lead.email}` : undefined}
+                aria-disabled={!(lead.email && lead.email !== '-')}
+              >
+                <Mail size={13} /> Email
+              </a>
+              <div className="ld-reach-detail">
+                <span><Phone size={10} /><EditableHeaderField value={lead.phone} placeholder="No phone" onSave={v => patchWithAgentConfirm('phone', { phone: v }, 'Phone updated')} /></span>
+                <span><Mail size={10} /><EditableHeaderField value={lead.email} placeholder="No email" onSave={v => patchWithAgentConfirm('email', { email: v }, 'Email updated')} /></span>
+              </div>
+            </div>
+
+            {/* ── State ────────────────────────────────────────────
+                Exactly the three things a person changes from here. Given the
+                whole row and real control sizing, so they never again read as
+                the same weight as a number nobody can act on. */}
+            <div className="ld-state">
+              <label className="ld-state-cell">
+                <span className="ld-state-label">Stage</span>
+                <select className={`input ld-state-select ${stageClass(lead.stage)}`} style={stageBadgeStyle(lead.stage)} value={lead.stage} onChange={e => patch({ stage: e.target.value }, `Moved to ${e.target.value}`)}>
                   {(boot?.stages || []).map(s => <option key={s}>{s}</option>)}
                 </select>
-              </div>
-              <div className="ld-field">
-                <span className="ld-field-label">Status</span>
-                <select className="input ld-chip-select capitalize" value={lead.status || 'open'} onChange={e => patchWithAgentConfirm('status', { status: e.target.value }, `Status set to ${e.target.value}`)}>
+              </label>
+              <label className="ld-state-cell">
+                <span className="ld-state-label">Status</span>
+                <select className="input ld-state-select capitalize" value={lead.status || 'open'} onChange={e => patchWithAgentConfirm('status', { status: e.target.value }, `Status set to ${e.target.value}`)}>
                   <option value="open">Open</option>
                   <option value="won">Won</option>
                   <option value="lost">Lost</option>
                 </select>
-              </div>
-              <div className="ld-field">
-                <span className="ld-field-label">Risk</span>
-                <span className={`chip ld-risk-chip ${riskClass(lead.ai.risk)}`}>{lead.ai.risk} risk</span>
-              </div>
-              <div className="ld-field">
-                <span className="ld-field-label">Phone</span>
-                <span className="ld-field-value"><Phone size={11} /><EditableHeaderField value={lead.phone} placeholder="No phone" onSave={v => patchWithAgentConfirm('phone', { phone: v }, 'Phone updated')} /></span>
-              </div>
-              <div className="ld-field">
-                <span className="ld-field-label">Email</span>
-                <span className="ld-field-value"><Mail size={11} /><EditableHeaderField value={lead.email} placeholder="No email" onSave={v => patchWithAgentConfirm('email', { email: v }, 'Email updated')} /></span>
-              </div>
-              <div className="ld-field">
-                <span className="ld-field-label">Owner</span>
+              </label>
+              <div className="ld-state-cell">
+                <span className="ld-state-label">Owner</span>
                 {role === 'admin' ? (
-                  <select className="input ld-chip-select" value={lead.associateId || ''} onChange={e => patch({ associateId: e.target.value }, e.target.value ? 'Owner updated' : 'Owner cleared')}>
+                  <select className="input ld-state-select" value={lead.associateId || ''} onChange={e => patch({ associateId: e.target.value }, e.target.value ? 'Owner updated' : 'Owner cleared')}>
                     <option value="">Unassigned</option>
                     {ownerOptions.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
                   </select>
@@ -464,23 +515,31 @@ export default function LeadDrawer() {
                   </div>
                 )}
               </div>
-              <div className="ld-field">
-                <span className="ld-field-label">Intent</span>
-                <span className="ld-field-static">{lead.ai.score}<small>/100</small></span>
-              </div>
-              <div className="ld-field">
-                <span className="ld-field-label">Next touchpoint</span>
-                <span className="ld-field-static">{nextFu ? fmtDate(nextFu.date) : 'Not set'}</span>
-              </div>
-              <div className="ld-field">
-                <span className="ld-field-label">Touchpoints</span>
-                <span className="ld-field-static">{realFollowUps.length}</span>
-              </div>
-              <div className="ld-field">
-                <span className="ld-field-label">Member value</span>
-                <span className="ld-field-static">{m ? money(lifetimeSales) : 'Not linked'}</span>
-              </div>
             </div>
+
+            {/* ── Vitals ───────────────────────────────────────────
+                Read-only numbers, deliberately quiet: a hairline strip in
+                tabular figures rather than four more boxes competing with the
+                controls above. Intent is absent — it is the spine on the left
+                edge, which is visible the whole time you are scrolling. */}
+            <dl className="ld-vitals">
+              <div className={`ld-vital ${overdueFu ? 'is-bad' : ''}`}>
+                <dt>Next touch</dt>
+                <dd>{nextFu ? fmtDate(nextFu.date) : 'Not set'}</dd>
+              </div>
+              <div className="ld-vital">
+                <dt>Touches</dt>
+                <dd>{realFollowUps.length}</dd>
+              </div>
+              <div className="ld-vital">
+                <dt>Risk</dt>
+                <dd className={`ld-vital-risk ${riskClass(lead.ai.risk)}`}>{lead.ai.risk}</dd>
+              </div>
+              <div className="ld-vital">
+                <dt>Member value</dt>
+                <dd>{m ? money(lifetimeSales) : '—'}</dd>
+              </div>
+            </dl>
 
             {role !== 'admin' && ownerRequestOpen && !lead.pendingOwnerChangeRequest && (
               <div className="ld-hero-owner-request">

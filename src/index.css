@@ -4425,9 +4425,6 @@ html[data-theme="light"] .ld-sticky-name { background: rgba(255, 255, 255, .98);
 .ld-contact span { display: inline-flex; align-items: center; gap: 5px; min-width: 0; }
 .ld-contact svg { color: #64748b; flex-shrink: 0; }
 
-.ld-fields { display: grid; grid-template-columns: 1.3fr 1fr auto; gap: 10px; align-items: stretch; }
-.ld-field { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
-.ld-field-label { color: #64748b; font-size: 9.5px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
 .ld-field-input, .ld-owner-control .input { height: 36px !important; font-size: 12.5px !important; font-weight: 700; }
 .ld-risk-chip { height: 36px; display: inline-flex; align-items: center; justify-content: center; text-transform: capitalize; white-space: nowrap; }
 
@@ -8761,17 +8758,114 @@ html[data-theme="light"] .ld-hero-name { color: #0f172a; }
 .ld-hero-sub-item { display: inline-flex; align-items: center; gap: 4px; }
 .ld-hero-actions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
 
-.ld-hero-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+
+
+/* ============================================================
+   LEAD DRAWER — call sheet
+   The drawer is read mid-call, so it is ordered by what the person does with
+   it, not by what the record contains: reach, then the state they change, then
+   the numbers they only glance at. The old layout put all ten facts in one
+   uniform grid, which gave a Stage control and a follow-up count identical
+   weight and left nothing to read first.
+   ============================================================ */
+
+/* Tier 1 — reach. Wide targets, because these are pressed while talking. */
+.ld-reach { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 15px; }
+.ld-reach-btn {
+  display: inline-flex; align-items: center; gap: 7px;
+  height: 32px; padding: 0 14px;
+  border: 1px solid var(--border); border-radius: 999px;
+  background: var(--surface-2); color: var(--text-dim);
+  font-size: var(--text-base); font-weight: 620; text-decoration: none;
+  transition: border-color var(--dur-hover) var(--ease-out), color var(--dur-hover) var(--ease-out), background var(--dur-hover) var(--ease-out);
+}
+.ld-reach-btn:hover { color: var(--text); border-color: var(--border-strong); }
+.ld-reach-btn svg { flex-shrink: 0; }
+/* Calling is the primary act; the other two are alternatives to it. */
+.ld-reach-btn.is-call { background: var(--accent-soft); border-color: var(--accent-border); color: var(--accent-ink, var(--accent)); }
+.ld-reach-btn.is-whatsapp:hover { color: #10b981; border-color: rgba(16,185,129,.4); }
+.ld-reach-btn.is-disabled { opacity: .38; pointer-events: none; }
+.ld-reach-detail {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px;
+  margin-left: auto; font-size: var(--text-sm); color: var(--text-mute);
+}
+.ld-reach-detail span { display: inline-flex; align-items: center; gap: 5px; min-width: 0; }
+.ld-reach-detail svg { color: var(--text-mute); flex-shrink: 0; }
+
+/* Tier 2 — state. The three controls, on their own row, labelled above so the
+   control itself carries the value at full size. */
+.ld-state {
+  display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, .8fr) minmax(0, 1.1fr);
+  gap: 10px; margin-top: 14px;
+}
+.ld-state-cell { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.ld-state-label {
+  font-family: var(--font-mono); font-size: var(--text-2xs); font-weight: 600;
+  text-transform: uppercase; letter-spacing: .1em; color: var(--text-mute);
+}
+.ld-state-select { width: 100%; height: 30px; min-height: 0; padding: 0 26px 0 10px !important; font-size: var(--text-base); font-weight: 620; border-radius: var(--radius-md); cursor: pointer; }
+
+/* Tier 3 — vitals. A hairline strip, not four boxes: these are glanced at, and
+   boxing them would put them back in competition with the controls above. */
+.ld-vitals { display: flex; flex-wrap: wrap; margin: 14px 0 0; padding: 0; }
+.ld-vital { flex: 1 1 auto; min-width: 88px; padding: 0 14px; border-left: 1px solid var(--border); }
+.ld-vital:first-child { padding-left: 0; border-left: 0; }
+.ld-vital dt { font-size: var(--text-2xs); text-transform: uppercase; letter-spacing: .08em; color: var(--text-mute); margin: 0 0 3px; }
+.ld-vital dd {
+  margin: 0; font-family: var(--font-mono); font-size: var(--text-base); font-weight: 600;
+  color: var(--text-dim); font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+.ld-vital.is-bad dd { color: #fb7185; }
+/* The risk classes carry a pill background elsewhere in the app; in this strip
+   only the colour is wanted, so the numbers stay a row of numbers. */
+.ld-vital-risk { text-transform: capitalize; background: none !important; padding: 0; }
+
+/* Signature — the intent spine. Pinned to the drawer's inner edge and filled
+   bottom-up to the score, so the lead's temperature is legible from anywhere in
+   the panel without occupying a cell in the header. */
+.ld-spine {
+  position: absolute; left: 0; top: 0; bottom: 0; width: 3px; z-index: 3;
+  background: var(--border); pointer-events: none;
+  --spine-tone: var(--accent);
+}
+/* riskClass() yields risk-hot / risk-warm / risk-cold, where hot is the lead
+   most at risk of being lost. */
+.ld-spine.risk-hot  { --spine-tone: #f43f5e; }
+.ld-spine.risk-warm { --spine-tone: #f59e0b; }
+.ld-spine.risk-cold { --spine-tone: #64748b; }
+.ld-spine-fill {
+  position: absolute; left: 0; right: 0; bottom: 0;
+  height: calc(var(--score, 0) * 1%);
+  background: linear-gradient(to top, var(--spine-tone), color-mix(in srgb, var(--spine-tone) 45%, transparent));
+  box-shadow: 0 0 12px -2px var(--spine-tone);
+  transition: height .5s var(--ease-out);
+}
+.ld-spine-value {
+  position: absolute; left: 8px; bottom: calc(var(--score, 0) * 1%);
+  transform: translateY(50%);
+  font-family: var(--font-mono); font-size: var(--text-2xs); font-weight: 700;
+  color: var(--spine-tone); letter-spacing: .02em;
+  font-variant-numeric: tabular-nums; opacity: .85;
+}
+@media (prefers-reduced-motion: reduce) { .ld-spine-fill { transition: none; } }
+
+/* The hero's own padding has to clear the spine. */
+.ld-hero { padding-left: 26px; }
+
+@media (max-width: 720px) {
+  .ld-state { grid-template-columns: 1fr; }
+  .ld-reach-detail { margin-left: 0; width: 100%; }
+  .ld-vital { min-width: 50%; padding: 0 10px; margin-bottom: 8px; }
+  .ld-vital:nth-child(odd) { padding-left: 0; border-left: 0; }
+  .ld-spine-value { display: none; }
+}
+
 .ld-chip-select {
   width: auto; padding: 4px 26px 4px 10px !important; font-size: 11px; font-weight: 650;
   border-radius: 999px; min-height: 0; height: 26px; cursor: pointer;
 }
 .ld-risk-chip { text-transform: capitalize; }
 
-.ld-hero-contact { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-top: 10px; }
-.ld-hero-contact-item { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: #94a3b8; }
-.ld-hero-contact-item svg { color: #64748b; flex-shrink: 0; }
-html[data-theme="light"] .ld-hero-contact-item { color: #475569; }
 
 .ld-hero-owner { display: flex; align-items: center; gap: 10px; margin-top: 12px; }
 .ld-hero-owner-label { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; color: #64748b; flex-shrink: 0; }
@@ -9202,26 +9296,8 @@ html[data-theme="light"] .ld-width-preset-btn.is-active { background: var(--surf
 .ld-hero-actions .btn { min-width: 30px; min-height: 30px; }
 .ld-width-preset-btn { min-width: 22px !important; height: 24px !important; }
 
-.ld-field-grid {
-  display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 10px 14px;
-}
-.ld-field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
-.ld-field-label {
-  font-size: 8.5px; font-weight: 700; letter-spacing: .09em; text-transform: uppercase;
-  color: var(--ld-muted);
-}
-.ld-field .ld-chip-select { width: 100%; }
-.ld-field-value {
-  display: inline-flex; align-items: center; gap: 5px; min-height: 25px;
-  font-size: 12px; color: var(--ld-copy);
-}
-.ld-field-value svg { color: var(--ld-muted); flex-shrink: 0; }
-.ld-field-static {
-  display: inline-flex; align-items: baseline; min-height: 25px;
-  font-size: 12px; font-weight: 650; color: var(--ld-ink); font-variant-numeric: tabular-nums;
-}
+/* The old uniform field grid lived here. Replaced by the reach / state /
+   vitals tiers above — see LEAD DRAWER — call sheet. */
 .ld-field-static small { margin-left: 2px; color: var(--ld-muted); font-size: 9.5px; font-weight: 550; }
 .ld-field .ld-owner-locked { min-height: 25px; }
 
@@ -10940,3 +11016,20 @@ html[data-theme="light"] .app-marquee {
 @media (prefers-reduced-motion: reduce) {
   .app-marquee-track { animation: none !important; }
 }
+
+/* ============================================================
+   LEAD DRAWER — call-sheet corrections
+   This stylesheet carries five layered `.ld-hero` blocks; the last one wins, so
+   these two declarations have to sit at the very end to take effect at all.
+   ============================================================ */
+
+/* Clear the intent spine. Set earlier in the file, it lost to the later block. */
+.ld-hero { padding-left: 26px; }
+
+/* The hero was capped at 20vh with its own scrollbar — a header that scrolls
+   independently of the panel below it, which is why the old field grid had to be
+   squeezed into five tight columns in the first place. The call-sheet hero is
+   bounded by construction (identity, three controls, one strip of numbers), so
+   it can simply take the height it needs and let the panels do the scrolling. */
+.ld-hero { max-height: none; overflow: visible; }
+@media (max-height: 760px) { .ld-hero { max-height: none; } }

@@ -4811,11 +4811,57 @@ function backfillLeadLocations(db) {
   }
 }
 
+// db.stages is an admin-editable list, and editing it by hand has left case
+// variants of the same stage sitting side by side — "Called - Did Not Answer"
+// next to "Called - Did not answer". They read as one stage to a person and to
+// the Momence mapping (which normalises case), but as two everywhere the list
+// itself is shown: two entries in the stage dropdown, two rows in every
+// stage-grouped report, two of the same thing to pick between.
+//
+// Collapsed to whichever spelling the most leads actually use — the one people
+// have been picking is the one that stays. Leads on a losing variant are moved
+// across, so no lead is left pointing at a stage that no longer exists.
+function mergeDuplicateStages(db) {
+  const key = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '')
+  const groups = new Map()
+  for (const stage of db.stages) {
+    const k = key(stage)
+    if (!k) continue
+    if (!groups.has(k)) groups.set(k, [])
+    groups.get(k).push(stage)
+  }
+
+  const rename = new Map()
+  for (const variants of groups.values()) {
+    if (variants.length < 2) continue
+    const counted = variants.map(name => ({ name, used: db.leads.filter(l => l.stage === name).length }))
+    counted.sort((a, b) => b.used - a.used)
+    const winner = counted[0].name
+    for (const loser of counted.slice(1)) rename.set(loser.name, winner)
+  }
+  if (!rename.size) return
+
+  let moved = 0
+  for (const lead of db.leads) {
+    const winner = rename.get(lead.stage)
+    if (!winner) continue
+    lead.stage = winner
+    markDirty(lead.id)
+    moved++
+  }
+  db.stages = db.stages.filter(stage => !rename.has(stage))
+
+  const summary = [...rename].map(([from, to]) => `"${from}" -> "${to}"`).join(', ')
+  console.log(`[physique57-leads] merged ${rename.size} duplicate stage(s), moved ${moved} lead(s): ${summary}`)
+  save()
+}
+
 async function start() {
   await init()
   db = load()
   if (!Array.isArray(db.webhookIntegrations)) db.webhookIntegrations = []
   if (!Array.isArray(db.webhookLogs)) db.webhookLogs = []
+  mergeDuplicateStages(db)
   backfillLeadLocations(db)
   backfillFollowUps(db)
   backfillAssociatePhotos(db)
