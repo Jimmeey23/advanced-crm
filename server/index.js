@@ -17,7 +17,7 @@ import * as inbox from './inbox.js'
 import * as mailer from './mailer.js'
 import { randomUUID } from 'node:crypto'
 import * as supabase from './supabaseStore.js'
-import { requireAuth, requireAuthWithQueryToken, scopeLocation, blockAgentWrite, adminCodeHandler, isAllowedLocation, allowedLocationIds, isPublicLeadWebhookPath, isPublicSheetHookPath } from './auth.js'
+import { requireAuth, requireAuthWithQueryToken, scopeLocation, blockAgentWrite, adminCodeHandler, isAllowedLocation, allowedLocationIds, isPublicLeadWebhookPath, isPublicSheetHookPath, isPublicSheetOauthPath } from './auth.js'
 import { runReminderDigest, startReminderScheduler } from './reminders.js'
 import { parseCsv, autoMap, normalizeStage, normalizeStatus, parseFlexibleDate } from './csv.js'
 import { STATUS_GROUPS, statusGroupOf } from './leadStatus.js'
@@ -97,7 +97,7 @@ app.use('/api', (req, res, next) => {
   // browser opens with EventSource — it cannot set an Authorization header, so
   // that one route authenticates itself off `?token=` in its own handler
   // below. Nothing else is exempt from the mandatory bearer token.
-  if (req.path === '/runtime' || req.path === '/events' || isPublicLeadWebhookPath(req.originalUrl) || isPublicSheetHookPath(req.originalUrl)) return next()
+  if (req.path === '/runtime' || req.path === '/events' || isPublicLeadWebhookPath(req.originalUrl) || isPublicSheetHookPath(req.originalUrl) || isPublicSheetOauthPath(req.originalUrl)) return next()
   requireAuth(db)(req, res, (err) => {
     if (err) return next(err)
     scopeLocation(req, res, next)
@@ -1518,10 +1518,17 @@ app.get('/api/google-sheets/detect-mapping', async (req, res) => {
   }
 })
 
-app.get('/api/google-sheets/oauth/start', (req, res) => {
+// Reached by a full-page navigation, so the session token arrives as `?token=`
+// rather than a header (see isPublicSheetOauthPath). The nonce minted here is
+// what lets the callback — a redirect from Google, carrying nothing of ours —
+// be public without being open to anyone.
+app.get('/api/google-sheets/oauth/start', (req, res, next) => requireAuthWithQueryToken(db)(req, res, next), (req, res) => {
   try {
-    const url = googleSheets.buildAuthUrl(db, sheetsRedirectUri(req))
-    res.redirect(url)
+    const state = randomUUID()
+    db.settings.googleSheets = db.settings.googleSheets || {}
+    db.settings.googleSheets.oauthState = { value: state, at: nowIso() }
+    save()
+    res.redirect(googleSheets.buildAuthUrl(db, sheetsRedirectUri(req), state))
   } catch (e) {
     res.status(400).json({ error: e.message })
   }
@@ -1531,6 +1538,15 @@ app.get('/api/google-sheets/oauth/callback', async (req, res) => {
   try {
     if (req.query.error) throw new Error(req.query.error_description || req.query.error)
     if (!req.query.code) throw new Error('No authorization code returned by Google')
+    // The nonce is single-use and short-lived: without both checks this public
+    // route would let anyone replay a code, or hand us one from another
+    // account's consent screen.
+    const expected = db.settings.googleSheets?.oauthState
+    const fresh = expected?.at && (Date.now() - new Date(expected.at).getTime()) < 10 * 60 * 1000
+    if (!expected?.value || !fresh || String(req.query.state || '') !== expected.value) {
+      throw new Error('This sign-in link has expired — start the connection again from Settings.')
+    }
+    delete db.settings.googleSheets.oauthState
     await googleSheets.exchangeCode(db, req.query.code, sheetsRedirectUri(req))
     log('settings', `Connected Google Sheets (${db.settings.googleSheets.connectedEmail})`)
     await saveMetaNow()

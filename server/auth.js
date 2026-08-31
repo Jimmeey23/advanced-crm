@@ -17,6 +17,20 @@ export function isPublicLeadWebhookPath(originalUrl) {
   return /^\/api\/webhooks\/leads\/[^/]+\/?$/.test(pathname)
 }
 
+// The Google OAuth handshake cannot carry a bearer header at all:
+//
+//   /oauth/start    is a full-page navigation, not a fetch, so the browser
+//                   sends no Authorization header. It authenticates off
+//                   `?token=` instead, the same exemption the SSE stream uses.
+//   /oauth/callback is a redirect issued by GOOGLE, so nothing of ours is in
+//                   the request. It is protected by the `state` nonce minted at
+//                   /oauth/start, which is what CSRF-protects an OAuth callback
+//                   in the first place.
+export function isPublicSheetOauthPath(originalUrl) {
+  const pathname = String(originalUrl || '').split('?')[0]
+  return /^\/api\/google-sheets\/oauth\/(start|callback)\/?$/.test(pathname)
+}
+
 // The sheet's Apps Script has no Supabase session — it authenticates with the
 // shared secret in the X-Sheet-Secret header, checked by the route itself.
 export function isPublicSheetHookPath(originalUrl) {

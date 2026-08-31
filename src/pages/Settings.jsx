@@ -14,6 +14,7 @@ import {
 } from 'simple-icons'
 import { useApp } from '../store.jsx'
 import { api } from '../api.js'
+import { supabase } from '../lib/supabaseClient.js'
 import { Spinner, Modal, ModalHeader } from '../ui.jsx'
 import FieldMappingEditor from '../components/FieldMappingEditor.jsx'
 import { DEFAULT_COLUMNS } from '../components/ColumnManager.jsx'
@@ -519,7 +520,17 @@ export default function SettingsPage({ jumpTo }) {
     } catch (e) { toast(e.message, 'error') }
   }
 
-  const connectGoogle = () => { window.location.href = '/api/google-sheets/oauth/start' }
+  // A full-page navigation cannot send an Authorization header, so the session
+  // token rides in the query string — the same exemption /api/events uses.
+  const connectGoogle = async () => {
+    try {
+      const { data } = await supabase.auth.getSession()
+      const token = data?.session?.access_token
+      if (!token) { toast('Session expired — sign in again', 'error'); return }
+      const base = await api.resolveBase()
+      window.location.href = `${base}/api/google-sheets/oauth/start?token=${encodeURIComponent(token)}`
+    } catch (e) { toast(e.message, 'error') }
+  }
 
   const disconnectGoogle = async () => {
     if (!window.confirm('Disconnect this Google account? Syncing will stop until reconnected.')) return
