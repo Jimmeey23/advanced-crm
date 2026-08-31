@@ -733,6 +733,7 @@ export default function Leads({ initialSearch = '', initialAssociateId = '' }) {
 
   return (
     <div className="leads-workspace">
+      <LeadsIntegrationRail boot={boot} leads={items} refreshData={refreshData} toast={toast} />
       {/* bulk selection toolbar */}
       {selected.size > 0 && (
         <div className="card p-3 flex flex-wrap items-center gap-3 border-rose-400/25" style={{ animation: 'fadeIn .15s ease' }}>
@@ -1039,7 +1040,6 @@ export default function Leads({ initialSearch = '', initialAssociateId = '' }) {
               selected={selected} toggleSelect={toggleSelect} toggleSelectAll={toggleSelectAll}
               columns={columns} density={density} rowHeight={rowHeight} tableZoom={tableZoom} colWidths={colWidths} setColWidths={saveColWidths} manualFlagOverrides={manualFlagOverrides} headerPinned={headerPinned} fixedCols={fixedCols} focusLeadIds={focusLeadIds} clearFocus={() => setFocusLeadIds([])} sortBy={sortBy} sortDir={sortDir} setSortBy={setSortBy} setSortDir={setSortDir}
               columnCountsQuery={columnCountsQuery}
-              integrationRail={<LeadsIntegrationRail boot={boot} leads={items} refreshData={refreshData} toast={toast} />}
             />
           )}
           {view === 'cards' && <CardsView items={items} lookup={lookup} openLead={openLead} grouped={grouped} collapsed={collapsed} toggleGroup={toggleGroup} boot={boot} onMessage={setComposeLead} onTemplateMessage={setTemplateLead} />}
@@ -1413,7 +1413,7 @@ function GroupSummary({ list }) {
   )
 }
 
-function TableView({ items, boot, lookup, openLead, openQuickAction, changeStage, changeAssociate, changeLeadField, toggleManualFlag, grouped, collapsed, toggleGroup, onMessage, onTemplateMessage, selected, toggleSelect, toggleSelectAll, columns, density, rowHeight, tableZoom, colWidths, setColWidths, manualFlagOverrides, headerPinned = true, fixedCols = false, focusLeadIds = [], clearFocus, sortBy, sortDir, setSortBy, setSortDir, columnCountsQuery, integrationRail }) {
+function TableView({ items, boot, lookup, openLead, openQuickAction, changeStage, changeAssociate, changeLeadField, toggleManualFlag, grouped, collapsed, toggleGroup, onMessage, onTemplateMessage, selected, toggleSelect, toggleSelectAll, columns, density, rowHeight, tableZoom, colWidths, setColWidths, manualFlagOverrides, headerPinned = true, fixedCols = false, focusLeadIds = [], clearFocus, sortBy, sortDir, setSortBy, setSortDir, columnCountsQuery }) {
   const focusedItems = focusLeadIds.length ? items.filter(l => focusLeadIds.includes(l.id)) : items
   if (grouped) {
     return (
@@ -1632,7 +1632,6 @@ function TableGrid({ items, boot, lookup, openLead, openQuickAction, changeStage
           <button className="btn btn-ghost !py-1.5 !text-sm" onClick={clearFocus}>Show all leads</button>
         </div>
       )}
-      <div className="lead-table-horizontal-stage">
       <table className={`data-table leads-data-table is-${density} ${fixedCols ? 'has-sticky-cols' : ''}`} style={{ '--lead-row-height': `${rowHeight}px`, '--col-select-width': `${selectW}px`, '--col-lead-width': `${leadW}px`, '--col-stage-width': `${stageW}px` }}>
         <thead className={headerPinned ? 'is-pinned' : 'is-unpinned'}>
           <tr className="text-xs uppercase tracking-wider text-slate-500 border-b border-white/8">
@@ -1821,8 +1820,6 @@ function TableGrid({ items, boot, lookup, openLead, openQuickAction, changeStage
           })}
         </tbody>
       </table>
-      <div className="leads-integration-dock">{integrationRail}</div>
-      </div>
       {scoreTip && <ScoreDetailsPopover tip={scoreTip} onClose={() => setScoreTip(null)} />}
     </div>
   )
