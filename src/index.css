@@ -3232,7 +3232,10 @@ html[data-theme="light"] .associate-scorecard-close:hover {
 }
 
 /* Leads active-integration rail and in-place workspace */
-.leads-integration-rail { position: fixed; z-index: 42; top: 50%; right: 13px; display: flex; width: 45px; flex-direction: column; align-items: center; gap: 5px; padding: 7px 5px; border: 1px solid var(--border); border-radius: 14px; background: color-mix(in srgb, var(--surface) 94%, transparent); box-shadow: 0 12px 34px rgba(2, 6, 23, .18); backdrop-filter: blur(14px); transform: translateY(-50%); }
+.lead-table-horizontal-stage { display: flex; width: max-content; min-width: 100%; align-items: stretch; }
+.lead-table-horizontal-stage > .leads-data-table { flex: 0 0 auto; }
+.leads-integration-dock { display: flex; width: 58px; min-height: 100%; flex: 0 0 58px; align-items: flex-start; justify-content: center; padding: 48px 6px 12px; border-left: 1px solid var(--border); background: var(--surface-2); }
+.leads-integration-rail { position: sticky; z-index: 12; top: 12px; display: flex; width: 45px; flex-direction: column; align-items: center; gap: 5px; padding: 7px 5px; border: 1px solid var(--border); border-radius: 14px; background: color-mix(in srgb, var(--surface) 94%, transparent); box-shadow: 0 8px 24px rgba(2, 6, 23, .12); backdrop-filter: blur(14px); }
 .leads-integration-rail-label { padding: 3px 0 5px; color: var(--text-mute); font-size: 7px; font-weight: 850; letter-spacing: .12em; text-transform: uppercase; writing-mode: horizontal-tb; }
 .leads-integration-rail > button { position: relative; display: grid; width: 35px; height: 35px; place-items: center; border: 1px solid transparent; border-radius: 9px; color: var(--text-mute); transition: color .18s ease, border-color .18s ease, background-color .18s ease; }
 .leads-integration-rail > button:hover, .leads-integration-rail > button.is-active { color: #047857; border-color: color-mix(in srgb, #10b981 25%, var(--border)); background: color-mix(in srgb, #10b981 10%, var(--surface)); }
@@ -3277,9 +3280,9 @@ html[data-theme="light"] .associate-scorecard-close:hover {
 html[data-theme="dark"] .leads-integration-rail > button:hover, html[data-theme="dark"] .leads-integration-rail > button.is-active { color: #6ee7b7; }
 @media (prefers-reduced-motion: reduce) { .leads-integration-panel { animation: none; } }
 @media (max-width: 760px) {
-  .leads-integration-rail { top: auto; right: 12px; bottom: 12px; left: 12px; width: auto; flex-direction: row; justify-content: center; transform: none; }
-  .leads-integration-rail-label { display: none; }
-  .leads-integration-rail > button { width: 42px; height: 42px; }
+  .leads-integration-dock { width: 56px; flex-basis: 56px; padding-top: 38px; }
+  .leads-integration-rail { top: 8px; }
+  .leads-integration-rail-label { display: block; }
   .leads-integration-panel, .leads-integration-panel.is-workspace { top: 8px; right: 8px; bottom: 8px; width: calc(100vw - 16px); }
   .leads-integration-status { grid-template-columns: 1fr; }
 }
