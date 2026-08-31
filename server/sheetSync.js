@@ -162,6 +162,18 @@ function forgetRow(leadId) {
   snapshotGone.add(leadId)
 }
 
+// Drops snapshot rows whose lead is gone. Returns how many went.
+function pruneSnapshot() {
+  const live = new Set(db().leads.map(l => l.id))
+  let dropped = 0
+  for (const leadId of [...snapshot.keys()]) {
+    if (live.has(leadId)) continue
+    forgetRow(leadId)
+    dropped++
+  }
+  return dropped
+}
+
 export async function persistSnapshot() {
   const dirty = [...snapshotDirty]
   const gone = [...snapshotGone]
@@ -751,6 +763,15 @@ export async function reconcile({ force = false } = {}) {
   // is already on the lead when the source tab gets its (final) say.
   const mirrorIn = await ingestMirrorEdits()
 
+  // Snapshot entries for leads that no longer exist are dead weight, and not
+  // harmlessly so: `snapshot.size` is what the mid-refresh guard below compares
+  // the sheet's row count against. Left to accumulate through delete/re-create
+  // churn the snapshot outgrew the sheet — 43,585 entries against 23,797 leads
+  // — so every read looked like it had lost a third of the rows and deletion
+  // detection switched itself off permanently.
+  const pruned = pruneSnapshot()
+  if (pruned) ctx.logSync('warn', `dropped ${pruned} snapshot row(s) for leads that no longer exist`)
+
   const { header, rows } = await transport.readSheetRows()
   if (!header.length) return { created: 0, merged: 0, unchanged: 0, skipped: 0, deleted: 0, mirrorIn: mirrorIn.ingested }
 
@@ -769,7 +790,7 @@ export async function reconcile({ force = false } = {}) {
     && rows.length < priorRowCount * BULK_CLEAR_RATIO
     && missingRows >= BULK_CLEAR_FLOOR
 
-  const counts = { created: 0, merged: 0, unchanged: 0, skipped: 0, deleted: 0, conflicts: 0, mirrorIn: mirrorIn.ingested, mirrorOut: 0 }
+  const counts = { created: 0, merged: 0, unchanged: 0, skipped: 0, deleted: 0, conflicts: 0, duplicates: 0, sheetRows: rows.length, mirrorIn: mirrorIn.ingested, mirrorOut: 0 }
   // Owner names the roster has never heard of. Silently ignoring them is what
   // let the sheet and the app disagree about who owns a lead indefinitely: the
   // sheet says a name, nothing matches it, and the lead quietly keeps whoever
@@ -791,7 +812,15 @@ export async function reconcile({ force = false } = {}) {
     const result = applyRow(plan, { rowNumber, row: rows[i], index, ignoreSnapshot: force })
     counts[result.outcome] = (counts[result.outcome] || 0) + 1
     counts.conflicts += result.conflicts?.length || 0
-    if (result.lead) seen.add(result.lead.id)
+    // A row resolving to a lead an earlier row in this same pass already
+    // claimed is a repeat contact — the same person enquiring twice. It is
+    // merged onto the one lead by design, which is the whole of the gap between
+    // the sheet's row count and the app's lead count, so it gets counted rather
+    // than left for someone to work out by subtraction.
+    if (result.lead) {
+      if (seen.has(result.lead.id)) counts.duplicates++
+      seen.add(result.lead.id)
+    }
     if (result.reason === 'blank row') blankRows.add(rowNumber)
   }
 
@@ -854,7 +883,7 @@ export async function reconcile({ force = false } = {}) {
   await persistSnapshot()
   db().settings.googleSheets.lastSyncAt = new Date().toISOString()
   db().settings.googleSheets.lastSyncCounts = counts
-  ctx.logSync('synced', `${counts.created} created, ${counts.merged} merged, ${counts.unchanged} unchanged, ${counts.deleted} deleted, ${counts.skipped} skipped, ${counts.conflicts} conflicts, mirror ${counts.mirrorIn} in / ${counts.mirrorOut} out`)
+  ctx.logSync('synced', `${counts.sheetRows} sheet rows -> ${db().leads.length} leads: ${counts.created} created, ${counts.merged} merged, ${counts.unchanged} unchanged, ${counts.duplicates} repeat contacts merged onto an existing lead, ${counts.skipped} skipped, ${counts.deleted} deleted, ${counts.conflicts} conflicts, mirror ${counts.mirrorIn} in / ${counts.mirrorOut} out`)
   ctx.save()
   return counts
 }

@@ -815,3 +815,47 @@ test('a studio named without its city still resolves', async () => {
   await sheetSync.reconcile()
   assert.equal(db.leads[0].locationId, 'loc_kenkere')
 })
+
+// ---------------------------------------------------------------------------
+// row count vs lead count
+// ---------------------------------------------------------------------------
+
+test('two rows for the same person become one lead, and the pass says so', async () => {
+  const db = makeDb()
+  const rows = [
+    row({ name: 'Asha Rao', email: 'asha@example.com', phone: '9820011111', stage: 'New Enquiry' }),
+    // Same person, enquiring a second time — same phone, no email this time.
+    row({ name: 'Asha Rao', phone: '9820011111', stage: 'Trial Booked' })
+  ]
+  install(db, rows)
+
+  const counts = await sheetSync.reconcile()
+  assert.equal(db.leads.length, 1)
+  assert.equal(counts.sheetRows, 2)
+  assert.equal(counts.duplicates, 1)
+})
+
+test('a snapshot full of dead leads does not switch deletion detection off', async () => {
+  const db = makeDb()
+  const rows = [
+    row({ name: 'Asha Rao', email: 'asha@example.com', phone: '9820011111', stage: 'New Enquiry' }),
+    row({ name: 'Ravi Menon', email: 'ravi@example.com', phone: '9820022222', stage: 'New Enquiry' }),
+    row({ name: 'Kiran Shah', email: 'kiran@example.com', phone: '9820033333', stage: 'New Enquiry' }),
+    row({ name: 'Meera Nair', email: 'meera@example.com', phone: '9820044444', stage: 'New Enquiry' }),
+    row({ name: 'Sanya Bose', email: 'sanya@example.com', phone: '9820055555', stage: 'New Enquiry' }),
+    row({ name: 'Rhea Iyer', email: 'rhea@example.com', phone: '9820066666', stage: 'New Enquiry' })
+  ]
+  const writes = install(db, rows)
+  await sheetSync.reconcile()
+  assert.equal(db.leads.length, 6)
+
+  // Leads deleted outside the sync leave their snapshot rows behind. Left in,
+  // those orphans inflate the "rows we knew about" figure the mid-refresh guard
+  // measures the sheet against, and a healthy read starts looking truncated.
+  db.leads = db.leads.slice(0, 1)
+  rows.length = 1
+
+  const counts = await sheetSync.reconcile()
+  assert.ok(!writes.log.some(line => line.includes('mid-refresh')), 'a real read must not be dismissed as mid-refresh')
+  assert.equal(counts.sheetRows, 1)
+})
