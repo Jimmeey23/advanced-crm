@@ -1,7 +1,7 @@
 // Scheduled email reminders for upcoming / overdue follow-ups.
 // Emails a daily digest to each associate (and the studio support inbox)
 // summarising which of their leads need attention.
-import { sendMail } from './mailer.js'
+import { config as mailConfig, sendMail } from './mailer.js'
 import { save } from './db.js'
 
 export function fmtDate(iso) {
@@ -78,7 +78,7 @@ export async function runReminderDigest(db) {
   const rem = db.settings.reminders || {}
   if (rem.emailReminders !== true) return { skipped: true, reason: 'reminders disabled' }
   const cfg = db.settings.mailtrap || {}
-  if (cfg.enabled !== true) return { skipped: true, reason: 'email disabled' }
+  if (mailConfig(db).enabled !== true) return { skipped: true, reason: 'email disabled' }
 
   const todayKey = new Date().toISOString().slice(0, 10)
   if (cfg.lastDigestDate === todayKey) return { skipped: true, reason: 'already sent today' }

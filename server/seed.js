@@ -296,7 +296,7 @@ export function seed() {
       gpt: { apiKey: '', model: 'gpt-4o-mini', enabled: true },
       respondio: { apiKey: '', workspaceId: '' },
       inbox: { snippets: [] },
-      mailtrap: { host: '', port: 2525, user: '', pass: '', fromEmail: 'studio@physique57.in', fromName: 'Physique 57 Lead Studio', enabled: false },
+      mailtrap: { host: 'live.smtp.mailtrap.io', port: 587, user: 'api', pass: '', fromEmail: 'hello@physique57india.com', fromName: 'Physique 57 India', enabled: false },
       googleSheets: {
         clientId: '', clientSecret: '', refreshToken: '', accessToken: '', tokenExpiresAt: '',
         connectedEmail: '', sheetId: '', sheetTab: '', fieldMapping: {}, defaults: {},

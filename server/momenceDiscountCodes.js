@@ -278,7 +278,11 @@ export function createDiscountCodeHandlers({
       try {
         if (req.authUser?.role === 'admin') throw Object.assign(new Error('Admins can create discount codes directly'), { status: 400 })
         const { market } = context(req)
-        const payload = serializeDiscountCode(req.body)
+        // scopeLocation adds locationId to agent request bodies as an
+        // authorization clamp. It is not a Momence discount-code field and
+        // must never cross the integration boundary.
+        const { locationId: _scopedLocationId, ...discountCodeInput } = req.body || {}
+        const payload = serializeDiscountCode(discountCodeInput)
         const { db, requests } = requestStore()
         const duplicate = requests.find(request => request.status === 'pending' && request.requestedByUserId === req.authUser.userId && request.market === market && request.payload?.code === payload.code)
         if (duplicate) throw Object.assign(new Error(`A pending request already exists for ${payload.code}`), { status: 409 })

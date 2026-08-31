@@ -2547,6 +2547,7 @@ app.put('/api/settings', async (req, res) => {
   // generic per-section merge below is shallow, so without this it would
   // blow away whatever cookie/botId/orgId the un-sent fields already held.
   const prevRespondioSession = db.settings.respondio?.session || null
+  const previousMailtrapPassword = db.settings.mailtrap?.pass || ''
   for (const section of SETTINGS_SECTIONS) {
     if (body[section] && typeof body[section] === 'object' && !Array.isArray(body[section])) {
       db.settings[section] = { ...(db.settings[section] || {}), ...body[section] }
@@ -2561,6 +2562,11 @@ app.put('/api/settings', async (req, res) => {
       USER_RESPONDIO_BOT_ID: s.botId || '',
       USER_RESPONDIO_ORG_ID: s.orgId || ''
     })
+  }
+  // The Settings API never returns SMTP secrets. A blank password sent back
+  // by the form means "keep the existing secret", not "erase it".
+  if (body.mailtrap && !String(body.mailtrap.pass || '').trim()) {
+    db.settings.mailtrap.pass = previousMailtrapPassword
   }
   if (Array.isArray(body.followUpChannels)) db.settings.followUpChannels = body.followUpChannels.filter(Boolean)
   if (Array.isArray(body.leadColumns)) db.settings.leadColumns = body.leadColumns.filter(column => column && column.id && column.label)
@@ -4317,10 +4323,18 @@ app.delete('/api/inbox/snippets/:id', (req, res) => {
 
 app.get('/api/mailtrap/status', (req, res) => {
   const c = mailer.config(db)
-  res.json({ configured: mailer.isConfigured(db), enabled: c.enabled === true, host: c.host, fromEmail: c.fromEmail, digestEnabled: db.settings.reminders?.emailReminders === true })
+  res.json({ configured: mailer.isConfigured(db), enabled: c.enabled === true, host: c.host, port: c.port, user: c.user, fromEmail: c.fromEmail, fromName: c.fromName, digestEnabled: db.settings.reminders?.emailReminders === true })
 })
 
-app.post('/api/mailtrap/test', async (req, res) => {
+app.post('/api/mailtrap/verify', blockAgentWrite, async (req, res) => {
+  try {
+    res.json(await mailer.verifyTransport(db))
+  } catch (e) {
+    res.status(e.status || 502).json({ error: e.message })
+  }
+})
+
+app.post('/api/mailtrap/test', blockAgentWrite, async (req, res) => {
   const to = String(req.body.to || '').trim()
   if (!to) return res.status(400).json({ error: 'Recipient email is required' })
   try {
@@ -4331,7 +4345,7 @@ app.post('/api/mailtrap/test', async (req, res) => {
   }
 })
 
-app.post('/api/mailtrap/reminders', async (req, res) => {
+app.post('/api/mailtrap/reminders', blockAgentWrite, async (req, res) => {
   try {
     const r = await runReminderDigest(db)
     res.json(r)

@@ -118,10 +118,11 @@ export default function SettingsPage({ jumpTo }) {
     { id: 'trial', label: 'Trial Booking Follow-up', name: 'trial_booking_followup', language: 'en', category: 'utility', namespace: '', parameters: ['First name', 'Trial date', 'Studio name'] }
   ])
 
-  const [mailSet, setMailSet] = useState({ host: '', port: 2525, user: '', pass: '', fromEmail: '', fromName: '', enabled: false })
+  const [mailSet, setMailSet] = useState({ host: 'live.smtp.mailtrap.io', port: 587, user: 'api', pass: '', fromEmail: 'hello@physique57india.com', fromName: 'Physique 57 India', enabled: false })
   const [mailStatus, setMailStatus] = useState(null)
   const [testMail, setTestMail] = useState(false)
   const [testMailResult, setTestMailResult] = useState(null)
+  const [verifyMail, setVerifyMail] = useState(false)
   const [mailTo, setMailTo] = useState('')
   const [mailDigest, setMailDigest] = useState(false)
   const [mailDigestResult, setMailDigestResult] = useState(null)
@@ -224,7 +225,7 @@ export default function SettingsPage({ jumpTo }) {
     }).catch(() => {})
     api.get('/api/mailtrap/status').then(s => {
       setMailStatus(s)
-      setMailSet(m => ({ ...m, host: s.host || '', fromEmail: s.fromEmail || '', enabled: s.enabled === true }))
+      setMailSet(m => ({ ...m, host: s.host || 'live.smtp.mailtrap.io', port: s.port || 587, user: s.user || 'api', fromEmail: s.fromEmail || 'hello@physique57india.com', fromName: s.fromName || 'Physique 57 India', enabled: s.enabled === true }))
     }).catch(() => {})
     loadWebhooks()
     api.get('/api/webhooks/field-reference').then(d => setWebhookFieldRef(d.fields)).catch(() => setWebhookFieldRef([]))
@@ -349,6 +350,15 @@ export default function SettingsPage({ jumpTo }) {
       setTestMailResult({ ok: !r.skipped, text: r.skipped ? `Skipped — ${r.reason || 'not configured'}` : 'Test email sent' })
     } catch (e) { setTestMailResult({ ok: false, text: e.message }) }
     finally { setTestMail(false) }
+  }
+
+  const verifyMailFn = async () => {
+    setVerifyMail(true); setTestMailResult(null)
+    try {
+      const r = await api.post('/api/mailtrap/verify', {})
+      setTestMailResult({ ok: true, text: `SMTP verified — ${r.host}:${r.port} (${r.user})` })
+    } catch (e) { setTestMailResult({ ok: false, text: e.message }) }
+    finally { setVerifyMail(false) }
   }
 
   const sendDigest = async () => {
@@ -1048,14 +1058,15 @@ export default function SettingsPage({ jumpTo }) {
               <ToggleMini label="Enable outbound email" value={mailSet.enabled === true} onChange={v => setMailSet({ ...mailSet, enabled: v })} />
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
                 <div><label className="label">SMTP host</label><input className="input" value={mailSet.host} onChange={e => setMailSet({ ...mailSet, host: e.target.value })} placeholder="live.smtp.mailtrap.io" /></div>
-                <div><label className="label">Port</label><input className="input" type="number" value={mailSet.port} onChange={e => setMailSet({ ...mailSet, port: Number(e.target.value) })} placeholder="2525" /></div>
+                <div><label className="label">Port</label><input className="input" type="number" value={mailSet.port} onChange={e => setMailSet({ ...mailSet, port: Number(e.target.value) })} placeholder="587" /></div>
                 <div><label className="label">Username</label><input className="input" value={mailSet.user} onChange={e => setMailSet({ ...mailSet, user: e.target.value })} placeholder="api" /></div>
                 <div><label className="label">Password</label><input className="input" type="password" value={mailSet.pass} onChange={e => setMailSet({ ...mailSet, pass: e.target.value })} placeholder={mailStatus?.configured ? '•••••••• (stored)' : 'SMTP password'} /></div>
-                <div><label className="label">From email</label><input className="input" value={mailSet.fromEmail} onChange={e => setMailSet({ ...mailSet, fromEmail: e.target.value })} placeholder="studio@physique57.in" /></div>
-                <div><label className="label">From name</label><input className="input" value={mailSet.fromName} onChange={e => setMailSet({ ...mailSet, fromName: e.target.value })} placeholder="Physique 57 Lead Studio" /></div>
+                <div><label className="label">From email</label><input className="input" value={mailSet.fromEmail} onChange={e => setMailSet({ ...mailSet, fromEmail: e.target.value })} placeholder="hello@physique57india.com" /></div>
+                <div><label className="label">From name</label><input className="input" value={mailSet.fromName} onChange={e => setMailSet({ ...mailSet, fromName: e.target.value })} placeholder="Physique 57 India" /></div>
               </div>
               <div className="flex flex-wrap items-center gap-3 mt-4">
                 <button className="btn btn-primary" onClick={saveMail}>Save Mailtrap settings</button>
+                <button className="btn btn-ghost" onClick={verifyMailFn} disabled={verifyMail}>{verifyMail ? <Spinner size={14} /> : <ShieldCheck size={13} />} Verify SMTP</button>
                 <div className="flex items-center gap-2">
                   <input className="input !w-[200px] !py-1.5" placeholder="test recipient email" value={mailTo} onChange={e => setMailTo(e.target.value)} />
                   <button className="btn btn-ghost" onClick={testMailFn} disabled={testMail}>{testMail ? <Spinner size={14} /> : <Send size={13} />} Send test</button>
@@ -1079,7 +1090,7 @@ export default function SettingsPage({ jumpTo }) {
                 </p>
               )}
               {!mailStatus?.configured && (
-                <p className="mt-3 text-xs text-slate-500">Keys can also be set via the USER_MAILTRAP_HOST / USER_MAILTRAP_USER / USER_MAILTRAP_PASS environment variables, which always win over these settings.</p>
+                <p className="mt-3 text-xs text-slate-500">Set USER_MAILTRAP_PASS to your Mailtrap Email Sending API token. USER_MAILTRAP_HOST, PORT, USER, FROM_EMAIL, FROM_NAME, and ENABLED environment variables also override these settings.</p>
               )}
             </Section>
             )}

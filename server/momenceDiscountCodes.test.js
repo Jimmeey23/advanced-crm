@@ -164,9 +164,10 @@ test('agent can request a code and admin approval creates it once and notifies t
   })
   const agent = { role: 'agent', email: 'agent@example.com', userId: 'user-1', associateId: 'asn-1', locationIds: ['loc_supreme'] }
   const requestRes = responseDouble()
-  await handlers.createRequest({ authUser: agent, query: { market: 'mumbai' }, body: validCode, params: {} }, requestRes)
+  await handlers.createRequest({ authUser: agent, query: { market: 'mumbai' }, body: { ...validCode, locationId: 'loc_supreme' }, params: {} }, requestRes)
   assert.equal(requestRes.statusCode, 201)
   assert.equal(db.discountCodeRequests[0].status, 'pending')
+  assert.equal('locationId' in db.discountCodeRequests[0].payload, false)
 
   const admin = { role: 'admin', email: 'admin@example.com', userId: 'admin-1', locationIds: null }
   const decisionRes = responseDouble()
