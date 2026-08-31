@@ -18,7 +18,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import * as supabase from './supabaseStore.js'
 import { config, isConfigured, readSheetRows, sheetsFetch, colLetter, SHEETS_BASE } from './googleSheets.js'
-import { resolveLeadFields, resolveHeaderFields, buildLeadPayloadFromResolved, isValidEmail, isValidPhone } from './leadFieldMapping.js'
+import { resolveLeadFields, resolveHeaderFields, buildLeadPayloadFromResolved, isValidEmail, isValidPhone, isBlankish } from './leadFieldMapping.js'
 import { parseLeadKey, buildLeadIndex, contactKeys, resolveLead, STATUS_HEADER } from './sheetIdentity.js'
 import { mergeRow, nextSnapshot } from './sheetMerge.js'
 import { leadView, sheetValueFor, writableFields, isRoundTrippable } from './sheetFields.js'
@@ -195,13 +195,13 @@ export async function persistSnapshot() {
 // Everything the sync needs to know about the sheet's shape: which column
 // carries which lead field, and where the identity/status column lives.
 export function columnPlan(header, integ) {
-  const { fields, columnByField } = resolveHeaderFields(header, integ)
+  const { fields, columnByField, columnsByField } = resolveHeaderFields(header, integ)
   let statusColIndex = header.findIndex(h => String(h).trim().toLowerCase() === STATUS_HEADER.toLowerCase())
   if (statusColIndex === -1) statusColIndex = header.length
   // The status column carries our identity marker, never lead data, even if
   // its name happens to alias onto a field.
   const writable = fields.filter(field => columnByField[field] !== statusColIndex)
-  lastPlan = { header, fields: writable, columnByField, statusColIndex }
+  lastPlan = { header, fields: writable, columnByField, columnsByField, statusColIndex }
   return lastPlan
 }
 
@@ -219,6 +219,18 @@ function ownsAssignment(plan) {
 
 // Rewrites the raw cells of every date column in place, so the lead payload
 // built from this record sees "2026-08-31" rather than the serial number 46265.
+// The record handed to resolveLeadFields, reduced to one entry per mapped
+// field: the value readField chose, under the primary column's header. Without
+// this the resolver sees the raw record again and re-picks the "-" column.
+function collapseRecordToPlan(plan, record, row) {
+  for (const field of plan.fields) {
+    const header = plan.header[plan.columnByField[field]]
+    if (!header) continue
+    record[String(header).trim()] = readField(plan, row, field)
+  }
+  return record
+}
+
 function canonicalizeRecordDates(plan, record) {
   for (const field of plan.fields) {
     if (!isSheetDateField(field)) continue
@@ -237,10 +249,28 @@ function canonicalizeRecordDates(plan, record) {
 function sheetValues(plan, row) {
   const out = {}
   for (const field of plan.fields) {
-    const raw = row[plan.columnByField[field]] ?? ''
+    const raw = readField(plan, row, field)
     out[field] = isSheetDateField(field) ? canonicalSheetDate(raw) : raw
   }
   return out
+}
+
+// A field can have several columns (see resolveHeaderFields). The first one
+// carrying an actual value wins; "-" and the other spreadsheet spellings of
+// "nothing" do not count as one, which is what had leads reading their source
+// out of an empty "UTM Source" column while "Source Name" sat filled in beside
+// it. Falls back to the primary column so an all-blank field still resolves to
+// a blank rather than undefined.
+function readField(plan, row, field) {
+  const columns = plan.columnsByField?.[field] || [plan.columnByField[field]]
+  for (const index of columns) {
+    const value = row[index]
+    if (!isBlankish(value)) return value
+  }
+  // Every candidate was blank or a placeholder. Reported as a plain blank so
+  // the merge's blankMeansMissing rule applies and a "-" can never be written
+  // onto a lead as if it were a value.
+  return ''
 }
 
 // ---------------------------------------------------------------------------
@@ -258,6 +288,7 @@ function applyRow(plan, { rowNumber, row, previous = {}, editedAt = null, index,
 
   const statusCell = plan.statusColIndex < row.length ? row[plan.statusColIndex] : ''
   const leadKey = parseLeadKey(statusCell)
+  collapseRecordToPlan(plan, record, row)
   canonicalizeRecordDates(plan, record)
   const resolved = resolveLeadFields(record, config(db()))
   const { lead } = resolveLead(index, {
@@ -323,7 +354,10 @@ function applyRow(plan, { rowNumber, row, previous = {}, editedAt = null, index,
     queue.applyingFromSheet(() => {
       const payload = buildLeadPayloadFromResolved(
         resolveLeadFields(recordForFields(plan, merged.toLead), config(db())),
-        db(), 'Google Sheets', record
+        // The lead's own source is the fallback, not a literal "Google Sheets":
+        // this payload carries only the fields that actually changed, so a
+        // constant here would relabel every lead's source on any other edit.
+        db(), lead.sourceName, record
       )
       ctx.updateLeadFromPayload(lead, payload)
       stampFieldTimes(lead, Object.keys(merged.toLead), editedAt)

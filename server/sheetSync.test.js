@@ -614,3 +614,82 @@ test('a lead deleted from the source tab leaves no ghost row in the mirror', asy
   assert.equal(remaining.length, 1)
   assert.equal(remaining[0][MCOL.name], 'Ravi Menon')
 })
+
+// ---------------------------------------------------------------------------
+// two columns, one field
+// ---------------------------------------------------------------------------
+
+const SOURCE_HEADER = ['Name', 'Email', 'Phone', 'UTM Source', 'Source Name', 'Sync Status']
+const SCOL = { name: 0, email: 1, phone: 2, utm: 3, source: 4, status: 5 }
+const SOURCE_INTEG = { 'UTM Source': 'source', 'Source Name': 'source' }
+
+function installSources(db, rows) {
+  const writes = { log: [], cells: [], mirrorWrites: [], mirrorAppends: [] }
+  const mirror = { header: [], rows: [] }
+  db.settings.googleSheets.fieldMapping = SOURCE_INTEG
+  sheetSync.__setTransport(mirrorTransport(SOURCE_HEADER, rows, mirror, writes))
+  sheetSync.__reset()
+  const ctx = makeCtx(db, writes)
+  const baseCreate = ctx.createLeadFrom
+  ctx.createLeadFrom = (payload) => {
+    const lead = baseCreate(payload)
+    lead.sourceName = payload.sourceName || null
+    return lead
+  }
+  const baseUpdate = ctx.updateLeadFromPayload
+  ctx.updateLeadFromPayload = (lead, payload) => {
+    const changed = baseUpdate(lead, payload)
+    if (payload.sourceName && lead.sourceName !== payload.sourceName) {
+      lead.sourceName = payload.sourceName
+      return true
+    }
+    return changed
+  }
+  sheetSync.configure(ctx)
+  writes.mirror = mirror
+  return writes
+}
+
+function sourceRow({ name = '', email = '', phone = '', utm = '', source = '' }) {
+  const r = new Array(SOURCE_HEADER.length).fill('')
+  r[SCOL.name] = name; r[SCOL.email] = email; r[SCOL.phone] = phone
+  r[SCOL.utm] = utm; r[SCOL.source] = source
+  return r
+}
+
+test('a "-" in the first source column does not hide the second', async () => {
+  const db = makeDb()
+  const rows = [sourceRow({ name: 'Asha Rao', email: 'asha@example.com', phone: '9820011111', utm: '-', source: 'Website' })]
+  installSources(db, rows)
+
+  await sheetSync.reconcile()
+  assert.equal(db.leads[0].sourceName, 'Website')
+})
+
+test('a lead already carrying "-" as its source is healed by the sheet', async () => {
+  const db = makeDb()
+  // The state the old resolver produced: nothing usable in either column, and
+  // the literal "-" written onto the lead as though it were a source.
+  const rows = [sourceRow({ name: 'Asha Rao', email: 'asha@example.com', phone: '9820011111', utm: '-' })]
+  installSources(db, rows)
+  await sheetSync.reconcile()
+  db.leads[0].sourceName = '-'
+
+  // The sheet's own source column, read properly this time.
+  rows[0][SCOL.source] = 'Website'
+  await sheetSync.reconcile()
+
+  assert.equal(db.leads[0].sourceName, 'Website')
+  // And the sheet keeps its value — the lead's "-" must never be written back.
+  assert.equal(rows[0][SCOL.source], 'Website')
+})
+
+test('a source column that is blank everywhere never writes "-" onto a lead', async () => {
+  const db = makeDb()
+  const rows = [sourceRow({ name: 'Asha Rao', email: 'asha@example.com', phone: '9820011111', utm: '-', source: 'N/A' })]
+  installSources(db, rows)
+
+  await sheetSync.reconcile()
+  assert.notEqual(db.leads[0].sourceName, '-')
+  assert.notEqual(db.leads[0].sourceName, 'N/A')
+})

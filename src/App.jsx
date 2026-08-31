@@ -2,14 +2,15 @@ import React, { useEffect, useState } from 'react'
 import {
   LayoutDashboard, KanbanSquare, Users, UploadCloud, Settings, Search,
   Plus, Sun, Moon, BarChart3,
-  CalendarDays, CalendarRange, Activity, Inbox as InboxIcon, CalendarClock, LogOut, Table2, BadgePercent, Package
+  CalendarDays, CalendarRange, Activity, Inbox as InboxIcon, CalendarClock, LogOut, Table2, BadgePercent, Package,
+  RefreshCw
 } from 'lucide-react'
 import { AppProvider, Toasts, useApp } from './store.jsx'
 import { useFetch } from './hooks.js'
 import { api } from './api.js'
 import { supabase } from './lib/supabaseClient.js'
 import LoginPage from './pages/LoginPage.jsx'
-import { money } from './lib.js'
+import { money, timeAgo, fmtDateTime } from './lib.js'
 import Dashboard from './pages/Dashboard.jsx'
 import Performance from './pages/Performance.jsx'
 import Pipeline from './pages/Pipeline.jsx'
@@ -118,6 +119,62 @@ function railLabel(label) {
   return label.split(/[\s-]/)[0]
 }
 
+// How fresh the sheet sync is, in the topbar. The sheet is the source of truth
+// for the whole lead list, so "when did we last hear from it" is a standing
+// question — and a sync that quietly stopped hours ago looks exactly like a
+// sync that is working until someone goes looking in Settings.
+//
+// Thresholds are keyed to the reconcile interval (30 min): a gap under an hour
+// is a normal pass, under four hours is late but survivable, beyond that
+// something is wrong.
+const SYNC_STALE_MS = 60 * 60 * 1000
+const SYNC_BROKEN_MS = 4 * 60 * 60 * 1000
+
+function SyncBadge() {
+  const { dataVersion, navigate } = useApp()
+  const [config, setConfig] = useState(null)
+  // Re-renders the relative time without re-fetching, so "4m ago" does not sit
+  // there saying "just now" for half an hour.
+  const [, setNow] = useState(0)
+
+  useEffect(() => {
+    let alive = true
+    const load = () => api.get('/api/google-sheets/config')
+      .then(c => { if (alive) setConfig(c) })
+      .catch(() => { if (alive) setConfig(null) })
+    load()
+    const poll = setInterval(load, 60000)
+    const tick = setInterval(() => setNow(n => n + 1), 30000)
+    return () => { alive = false; clearInterval(poll); clearInterval(tick) }
+  }, [dataVersion])
+
+  // Nothing to report until a sheet is actually connected — an unconfigured
+  // workspace should not carry a permanently red badge for a feature it does
+  // not use.
+  if (!config?.sheetId) return null
+
+  const at = config.lastSyncAt
+  const age = at ? Date.now() - new Date(at).getTime() : Infinity
+  const tone = !at || age >= SYNC_BROKEN_MS ? 'bad' : age >= SYNC_STALE_MS ? 'warn' : 'good'
+  const counts = config.lastSyncCounts
+  const detail = counts
+    ? `${counts.created || 0} created · ${counts.merged || 0} merged · ${counts.deleted || 0} deleted`
+    : 'No counts recorded yet'
+
+  return (
+    <button
+      type="button"
+      className={`topbar-sync is-${tone}`}
+      onClick={() => navigate('settings')}
+      title={at ? `Google Sheet last synced ${fmtDateTime(at)}\n${detail}` : 'The Google Sheet has never been synced'}
+    >
+      <RefreshCw size={13} />
+      <span className="topbar-sync-label">Sheet</span>
+      <span className="topbar-sync-value">{at ? timeAgo(at) : 'never'}</span>
+    </button>
+  )
+}
+
 function Topbar({ onAdd }) {
   const { view, navigate, alerts, boot, theme, setTheme, refreshData, toast, signOut } = useApp()
   const [refreshing, setRefreshing] = useState(false)
@@ -166,6 +223,8 @@ function Topbar({ onAdd }) {
         <span>Search leads, pages, actions</span>
         <kbd>⌘K</kbd>
       </button>
+
+      <SyncBadge />
 
       <button
         className="btn btn-ghost !h-9 !py-0 !px-3 text-sm"

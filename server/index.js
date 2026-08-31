@@ -872,6 +872,11 @@ function updateLeadFromPayload(lead, payload) {
   set('fullName', payload.fullName?.trim())
   set('phone', payload.phone)
   if (payload.email && payload.email !== '-') set('email', payload.email)
+  // The sheet owns the source column, and a lead that came in before this was
+  // wired up is sitting on whatever it was first given — including the literal
+  // "-" a placeholder cell used to resolve to.
+  set('sourceName', payload.sourceName)
+  set('sourceId', payload.sourceId)
   set('remarks', payload.remarks)
   set('classType', payload.classType)
   set('channel', payload.channel)

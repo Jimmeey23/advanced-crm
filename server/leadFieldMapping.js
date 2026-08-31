@@ -81,12 +81,28 @@ export function isValidPhone(v) {
   return digits.length >= 7 && digits.length <= 15
 }
 
+// "-", "N/A", "null" and friends are how a spreadsheet spells "nothing here".
+// Treating them as real values is what put 2,669 leads on the source "-": the
+// sheet maps two columns onto `source`, the first held "-", and a non-empty
+// string stopped the resolver from ever looking at the second.
+const PLACEHOLDER = /^(-+|n\/?a|na|null|none|nil|undefined|unknown|tbd|not\s*set|#n\/a|#value!|#ref!)$/i
+
+export function isBlankish(value) {
+  if (value === undefined || value === null) return true
+  const s = String(value).trim()
+  return s === '' || PLACEHOLDER.test(s)
+}
+
+// Every key in the record that maps onto `field` by alias, in record order —
+// not just the first. A sheet with both "UTM Source" and "Source Name" gets to
+// fall through from the empty one to the filled one.
 function findByAlias(record, field) {
   const aliases = NORMALIZED_ALIASES[field]
+  const hits = []
   for (const key of Object.keys(record)) {
-    if (aliases.includes(normalizeKey(key))) return record[key]
+    if (aliases.includes(normalizeKey(key))) hits.push(record[key])
   }
-  return undefined
+  return hits
 }
 
 // Resolves every eligible Lead field from an incoming flat record, in
@@ -98,22 +114,21 @@ function findByAlias(record, field) {
 export function resolveLeadFields(record, integ) {
   const mapping = integ.fieldMapping || {}
   const defaults = integ.defaults || {}
+  // All the keys mapped onto a field, in mapping order — a field mapped from
+  // two columns takes the first of them that actually carries a value.
   const reverseMapping = {}
   for (const [incomingKey, targetField] of Object.entries(mapping)) {
-    if (!reverseMapping[targetField]) reverseMapping[targetField] = incomingKey
+    (reverseMapping[targetField] ||= []).push(incomingKey)
   }
   const out = {}
   for (const field of Object.keys(LEAD_FIELD_ALIASES)) {
-    let val
-    const mappedKey = reverseMapping[field]
-    if (mappedKey !== undefined) val = record[mappedKey]
-    if (val === undefined || val === null || String(val).trim() === '') {
-      val = findByAlias(record, field)
-    }
-    if (val === undefined || val === null || String(val).trim() === '') {
-      val = defaults[field]
-    }
-    if (val !== undefined && val !== null && String(val).trim() !== '') out[field] = val
+    const candidates = [
+      ...(reverseMapping[field] || []).map(key => record[key]),
+      ...findByAlias(record, field),
+      defaults[field]
+    ]
+    const val = candidates.find(v => !isBlankish(v))
+    if (val !== undefined) out[field] = val
   }
   // firstName/lastName aren't real Lead fields — they only exist to build
   // fullName when a source sends split name fields instead of one combined one.
@@ -138,15 +153,20 @@ export function resolveLeadFields(record, integ) {
 // first-match-wins behaviour.
 export function resolveHeaderFields(header, integ = {}) {
   const mapping = integ.fieldMapping || {}
-  const columnByField = {}
+  // field -> every column that carries it, leftmost first. A sheet really does
+  // map two columns onto one field ("UTM Source" and "Source Name"), and
+  // keeping only the leftmost meant reading whichever of them happened to come
+  // first even when it held nothing but "-".
+  const columnsByField = {}
   const claimed = new Set()
+  const add = (field, index) => { (columnsByField[field] ||= []).push(index) }
 
   header.forEach((raw, index) => {
     const name = String(raw || '').trim()
     if (!name) return
     const mapped = mapping[name]
-    if (mapped && LEAD_FIELD_ALIASES[mapped] && !(mapped in columnByField)) {
-      columnByField[mapped] = index
+    if (mapped && LEAD_FIELD_ALIASES[mapped]) {
+      add(mapped, index)
       claimed.add(index)
     }
   })
@@ -156,17 +176,21 @@ export function resolveHeaderFields(header, integ = {}) {
     const name = normalizeKey(raw)
     if (!name) return
     for (const [field, aliases] of Object.entries(NORMALIZED_ALIASES)) {
-      if (field in columnByField) continue
-      if (aliases.includes(name)) { columnByField[field] = index; break }
+      if (aliases.includes(name)) { add(field, index); break }
     }
   })
 
   // firstName/lastName are inputs to fullName, not fields of their own, so
   // they are never written back to.
-  delete columnByField.firstName
-  delete columnByField.lastName
+  delete columnsByField.firstName
+  delete columnsByField.lastName
 
-  return { fields: Object.keys(columnByField), columnByField }
+  // The primary column — where a write-back goes, and what a single-column
+  // field resolves to. Reads consider every candidate (see sheetValues).
+  const columnByField = {}
+  for (const [field, indexes] of Object.entries(columnsByField)) columnByField[field] = indexes[0]
+
+  return { fields: Object.keys(columnByField), columnByField, columnsByField }
 }
 
 // "Follow Up 1 Date" / "Follow Up Comments (1)" / "Follow Up 2 Date" / ... —
