@@ -319,6 +319,7 @@ export function seed() {
     webhookIntegrations: [],
     webhookLogs: [],
     payments: [],
+    discountCodeRequests: [],
     sheetSyncLogs: [],
     inbox: { messages: [], conversations: {} }
   }

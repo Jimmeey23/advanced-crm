@@ -128,3 +128,71 @@ test('handlers expose normalized list and validate status payload', async () => 
   assert.equal(statusRes.statusCode, 400)
   assert.match(statusRes.body.error, /enabled must be a boolean/i)
 })
+
+test('agent list returns active codes only and direct mutations are forbidden', async () => {
+  const service = {
+    list: async () => [
+      { id: 1, code: 'ACTIVE' },
+      { id: 2, code: 'EXPIRED', expiresAt: '2026-08-01T00:00:00Z' },
+      { id: 3, code: 'FUTURE', validFrom: '2026-10-01T00:00:00Z' }
+    ],
+    create: async () => { throw new Error('must not be called') }
+  }
+  const handlers = createDiscountCodeHandlers({ service, getDb: () => ({ locations, discountCodeRequests: [] }), now: () => new Date('2026-08-31T00:00:00Z') })
+  const authUser = { role: 'agent', email: 'agent@example.com', userId: 'user-1', locationIds: ['loc_supreme'] }
+  const listRes = responseDouble()
+  await handlers.list({ authUser, query: { market: 'mumbai' }, params: {} }, listRes)
+  assert.deepEqual(listRes.body.codes.map(code => code.code), ['ACTIVE'])
+
+  const createRes = responseDouble()
+  await handlers.create({ authUser, query: { market: 'mumbai' }, body: validCode, params: {} }, createRes)
+  assert.equal(createRes.statusCode, 403)
+})
+
+test('agent can request a code and admin approval creates it once and notifies the agent', async () => {
+  const db = { locations, discountCodeRequests: [] }
+  const created = []
+  const emails = []
+  let saves = 0
+  const handlers = createDiscountCodeHandlers({
+    service: { create: async (market, payload) => { created.push({ market, payload }); return { id: 700, code: payload.code } } },
+    getDb: () => db,
+    saveMeta: async () => { saves++ },
+    sendMail: async (_db, email) => { emails.push(email); return { ok: true } },
+    makeId: () => 'dcr_1',
+    now: () => new Date('2026-08-31T00:00:00Z')
+  })
+  const agent = { role: 'agent', email: 'agent@example.com', userId: 'user-1', associateId: 'asn-1', locationIds: ['loc_supreme'] }
+  const requestRes = responseDouble()
+  await handlers.createRequest({ authUser: agent, query: { market: 'mumbai' }, body: validCode, params: {} }, requestRes)
+  assert.equal(requestRes.statusCode, 201)
+  assert.equal(db.discountCodeRequests[0].status, 'pending')
+
+  const admin = { role: 'admin', email: 'admin@example.com', userId: 'admin-1', locationIds: null }
+  const decisionRes = responseDouble()
+  await handlers.decideRequest({ authUser: admin, params: { id: 'dcr_1' }, body: { decision: 'approve', note: 'Approved' }, query: {} }, decisionRes)
+  assert.equal(decisionRes.body.request.status, 'approved')
+  assert.equal(decisionRes.body.request.momenceCodeId, 700)
+  assert.equal(created.length, 1)
+  assert.equal(emails[0].to, 'agent@example.com')
+  assert.ok(saves >= 2)
+
+  const repeatRes = responseDouble()
+  await handlers.decideRequest({ authUser: admin, params: { id: 'dcr_1' }, body: { decision: 'approve' }, query: {} }, repeatRes)
+  assert.equal(repeatRes.statusCode, 409)
+  assert.equal(created.length, 1)
+})
+
+test('admin can decline a request without creating a Momence code', async () => {
+  const db = { locations, discountCodeRequests: [{ id: 'dcr_2', market: 'blr', status: 'pending', requestedByEmail: 'agent@example.com', payload: validCode }] }
+  let creates = 0
+  const handlers = createDiscountCodeHandlers({
+    service: { create: async () => { creates++; return {} } }, getDb: () => db,
+    saveMeta: async () => {}, sendMail: async () => ({ skipped: true }), now: () => new Date('2026-08-31T00:00:00Z')
+  })
+  const res = responseDouble()
+  await handlers.decideRequest({ authUser: { role: 'admin', email: 'admin@example.com' }, params: { id: 'dcr_2' }, body: { decision: 'decline', note: 'Use the seasonal campaign.' }, query: {} }, res)
+  assert.equal(res.body.request.status, 'declined')
+  assert.equal(res.body.request.decisionNote, 'Use the seasonal campaign.')
+  assert.equal(creates, 0)
+})

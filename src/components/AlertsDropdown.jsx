@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react'
-import { Bell, AlertTriangle, CalendarClock, UserPlus, Flame, Snowflake, RadioTower, Flag, ChevronRight, UserCog } from 'lucide-react'
+import { Bell, AlertTriangle, CalendarClock, UserPlus, Flame, Snowflake, RadioTower, Flag, ChevronRight, UserCog, BadgePercent, BadgeCheck, BadgeX } from 'lucide-react'
 import { useApp } from '../store.jsx'
 
 const KIND_META = {
@@ -11,14 +11,17 @@ const KIND_META = {
   stale: { icon: Snowflake, color: '#94a3b8', label: 'Cold lead' },
   overdue: { icon: AlertTriangle, color: '#f87171', label: 'Overdue' },
   custom_rule: { icon: Flag, color: '#f59e0b', label: 'Custom rule' },
-  owner_change_request: { icon: UserCog, color: '#a78bfa', label: 'Owner request' }
+  owner_change_request: { icon: UserCog, color: '#a78bfa', label: 'Owner request' },
+  discount_code_request: { icon: BadgePercent, color: '#f59e0b', label: 'Code request' },
+  discount_code_approved: { icon: BadgeCheck, color: '#10b981', label: 'Code approved' },
+  discount_code_declined: { icon: BadgeX, color: '#f43f5e', label: 'Code declined' }
 }
 
 export default function AlertsDropdown() {
-  const { alerts, openLead } = useApp()
+  const { alerts, openLead, navigate } = useApp()
   const [open, setOpen] = useState(false)
   const ref = useRef(null)
-  const high = alerts.filter(a => a.level === 'high').length
+  const high = alerts.filter(a => a.level === 'high' || a.kind === 'discount_code_approved' || a.kind === 'discount_code_declined').length
 
   useEffect(() => {
     const h = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false) }
@@ -52,7 +55,7 @@ export default function AlertsDropdown() {
               const color = a.color || meta.color
               const Icon = meta.icon
               return (
-                <button key={a.id} className="w-full flex items-start gap-3 px-4 py-3 border-b border-white/5 hover:bg-white/4 text-left" onClick={() => { openLead(a.leadId); setOpen(false) }}>
+                <button key={a.id} className="w-full flex items-start gap-3 px-4 py-3 border-b border-white/5 hover:bg-white/4 text-left" onClick={() => { if (a.view) navigate(a.view); else if (a.leadId) openLead(a.leadId); setOpen(false) }}>
                   <span className="mt-0.5 w-7 h-7 rounded-lg flex items-center justify-center shrink-0" style={{ background: `${color}1e`, color }}>
                     <Icon size={14} />
                   </span>

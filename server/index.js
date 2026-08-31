@@ -151,7 +151,13 @@ const STRIPE_BASE = 'https://api.stripe.com/v1'
 let db = null
 const momenceDashboardClient = createMomenceDashboardClient()
 const momenceDiscountService = createDiscountCodeService({ client: momenceDashboardClient })
-const momenceDiscountHandlers = createDiscountCodeHandlers({ service: momenceDiscountService, getDb: () => db })
+const momenceDiscountHandlers = createDiscountCodeHandlers({
+  service: momenceDiscountService,
+  getDb: () => db,
+  saveMeta: saveMetaNow,
+  sendMail: mailer.sendMail,
+  makeId: () => uid('dcr')
+})
 
 function log(type, text, leadId = null) {
   db.activity.unshift({ id: uid('act'), ts: nowIso(), type, text, leadId })
@@ -315,6 +321,28 @@ function buildAlerts(scope = {}, req = null) {
         id: uid('alt'), leadId: request.leadId, leadName: request.leadName, level: 'high',
         kind: 'owner_change_request', title: 'Owner change requested',
         detail: `${request.requestedByName} wants to reassign to ${request.requestedAssociateName}.`
+      })
+    }
+    for (const request of (db.discountCodeRequests || [])) {
+      if (request.status !== 'pending') continue
+      alerts.push({
+        id: `discount-request-${request.id}`, level: 'high', kind: 'discount_code_request', view: 'discount-codes',
+        leadName: request.payload?.code || 'Discount code', title: 'Discount code approval requested',
+        detail: `${request.requestedByName || request.requestedByEmail || 'An agent'} requested a ${request.market === 'blr' ? 'Bengaluru' : 'Mumbai'} code.`
+      })
+    }
+  } else {
+    const cutoff = Date.now() - 30 * 86400000
+    for (const request of (db.discountCodeRequests || [])) {
+      if (!['approved', 'declined'].includes(request.status)) continue
+      if (request.requestedByUserId !== req?.authUser?.userId && request.requestedByEmail !== req?.authUser?.email) continue
+      if (new Date(request.decidedAt || 0).getTime() < cutoff) continue
+      alerts.push({
+        id: `discount-decision-${request.id}`, level: request.status === 'approved' ? 'low' : 'medium',
+        kind: request.status === 'approved' ? 'discount_code_approved' : 'discount_code_declined', view: 'discount-codes',
+        leadName: request.payload?.code || 'Discount code',
+        title: `Discount code request ${request.status}`,
+        detail: request.status === 'approved' ? 'The code was created directly in Momence.' : (request.decisionNote || 'The admin declined this request.')
       })
     }
   }
@@ -1795,6 +1823,9 @@ app.get('/api/analytics/team', (req, res) => {
 
 app.get('/api/momence-discount-codes', momenceDiscountHandlers.list)
 app.get('/api/momence-discount-codes/memberships', momenceDiscountHandlers.memberships)
+app.get('/api/momence-discount-codes/requests', momenceDiscountHandlers.requests)
+app.post('/api/momence-discount-codes/requests', momenceDiscountHandlers.createRequest)
+app.put('/api/momence-discount-codes/requests/:id/decision', momenceDiscountHandlers.decideRequest)
 app.post('/api/momence-discount-codes', momenceDiscountHandlers.create)
 app.put('/api/momence-discount-codes/:id', momenceDiscountHandlers.update)
 app.post('/api/momence-discount-codes/:id/status', momenceDiscountHandlers.setEnabled)

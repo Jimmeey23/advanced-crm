@@ -169,7 +169,14 @@ function positiveRouteId(value) {
   return id
 }
 
-export function createDiscountCodeHandlers({ service, getDb }) {
+export function createDiscountCodeHandlers({
+  service,
+  getDb,
+  saveMeta = async () => {},
+  sendMail = async () => ({ skipped: true, reason: 'Email unavailable' }),
+  makeId = () => `dcr_${crypto.randomUUID()}`,
+  now = () => new Date()
+}) {
   function context(req) {
     const db = getDb()
     const market = String(req.query?.market || '').toLowerCase()
@@ -177,14 +184,44 @@ export function createDiscountCodeHandlers({ service, getDb }) {
     return { market, markets: marketsForAuthUser(req.authUser, db?.locations || []) }
   }
   function fail(res, error, validation = false) {
-    const status = error?.status === 403 ? 403 : error?.status === 400 || validation ? 400 : 502
+    const status = [400, 403, 404, 409].includes(error?.status) ? error.status : validation ? 400 : 502
     return res.status(status).json({ error: String(error?.message || 'Momence request failed').slice(0, 300) })
+  }
+  function requireAdmin(req) {
+    if (req.authUser?.role !== 'admin') throw Object.assign(new Error('Only admins can create, modify, enable, disable, or delete discount codes'), { status: 403 })
+  }
+  function requestStore() {
+    const db = getDb()
+    if (!Array.isArray(db.discountCodeRequests)) db.discountCodeRequests = []
+    return { db, requests: db.discountCodeRequests }
+  }
+  function requestView(request) {
+    return { ...request, payload: { ...request.payload } }
+  }
+  async function notifyDecision(db, request) {
+    const approved = request.status === 'approved'
+    const statusText = approved ? 'approved and created in Momence' : 'declined'
+    try {
+      const result = await sendMail(db, {
+        to: request.requestedByEmail,
+        subject: `Discount code request ${approved ? 'approved' : 'declined'} — ${request.payload.code}`,
+        text: `Your ${MARKET_LABELS[request.market]} discount code request for ${request.payload.code} was ${statusText}.${request.decisionNote ? `\n\nAdmin note: ${request.decisionNote}` : ''}`,
+        html: `<p>Your <strong>${MARKET_LABELS[request.market]}</strong> discount code request for <strong>${escapeHtml(request.payload.code)}</strong> was ${statusText}.</p>${request.decisionNote ? `<p><strong>Admin note:</strong> ${escapeHtml(request.decisionNote)}</p>` : ''}`
+      })
+      request.emailNotification = result?.ok ? 'sent' : `skipped: ${result?.reason || 'unknown reason'}`
+    } catch (error) {
+      request.emailNotification = `failed: ${String(error?.message || 'unknown error').slice(0, 160)}`
+    }
+    await saveMeta()
   }
   return {
     async list(req, res) {
       try {
         const { market, markets } = context(req)
-        res.json({ codes: await service.list(market, booleanQuery(req.query?.includeExpired)), markets })
+        const includeExpired = req.authUser?.role === 'admin' && booleanQuery(req.query?.includeExpired)
+        let codes = await service.list(market, includeExpired)
+        if (req.authUser?.role !== 'admin') codes = codes.filter(code => isCodeActive(code, now()))
+        res.json({ codes, markets })
       } catch (error) { fail(res, error) }
     },
     async memberships(req, res) {
@@ -195,6 +232,7 @@ export function createDiscountCodeHandlers({ service, getDb }) {
     },
     async create(req, res) {
       try {
+        requireAdmin(req)
         const { market } = context(req)
         serializeDiscountCode(req.body)
         res.status(201).json({ code: await service.create(market, req.body) })
@@ -202,6 +240,7 @@ export function createDiscountCodeHandlers({ service, getDb }) {
     },
     async update(req, res) {
       try {
+        requireAdmin(req)
         const { market } = context(req)
         const id = positiveRouteId(req.params?.id)
         serializeDiscountCode(req.body)
@@ -210,6 +249,7 @@ export function createDiscountCodeHandlers({ service, getDb }) {
     },
     async setEnabled(req, res) {
       try {
+        requireAdmin(req)
         const { market } = context(req)
         const id = positiveRouteId(req.params?.id)
         if (typeof req.body?.enabled !== 'boolean') throw Object.assign(new Error('enabled must be a boolean'), { status: 400 })
@@ -219,10 +259,93 @@ export function createDiscountCodeHandlers({ service, getDb }) {
     },
     async remove(req, res) {
       try {
+        requireAdmin(req)
         const { market } = context(req)
         await service.remove(market, positiveRouteId(req.params?.id))
         res.json({ ok: true })
       } catch (error) { fail(res, error) }
+    },
+    async requests(req, res) {
+      try {
+        const { requests } = requestStore()
+        const visible = req.authUser?.role === 'admin'
+          ? requests
+          : requests.filter(request => request.requestedByUserId === req.authUser?.userId || request.requestedByEmail === req.authUser?.email)
+        res.json({ requests: visible.slice().sort((a, b) => String(b.requestedAt).localeCompare(String(a.requestedAt))).map(requestView) })
+      } catch (error) { fail(res, error) }
+    },
+    async createRequest(req, res) {
+      try {
+        if (req.authUser?.role === 'admin') throw Object.assign(new Error('Admins can create discount codes directly'), { status: 400 })
+        const { market } = context(req)
+        const payload = serializeDiscountCode(req.body)
+        const { db, requests } = requestStore()
+        const duplicate = requests.find(request => request.status === 'pending' && request.requestedByUserId === req.authUser.userId && request.market === market && request.payload?.code === payload.code)
+        if (duplicate) throw Object.assign(new Error(`A pending request already exists for ${payload.code}`), { status: 409 })
+        const associate = db.associates?.find(item => item.id === req.authUser?.associateId)
+        const requestedAt = now().toISOString()
+        const request = {
+          id: makeId(), market, status: 'pending', payload,
+          requestedAt, updatedAt: requestedAt,
+          requestedByUserId: req.authUser?.userId || null,
+          requestedByAssociateId: req.authUser?.associateId || null,
+          requestedByName: associate?.name || req.authUser?.email || 'Agent',
+          requestedByEmail: req.authUser?.email || associate?.email || ''
+        }
+        requests.unshift(request)
+        await saveMeta()
+        res.status(201).json({ request: requestView(request) })
+      } catch (error) { fail(res, error, !error?.status) }
+    },
+    async decideRequest(req, res) {
+      let request = null
+      try {
+        requireAdmin(req)
+        const decision = String(req.body?.decision || '').toLowerCase()
+        if (!['approve', 'decline'].includes(decision)) throw Object.assign(new Error('Decision must be approve or decline'), { status: 400 })
+        const { db, requests } = requestStore()
+        request = requests.find(item => item.id === req.params?.id)
+        if (!request) throw Object.assign(new Error('Discount code request not found'), { status: 404 })
+        if (request.status !== 'pending') throw Object.assign(new Error('This discount code request has already been decided'), { status: 409 })
+        request.status = 'processing'
+        request.updatedAt = now().toISOString()
+        await saveMeta()
+        if (decision === 'approve') {
+          const created = await service.create(request.market, request.payload)
+          request.status = 'approved'
+          request.momenceCodeId = Number(created?.id) || created?.id || null
+        } else {
+          request.status = 'declined'
+        }
+        request.decisionNote = String(req.body?.note || '').trim().slice(0, 1000)
+        request.decidedAt = now().toISOString()
+        request.decidedByUserId = req.authUser?.userId || null
+        request.decidedByEmail = req.authUser?.email || ''
+        request.updatedAt = request.decidedAt
+        await saveMeta()
+        await notifyDecision(db, request)
+        res.json({ request: requestView(request) })
+      } catch (error) {
+        if (request?.status === 'processing') {
+          request.status = 'pending'
+          request.updatedAt = now().toISOString()
+          await saveMeta().catch(() => {})
+        }
+        fail(res, error)
+      }
     }
   }
+}
+
+const MARKET_LABELS = Object.freeze({ mumbai: 'Mumbai', blr: 'Bengaluru' })
+
+function escapeHtml(value) {
+  return String(value).replace(/[&<>'"]/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' })[character])
+}
+
+export function isCodeActive(code, now = new Date()) {
+  const time = now.getTime()
+  if (code?.validFrom && new Date(code.validFrom).getTime() > time) return false
+  if (code?.expiresAt && new Date(code.expiresAt).getTime() <= time) return false
+  return true
 }
