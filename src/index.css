@@ -10564,6 +10564,22 @@ html[data-theme="dark"] .discount-status.is-expired { color: #fda4af !important;
 .membership-card-meta span { padding-left: 8px; border-left: 2px solid color-mix(in srgb, #10b981 45%, transparent); }
 .membership-card-actions { display: flex; align-items: center; justify-content: flex-end; gap: 6px; margin-top: auto; padding-top: 14px; }
 .membership-card-actions .btn { min-height: 34px; }
+.membership-list { overflow: hidden; border: 1px solid var(--border); border-radius: 10px; }
+.membership-list-head, .membership-row { display: grid; grid-template-columns: minmax(270px, 1.55fr) minmax(110px, .55fr) minmax(150px, .75fr) minmax(150px, .75fr) auto; align-items: center; gap: 14px; }
+.membership-list-head { min-height: 34px; padding: 7px 12px; border-bottom: 1px solid var(--border); color: var(--text-mute); background: var(--surface-2); font-size: 8px; font-weight: 820; letter-spacing: .07em; text-transform: uppercase; }
+.membership-list-head span:last-child { text-align: right; }
+.membership-row { min-height: 78px; padding: 10px 12px; border-bottom: 1px solid var(--border); background: var(--surface); transition: background-color .18s ease; }
+.membership-row:last-child { border-bottom: 0; }
+.membership-row:hover { background: color-mix(in srgb, #10b981 3%, var(--surface)); }
+.membership-row-name { min-width: 0; }
+.membership-row-name > div { display: flex; min-height: 20px; align-items: center; gap: 5px; margin-bottom: 4px; }
+.membership-row-name h4 { overflow: hidden; color: var(--text); font-size: 11.5px; font-weight: 740; text-overflow: ellipsis; white-space: nowrap; }
+.membership-row-name small, .membership-row-value small { display: block; overflow: hidden; margin-top: 2px; color: var(--text-mute); font-size: 8.5px; text-overflow: ellipsis; white-space: nowrap; }
+.membership-row-value { min-width: 0; }
+.membership-row-value strong { display: block; overflow: hidden; color: var(--text-dim); font-size: 10px; font-weight: 680; text-overflow: ellipsis; white-space: nowrap; }
+.membership-row-value:first-of-type strong { color: var(--text); font-size: 12px; font-variant-numeric: tabular-nums; }
+.membership-row-actions { display: flex; justify-content: flex-end; gap: 6px; }
+.membership-row-actions .btn { min-height: 34px; white-space: nowrap; }
 .membership-loading, .membership-empty, .membership-error { display: flex; min-height: 280px; align-items: center; justify-content: center; color: var(--text-mute); }
 .membership-loading { gap: 9px; font-size: 11px; }
 .membership-empty { flex-direction: column; text-align: center; }
@@ -10593,6 +10609,11 @@ html[data-theme="dark"] .discount-status.is-expired { color: #fda4af !important;
 .membership-detail footer { display: flex; justify-content: flex-end; gap: 7px; padding-top: 4px; border-top: 1px solid var(--border); }
 
 @media (max-width: 1050px) { .membership-grid { grid-template-columns: 1fr 1fr; } }
+@media (max-width: 1120px) {
+  .membership-list-head { display: none; }
+  .membership-row { grid-template-columns: minmax(240px, 1.3fr) repeat(3, minmax(115px, .65fr)); }
+  .membership-row-actions { grid-column: 1 / -1; padding-top: 7px; border-top: 1px solid var(--border); }
+}
 @media (max-width: 760px) {
   .memberships-page { padding: 18px 16px 36px; }
   .membership-page-header { align-items: flex-start; flex-direction: column; }
@@ -10602,6 +10623,11 @@ html[data-theme="dark"] .discount-status.is-expired { color: #fda4af !important;
   .membership-summary > div:nth-child(-n+2) { border-bottom: 1px solid var(--border); }
   .membership-grid { grid-template-columns: 1fr; }
   .membership-card { min-height: 220px; }
+  .membership-row { grid-template-columns: 1fr 1fr; gap: 12px; padding: 12px; }
+  .membership-row-name { grid-column: 1 / -1; }
+  .membership-row-value::before { content: attr(data-label); display: block; margin-bottom: 3px; color: var(--text-mute); font-size: 7.5px; font-weight: 820; letter-spacing: .07em; text-transform: uppercase; }
+  .membership-row-actions { flex-wrap: wrap; }
+  .membership-row-actions .btn { min-height: 44px; flex: 1 1 140px; justify-content: center; }
   .membership-facts { grid-template-columns: 1fr 1fr; }
   .membership-fact:nth-child(3n) { border-right: 1px solid var(--border); }
   .membership-fact:nth-child(2n) { border-right: 0; }
