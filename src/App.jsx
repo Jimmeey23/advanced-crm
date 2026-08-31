@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react'
 import {
   LayoutDashboard, KanbanSquare, Users, UploadCloud, Settings, Search,
   Plus, Zap, Link2, ShieldCheck, Sun, Moon, BarChart3, ChevronsLeft, ChevronsRight,
-  CalendarDays, CalendarRange, Activity, Inbox as InboxIcon, CalendarClock, LogOut, Table2
+  CalendarDays, CalendarRange, Activity, Inbox as InboxIcon, CalendarClock, LogOut, Table2, BadgePercent
 } from 'lucide-react'
 import { AppProvider, Toasts, useApp } from './store.jsx'
 import { useFetch } from './hooks.js'
@@ -22,6 +22,7 @@ import Inbox from './pages/Inbox.jsx'
 import SettingsPage from './pages/Settings.jsx'
 import Pivot from './pages/Pivot.jsx'
 import MomenceSchedule, { formatTone, personName, time as fmtSessionTime } from './pages/MomenceSchedule.jsx'
+import DiscountCodes from './pages/DiscountCodes.jsx'
 import LeadDrawer from './components/LeadDrawer.jsx'
 import AddLeadModal from './components/AddLeadModal.jsx'
 import CommandPalette from './components/CommandPalette.jsx'
@@ -47,7 +48,8 @@ const NAV_GROUPS = [
     { id: 'pipeline', label: 'Pipeline', title: 'Sales Pipeline', icon: KanbanSquare },
     { id: 'leads', label: 'Leads', title: 'Lead Directory', icon: Users },
     { id: 'inbox', label: 'Inbox', title: 'Unified Inbox', icon: InboxIcon },
-    { id: 'momence-schedule', label: 'Class schedule', title: 'Momence Class Schedule', icon: CalendarClock }
+    { id: 'momence-schedule', label: 'Class schedule', title: 'Momence Class Schedule', icon: CalendarClock },
+    { id: 'discount-codes', label: 'Discount codes', title: 'Momence Discount Codes', icon: BadgePercent }
   ] },
   { label: 'Manage', items: [
     { id: 'import', label: 'Import CSV', title: 'Lead Import Centre', icon: UploadCloud },
@@ -413,6 +415,7 @@ function Shell() {
     case 'leads': return <Leads initialSearch={viewParams.search} initialAssociateId={viewParams.associateId} />
     case 'inbox': return <Inbox />
     case 'momence-schedule': return <MomenceSchedule />
+    case 'discount-codes': return <DiscountCodes />
     case 'import': return <Import />
     case 'team': return <Team />
     case 'pivot': return <Pivot />

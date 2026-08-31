@@ -8,6 +8,8 @@ import { init, load, save, saveNow, saveMetaNow, uid, nowIso, reset, markDirty, 
 import { enrichAll, enrichLead } from './ai.js'
 import { assignLead } from './roundRobin.js'
 import * as momence from './momence.js'
+import { createMomenceDashboardClient } from './momenceDashboardAuth.js'
+import { createDiscountCodeHandlers, createDiscountCodeService } from './momenceDiscountCodes.js'
 import * as gpt from './gpt.js'
 import * as respondio from './respondio.js'
 import * as respondioInternal from './respondioInternal.js'
@@ -147,6 +149,9 @@ const STRIPE_WEBHOOK_SECRET = String(process.env.STRIPE_WEBHOOK_SECRET || '').tr
 const STRIPE_BASE = 'https://api.stripe.com/v1'
 
 let db = null
+const momenceDashboardClient = createMomenceDashboardClient()
+const momenceDiscountService = createDiscountCodeService({ client: momenceDashboardClient })
+const momenceDiscountHandlers = createDiscountCodeHandlers({ service: momenceDiscountService, getDb: () => db })
 
 function log(type, text, leadId = null) {
   db.activity.unshift({ id: uid('act'), ts: nowIso(), type, text, leadId })
@@ -1787,6 +1792,13 @@ app.get('/api/analytics/team', (req, res) => {
 })
 
 // ---------- momence ----------
+
+app.get('/api/momence-discount-codes', momenceDiscountHandlers.list)
+app.get('/api/momence-discount-codes/memberships', momenceDiscountHandlers.memberships)
+app.post('/api/momence-discount-codes', momenceDiscountHandlers.create)
+app.put('/api/momence-discount-codes/:id', momenceDiscountHandlers.update)
+app.post('/api/momence-discount-codes/:id/status', momenceDiscountHandlers.setEnabled)
+app.delete('/api/momence-discount-codes/:id', momenceDiscountHandlers.remove)
 
 app.get('/api/momence/config', (req, res) => {
   const c = momence.momenceConfig(db)

@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Search, CornerDownLeft, LayoutDashboard, KanbanSquare, Users, UploadCloud,
   Settings as SettingsIcon, BarChart3, CalendarDays, CalendarRange, Inbox as InboxIcon,
-  CalendarClock, Sun, Moon, RefreshCw, Plus, PanelLeft, Table2
+  CalendarClock, Sun, Moon, RefreshCw, Plus, PanelLeft, Table2, BadgePercent
 } from 'lucide-react'
 import { useApp } from '../store.jsx'
 import { api } from '../api.js'
@@ -18,6 +18,7 @@ const PAGES = [
   { id: 'leads', label: 'Leads', icon: Users },
   { id: 'inbox', label: 'Inbox', icon: InboxIcon },
   { id: 'momence-schedule', label: 'Class schedule', icon: CalendarClock },
+  { id: 'discount-codes', label: 'Discount codes', icon: BadgePercent },
   { id: 'import', label: 'Import CSV', icon: UploadCloud, adminOnly: true },
   { id: 'team', label: 'Team & Studios', icon: Users },
   { id: 'settings', label: 'Settings', icon: SettingsIcon }
