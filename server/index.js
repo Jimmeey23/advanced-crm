@@ -123,6 +123,8 @@ app.delete('/api/webhooks/:id', (req, res, next) => blockAgentWrite(req, res, ne
 app.post('/api/webhooks/:id/regenerate', (req, res, next) => blockAgentWrite(req, res, next))
 app.put('/api/google-sheets/config', (req, res, next) => blockAgentWrite(req, res, next))
 app.post('/api/google-sheets/disconnect', (req, res, next) => blockAgentWrite(req, res, next))
+app.post('/api/google-sheets/sync-now', (req, res, next) => blockAgentWrite(req, res, next))
+app.post('/api/zoho-people/refresh-now', (req, res, next) => blockAgentWrite(req, res, next))
 app.put('/api/zoho-people/config', (req, res, next) => blockAgentWrite(req, res, next))
 app.put('/api/momence/config', (req, res, next) => blockAgentWrite(req, res, next))
 app.post('/api/leads/dedupe', (req, res, next) => blockAgentWrite(req, res, next))
@@ -450,9 +452,11 @@ app.get('/api/bootstrap', (req, res) => {
       gpt: gpt.isEnabled(db),
       gptModel: gpt.modelName(db),
       respondio: respondio.isConfigured(db),
-      mailtrap: mailer.isConfigured(db),
+      mailtrap: mailer.isConfigured(db) && mailer.config(db).enabled === true,
       momence: momence.isConfigured(db),
-      stripe: Boolean(STRIPE_SECRET_KEY)
+      stripe: Boolean(STRIPE_SECRET_KEY),
+      googleSheets: googleSheets.isConfigured(db),
+      zohoPeople: zohoPeople.isConfigured(db) && db.settings.zohoPeople?.enabled === true
     },
     webhookIntegrations: db.webhookIntegrations
   })

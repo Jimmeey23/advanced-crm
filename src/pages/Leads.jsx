@@ -20,6 +20,7 @@ import ComposeModal from '../components/ComposeModal.jsx'
 import RespondioTemplateModal from '../components/RespondioTemplateModal.jsx'
 import ColumnManager, { DEFAULT_COLUMNS } from '../components/ColumnManager.jsx'
 import { Modal, ModalHeader } from '../ui.jsx'
+import LeadsIntegrationRail from '../components/LeadsIntegrationRail.jsx'
 
 const COLUMNS_KEY = 'p57_leads_columns_v1'
 const followUpText = value => {
@@ -732,6 +733,7 @@ export default function Leads({ initialSearch = '', initialAssociateId = '' }) {
 
   return (
     <div className="leads-workspace">
+      <LeadsIntegrationRail boot={boot} leads={items} refreshData={refreshData} toast={toast} />
       {/* bulk selection toolbar */}
       {selected.size > 0 && (
         <div className="card p-3 flex flex-wrap items-center gap-3 border-rose-400/25" style={{ animation: 'fadeIn .15s ease' }}>
