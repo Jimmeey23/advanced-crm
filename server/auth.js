@@ -8,6 +8,15 @@ import { createClient } from '@supabase/supabase-js'
 const ADMIN_CODE = '9818'
 
 let serviceClient = null
+
+// The random 48-character key in this exact inbound URL is its credential.
+// Keep the matcher deliberately narrow so webhook management, logs, tests,
+// and every other API route still require a Supabase session.
+export function isPublicLeadWebhookPath(originalUrl) {
+  const pathname = String(originalUrl || '').split('?')[0]
+  return /^\/api\/webhooks\/leads\/[^/]+\/?$/.test(pathname)
+}
+
 function getServiceClient() {
   if (serviceClient) return serviceClient
   const url = (process.env.USER_SUPABASE_URL || '').trim()

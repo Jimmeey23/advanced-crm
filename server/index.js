@@ -16,7 +16,7 @@ import * as respondioInternal from './respondioInternal.js'
 import * as inbox from './inbox.js'
 import * as mailer from './mailer.js'
 import * as supabase from './supabaseStore.js'
-import { requireAuth, requireAuthWithQueryToken, scopeLocation, blockAgentWrite, adminCodeHandler, isAllowedLocation, allowedLocationIds } from './auth.js'
+import { requireAuth, requireAuthWithQueryToken, scopeLocation, blockAgentWrite, adminCodeHandler, isAllowedLocation, allowedLocationIds, isPublicLeadWebhookPath } from './auth.js'
 import { runReminderDigest, startReminderScheduler } from './reminders.js'
 import { parseCsv, autoMap, normalizeStage, normalizeStatus, parseFlexibleDate } from './csv.js'
 import { STATUS_GROUPS, statusGroupOf } from './leadStatus.js'
@@ -93,7 +93,7 @@ app.use('/api', (req, res, next) => {
   // browser opens with EventSource — it cannot set an Authorization header, so
   // that one route authenticates itself off `?token=` in its own handler
   // below. Nothing else is exempt from the mandatory bearer token.
-  if (req.path === '/runtime' || req.path === '/events') return next()
+  if (req.path === '/runtime' || req.path === '/events' || isPublicLeadWebhookPath(req.originalUrl)) return next()
   requireAuth(db)(req, res, (err) => {
     if (err) return next(err)
     scopeLocation(req, res, next)
