@@ -89,7 +89,13 @@ export function mergeRow({
     if (appChanged && !sheetChanged) { toSheet[field] = lead[field]; continue }
     if (!sheetChanged && !appChanged) continue
 
-    const winner = later(sheetEditedAt, fieldUpdatedAt[field]) || SHEET_WINS
+    // Both sides moved the same field. The sheet is the source of truth, so it
+    // takes the field unless the app can show a LATER edit than a timestamped
+    // sheet edit. A reconcile carries no sheetEditedAt at all (nobody reports
+    // when a cell changed, only that it did) — and there "unknown" must not
+    // read as "older than the app", or every app edit would quietly outrank
+    // the sheet it is supposed to be a mirror of.
+    const winner = sheetEditedAt ? (later(sheetEditedAt, fieldUpdatedAt[field]) || SHEET_WINS) : SHEET_WINS
     conflicts.push({ field, base, sheetValue, leadValue, winner })
     if (winner === SHEET_WINS) toLead[field] = sheet[field]
     else toSheet[field] = lead[field]

@@ -20,6 +20,7 @@ const SCOPES = [
 ].join(' ')
 const STATUS_HEADER = 'Sync Status'
 const IMPORTED_MARK = 'Imported'
+export const VALUE_RENDER_QUERY = '?valueRenderOption=UNFORMATTED_VALUE&dateTimeRenderOption=SERIAL_NUMBER'
 
 export function config(db) {
   return db.settings.googleSheets || {}
@@ -200,7 +201,12 @@ export async function readSheetRows(db) {
   const c = config(db)
   if (!c.sheetId || !c.sheetTab) throw new Error('No sheet configured yet.')
   const range = encodeURIComponent(c.sheetTab)
-  const data = await sheetsFetch(db, `${SHEETS_BASE}/${c.sheetId}/values/${range}`)
+  // UNFORMATTED_VALUE + SERIAL_NUMBER, not the API's FORMATTED_VALUE default.
+  // A date cell displayed as "31-Dec" used to arrive as exactly that text, with
+  // the year gone for good; as a serial number the full date always survives
+  // whatever display format the sheet happens to use. Numbers come through as
+  // numbers too, so "₹1,200" no longer has to be un-formatted downstream.
+  const data = await sheetsFetch(db, `${SHEETS_BASE}/${c.sheetId}/values/${range}${VALUE_RENDER_QUERY}`)
   const values = data.values || []
   if (!values.length) return { header: [], rows: [] }
   return { header: values[0], rows: values.slice(1) }

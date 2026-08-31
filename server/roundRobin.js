@@ -52,6 +52,11 @@ export function nextAssociate(db, locationId) {
 }
 
 export function assignLead(db, lead) {
+  // Leads that arrived through the Google Sheet sync are owned by the sheet's
+  // Associate column, full stop. Rotating one to somebody else would contradict
+  // the sheet on the next read and flip the owner back and forth forever, so a
+  // sheet lead with a blank/unrecognised Associate stays unassigned instead.
+  if (lead.autoAssignExempt) return null
   if (!lead.locationId) return null
   const id = nextAssociate(db, lead.locationId)
   if (id) lead.associateId = id

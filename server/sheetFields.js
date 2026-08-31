@@ -13,11 +13,13 @@
 // written back to that column, which is the safe default for anything we
 // cannot faithfully read back out of a lead.
 
+import { canonicalLeadDate } from './sheetDates.js'
+
 const SAME_NAME = [
   'fullName', 'phone', 'email', 'stage', 'status', 'classType', 'channel',
   'center', 'memberId', 'hostId', 'period', 'valueEstimate', 'purchasesMade',
   'visits', 'trialStatus', 'conversionStatus', 'retentionStatus',
-  'convertedAt', 'createdAt', 'locationId', 'associateId'
+  'locationId', 'associateId'
 ]
 
 // field -> how to read the app's current value for it
@@ -26,7 +28,13 @@ const READERS = {
   notes: (lead) => lead.remarks,
   // The owner is an id on the lead and a name in the sheet, so it round-trips
   // through db.associates in both directions.
-  associateName: (lead, db) => db.associates.find(a => a.id === lead.associateId)?.name || ''
+  associateName: (lead, db) => db.associates.find(a => a.id === lead.associateId)?.name || '',
+  // Dates are compared and written as plain "YYYY-MM-DD". The lead stores a
+  // full ISO timestamp and the sheet only ever carries the day, so without
+  // trimming to the day every pass saw a difference and rewrote the cell — and
+  // the value written back always carries its year, which is the whole point.
+  createdAt: (lead) => canonicalLeadDate(lead.createdAt),
+  convertedAt: (lead) => canonicalLeadDate(lead.convertedAt)
 }
 for (const field of SAME_NAME) READERS[field] = (lead) => lead[field]
 

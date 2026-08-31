@@ -23,13 +23,51 @@ const COLUMNS = [
   (lead) => lead.stage || '',
   (lead) => lead.status || '',
   (lead, db) => db.associates.find(a => a.id === lead.associateId)?.name || '',
-  (lead, db) => db.locations.find(l => l.id === lead.locationId)?.name || '',
+  (lead, db) => db.locations.find(l => l.id === lead.locationId)?.name || lead.center || '',
   (lead) => lead.sourceName || '',
   (lead) => lead.remarks || '',
   (lead) => lead.valueEstimate ?? '',
-  (lead) => lead.createdAt || '',
-  (lead) => lead.updatedAt || lead.lastActivityAt || ''
+  // Written as an explicit "YYYY-MM-DD HH:mm" rather than a raw ISO string or a
+  // bare date: the sheet's own date formatting is what dropped the year in the
+  // first place, and a value written as text keeps the year visible whatever
+  // format the column is set to.
+  (lead) => stamp(lead.createdAt),
+  (lead) => stamp(lead.updatedAt || lead.lastActivityAt)
 ]
+
+function stamp(value) {
+  if (!value) return ''
+  const d = new Date(value)
+  if (isNaN(d.getTime())) return String(value)
+  const iso = d.toISOString()
+  return `${iso.slice(0, 10)} ${iso.slice(11, 16)}`
+}
+
+// Which lead field each mirror column carries, in MIRROR_HEADER order. `null`
+// marks a column nobody may edit their way back into the app: the lead id is
+// the row's key, and the two timestamps are reported by the app, not set from
+// the sheet. Names are in the SHEET's vocabulary (see sheetFields.js), so an
+// edit here goes through exactly the same projection as an edit to the source
+// tab.
+export const MIRROR_FIELDS = [
+  null, 'fullName', 'email', 'phone', 'stage', 'status', 'associateName',
+  'center', 'source', 'notes', 'valueEstimate', null, null
+]
+
+// The editable half of one mirror row, as {field: value}. Used both to read a
+// person's edit and to work out what the row SHOULD say for a lead, so the two
+// are always compared in the same shape.
+export function mirrorValues(row) {
+  const out = {}
+  MIRROR_FIELDS.forEach((field, i) => {
+    if (field) out[field] = row[i] === undefined || row[i] === null ? '' : String(row[i])
+  })
+  return out
+}
+
+export function leadIdFromMirrorRow(row) {
+  return String(row?.[0] || '').trim() || null
+}
 
 export function mirrorRowFor(lead, db) {
   return COLUMNS.map(read => {

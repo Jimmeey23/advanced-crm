@@ -17,15 +17,20 @@
  *                   can work out WHICH row disappeared
  *
  * SHEET_TAB must be the SOURCE tab — the one the upstream export rebuilds. The
- * CRM never writes to that tab; app-side changes go to the separate CRM tab
- * configured in Settings, and edits there are ignored by this script, so
- * nothing can loop. A wholesale rebuild of the source tab arrives as an
- * onChange event, which the CRM answers with a full reconcile.
+ * CRM never writes to that tab. MIRROR_TAB is the CRM-owned tab: the app writes
+ * every lead's current state there, and edits made there are pushed back the
+ * same way, so the mirror is a real two-way surface rather than a read-only
+ * report. A wholesale rebuild of the source tab arrives as an onChange event,
+ * which the CRM answers with a full reconcile.
+ *
+ * Nothing loops: a mirror row the CRM itself just wrote matches what the CRM
+ * already holds, so the push is recognised as "no change" and stops there.
  */
 
 var HOOK_URL = '__HOOK_URL__'
 var HOOK_SECRET = '__HOOK_SECRET__'
 var SHEET_TAB = '__SHEET_TAB__'
+var MIRROR_TAB = '__MIRROR_TAB__'
 
 function installTriggers() {
   var ss = SpreadsheetApp.getActive()
@@ -37,7 +42,9 @@ function installTriggers() {
 
 function onEditPush(e) {
   var sheet = e.range.getSheet()
-  if (sheet.getName() !== SHEET_TAB) return
+  var name = sheet.getName()
+  if (name === MIRROR_TAB && MIRROR_TAB) return onMirrorEdit(e, sheet)
+  if (name !== SHEET_TAB) return
 
   var row = e.range.getRow()
   if (row === 1) return // the header row is structure, not data
@@ -67,6 +74,26 @@ function onEditPush(e) {
       if (editedField.indexOf('phone') >= 0 || editedField.indexOf('mobile') >= 0) payload.previous.phone = e.oldValue
     }
     post(payload)
+  }
+}
+
+// An edit to the CRM-owned tab. The whole row goes over, keyed by the Lead ID
+// in column A, so the CRM can tell which cells a person actually touched by
+// comparing against what it last wrote there.
+function onMirrorEdit(e, sheet) {
+  var row = e.range.getRow()
+  if (row === 1) return
+  var lastRow = row + e.range.getNumRows() - 1
+  var width = sheet.getLastColumn()
+  var header = sheet.getRange(1, 1, 1, width).getValues()[0]
+  for (var r = row; r <= lastRow; r++) {
+    post({
+      type: 'mirror-edit',
+      rowNumber: r,
+      header: header.map(String),
+      values: sheet.getRange(r, 1, 1, width).getValues()[0].map(cell),
+      editedAt: new Date().toISOString()
+    })
   }
 }
 

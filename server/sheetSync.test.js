@@ -359,9 +359,11 @@ test("the sheet's associate column sets the owner, and is not blanked on later p
   await sheetSync.reconcile()
   assert.equal(rows[0][OCOL.associate], 'Imran Shaikh')
   assert.equal(db.leads[0].associateId, 'asc_1')
-  // The old bug produced a blank write for this column on every pass; with the
-  // projection in place the field is simply not in the changeset at all.
-  assert.equal(writes.mirrorWrites.length, 0)
+  // The old bug produced a blank owner on every pass. The mirror row is
+  // rewritten whenever anything about the lead moves, so what matters is not
+  // that nothing was written but that nothing ever writes a blank owner.
+  for (const write of writes.mirrorWrites) assert.equal(write.values[MCOL.owner], 'Imran Shaikh')
+  assert.equal(writes.mirror.rows[0][MCOL.owner], 'Imran Shaikh')
 })
 
 test('reassigning the owner in the app writes the associate NAME to the CRM tab', async () => {
@@ -432,4 +434,183 @@ test('a read that catches the sheet mid-refresh deletes nothing', async () => {
   assert.equal(counts.deleted, 0)
   assert.equal(db.leads.length, 10)
   assert.ok(writes.log.some(line => /mid-refresh read, no leads deleted/.test(line)))
+})
+
+// ---------------------------------------------------------------------------
+// the mirror as a two-way surface
+// ---------------------------------------------------------------------------
+
+test('every lead gets a mirror row, whether or not the app touched it', async () => {
+  const db = makeDb()
+  const rows = [row({ name: 'Asha Rao', email: 'asha@example.com', phone: '9820011111', stage: 'New Enquiry' })]
+  const writes = install(db, rows)
+
+  await sheetSync.reconcile()
+
+  assert.equal(writes.mirror.header[0], 'Lead ID')
+  assert.equal(writes.mirror.rows.length, 1)
+  assert.equal(writes.mirror.rows[0][0], db.leads[0].id)
+  assert.equal(writes.mirror.rows[0][1], 'Asha Rao')
+})
+
+test('an edit made in the mirror tab reaches the lead', async () => {
+  const db = makeDb()
+  const rows = [row({ name: 'Asha Rao', email: 'asha@example.com', phone: '9820011111', stage: 'New Enquiry' })]
+  const writes = install(db, rows)
+  await sheetSync.reconcile()
+
+  const mirrorRow = [...writes.mirror.rows[0]]
+  mirrorRow[MCOL.stage] = 'Trial Booked'
+  const result = await sheetSync.applyMirrorEdit({
+    header: writes.mirror.header, values: mirrorRow, editedAt: '2026-08-31T11:00:00.000Z'
+  })
+
+  assert.equal(result.outcome, 'merged')
+  assert.equal(db.leads[0].stage, 'Trial Booked')
+})
+
+test('a mirror row the app itself wrote is not read back as an edit', async () => {
+  const db = makeDb()
+  const rows = [row({ name: 'Asha Rao', email: 'asha@example.com', phone: '9820011111', stage: 'New Enquiry' })]
+  const writes = install(db, rows)
+  await sheetSync.reconcile()
+
+  const result = await sheetSync.applyMirrorEdit({
+    header: writes.mirror.header, values: writes.mirror.rows[0]
+  })
+  assert.equal(result.outcome, 'unchanged')
+})
+
+test('a mirror edit is overruled by the source tab, which stays the source of truth', async () => {
+  const db = makeDb()
+  const rows = [row({ name: 'Asha Rao', email: 'asha@example.com', phone: '9820011111', stage: 'New Enquiry' })]
+  const writes = install(db, rows)
+  await sheetSync.reconcile()
+
+  // Both tabs move the same field in the same pass.
+  writes.mirror.rows[0][MCOL.stage] = 'Trial Booked'
+  rows[0][COL.stage] = 'Membership Sold'
+  await sheetSync.reconcile()
+
+  assert.equal(db.leads[0].stage, 'Membership Sold')
+  assert.equal(writes.mirror.rows[0][MCOL.stage], 'Membership Sold')
+})
+
+test('a mirror column moved by hand is still read correctly', async () => {
+  const db = makeDb()
+  const rows = [row({ name: 'Asha Rao', email: 'asha@example.com', phone: '9820011111', stage: 'New Enquiry' })]
+  const writes = install(db, rows)
+  await sheetSync.reconcile()
+
+  // Someone drags the Stage column to the end of the tab.
+  const header = [...writes.mirror.header]
+  const moved = header.splice(MCOL.stage, 1)[0]
+  header.push(moved)
+  const values = [...writes.mirror.rows[0]]
+  values.splice(MCOL.stage, 1)
+  values.push('Trial Booked')
+
+  const result = await sheetSync.applyMirrorEdit({ header, values })
+  assert.equal(result.outcome, 'merged')
+  assert.equal(db.leads[0].stage, 'Trial Booked')
+})
+
+// ---------------------------------------------------------------------------
+// dates and ownership
+// ---------------------------------------------------------------------------
+
+const DATE_HEADER = ['Name', 'Email', 'Phone', 'Created At', 'Associate', 'Sync Status']
+const DCOL = { name: 0, email: 1, phone: 2, created: 3, associate: 4, status: 5 }
+
+function dateRow({ name = '', email = '', phone = '', created = '', associate = '' }) {
+  const r = new Array(DATE_HEADER.length).fill('')
+  r[DCOL.name] = name; r[DCOL.email] = email; r[DCOL.phone] = phone
+  r[DCOL.created] = created; r[DCOL.associate] = associate
+  return r
+}
+
+// A ctx whose createLeadFrom behaves like index.js's for the two things these
+// tests are about: it keeps createdAt, and it honours the round-robin
+// exemption flag the sync sets.
+function installDates(db, rows) {
+  const writes = { log: [], cells: [], mirrorWrites: [], mirrorAppends: [] }
+  const mirror = { header: [], rows: [] }
+  sheetSync.__setTransport(mirrorTransport(DATE_HEADER, rows, mirror, writes))
+  sheetSync.__reset()
+  const ctx = makeCtx(db, writes)
+  const baseCreate = ctx.createLeadFrom
+  ctx.createLeadFrom = (payload) => {
+    const lead = baseCreate(payload)
+    lead.createdAt = payload.createdAt ? new Date(payload.createdAt).toISOString() : new Date().toISOString()
+    lead.associateId = payload.associateId || null
+    lead.autoAssignExempt = payload.autoAssignExempt === true
+    return lead
+  }
+  sheetSync.configure(ctx)
+  writes.mirror = mirror
+  return writes
+}
+
+test('a date column read as a serial number keeps its year', async () => {
+  const db = ownerDb()
+  // 45678 is 2025-01-21. Displayed as "21-Jan" the year used to be lost for good.
+  const rows = [dateRow({ name: 'Asha Rao', email: 'asha@example.com', phone: '9820011111', created: 45678 })]
+  installDates(db, rows)
+
+  await sheetSync.reconcile()
+  assert.equal(db.leads[0].createdAt.slice(0, 10), '2025-01-21')
+})
+
+test('a date already in the app does not read as a change on every pass', async () => {
+  const db = ownerDb()
+  const rows = [dateRow({ name: 'Asha Rao', email: 'asha@example.com', phone: '9820011111', created: 45678 })]
+  installDates(db, rows)
+  await sheetSync.reconcile()
+
+  // The lead stores a full timestamp and the sheet a bare serial; without
+  // canonicalising both sides this compared unequal forever.
+  const counts = await sheetSync.reconcile()
+  assert.equal(counts.unchanged, 1)
+  assert.equal(counts.merged, 0)
+})
+
+test('a lead from the sheet is exempt from round robin and owned by its Associate cell', async () => {
+  const db = ownerDb()
+  const rows = [dateRow({ name: 'Asha Rao', email: 'asha@example.com', phone: '9820011111', associate: 'Imran Shaikh' })]
+  installDates(db, rows)
+
+  await sheetSync.reconcile()
+  assert.equal(db.leads[0].associateId, 'asc_1')
+  assert.equal(db.leads[0].autoAssignExempt, true)
+})
+
+test('a sheet lead with no Associate stays unassigned rather than being rotated', async () => {
+  const db = ownerDb()
+  const rows = [dateRow({ name: 'Asha Rao', email: 'asha@example.com', phone: '9820011111' })]
+  installDates(db, rows)
+
+  await sheetSync.reconcile()
+  assert.equal(db.leads[0].associateId, null)
+  // The flag is what stops round robin from filling that blank in behind the
+  // sheet's back; the sheet gets to say "nobody" (see assignLead).
+  assert.equal(db.leads[0].autoAssignExempt, true)
+})
+
+test('a lead deleted from the source tab leaves no ghost row in the mirror', async () => {
+  const db = makeDb()
+  const rows = [
+    row({ name: 'Asha Rao', email: 'asha@example.com', phone: '9820011111', stage: 'New Enquiry' }),
+    row({ name: 'Ravi Menon', email: 'ravi@example.com', phone: '9820022222', stage: 'New Enquiry' })
+  ]
+  const writes = install(db, rows)
+  await sheetSync.reconcile()
+  assert.equal(writes.mirror.rows.length, 2)
+
+  rows.shift() // the first row is deleted upstream; everything below slides up
+  await sheetSync.reconcile()
+
+  assert.equal(db.leads.length, 1)
+  const remaining = writes.mirror.rows.filter(r => String(r[0] || '').trim())
+  assert.equal(remaining.length, 1)
+  assert.equal(remaining[0][MCOL.name], 'Ravi Menon')
 })

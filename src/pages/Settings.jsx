@@ -1229,9 +1229,9 @@ export default function SettingsPage({ jumpTo }) {
                           wrote there would be wiped, so CRM state gets a tab of
                           its own that nothing else touches. */}
                       <div>
-                        <label className="label">CRM tab (written by the app)</label>
+                        <label className="label">CRM tab (two-way)</label>
                         <input className="input" value={sheetsMirrorTab} onChange={e => setSheetsMirrorTab(e.target.value)} placeholder="e.g. CRM State — leave blank to write nothing" />
-                        <p className="mt-1 text-xs text-slate-500">Stage, owner and remarks are mirrored here. The source tab is never written to. Leave blank to keep CRM state in the app only.</p>
+                        <p className="mt-1 text-xs text-slate-500">Every lead is written here, and edits made here come back to the app. The source tab is never written to and always wins on the columns it carries. Leave blank to keep CRM state in the app only — re-install the push script after changing this.</p>
                       </div>
                     </div>
                     <div className="flex items-center gap-3 mt-3 flex-wrap">

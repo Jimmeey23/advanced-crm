@@ -284,20 +284,38 @@ function isMissingSnapshotTable(error) {
   return error?.code === '42P01' || /relation .*sheet_row_snapshot.* does not exist/i.test(String(error?.message || ''))
 }
 
+// The `mirror` column arrived after the table did (see
+// migrations/20260901_add_sheet_mirror_snapshot.sql). Until that migration is
+// applied the snapshot still works, minus the mirror tab's baseline — which
+// only costs the first mirror pass its ability to tell an edit from a stale
+// row, not any data.
+let snapshotHasMirror = true
+
+function isMissingMirrorColumn(error) {
+  return error?.code === '42703' || /column .*mirror.* does not exist/i.test(String(error?.message || ''))
+}
+
 export async function loadSheetSnapshot() {
   const c = getClient()
   if (!c) return null
   const rows = {}
   for (let from = 0; ; from += SNAPSHOT_PAGE) {
+    const columns = snapshotHasMirror ? 'lead_id,row_number,values,mirror' : 'lead_id,row_number,values'
     const { data, error } = await c
       .from(SNAPSHOT_TABLE)
-      .select('lead_id,row_number,values')
+      .select(columns)
       .range(from, from + SNAPSHOT_PAGE - 1)
     if (error) {
       if (isMissingSnapshotTable(error)) return null
+      if (isMissingMirrorColumn(error) && snapshotHasMirror) {
+        snapshotHasMirror = false
+        console.warn('[supabase] sheet_row_snapshot has no `mirror` column yet; apply server/sql/migrations/20260901_add_sheet_mirror_snapshot.sql')
+        from -= SNAPSHOT_PAGE // retry this page without the column
+        continue
+      }
       throw new Error(`supabase load sheet snapshot: ${error.message}`)
     }
-    for (const row of data || []) rows[row.lead_id] = { rowNumber: row.row_number, values: row.values || {} }
+    for (const row of data || []) rows[row.lead_id] = { rowNumber: row.row_number, values: row.values || {}, mirror: row.mirror || null }
     if (!data || data.length < SNAPSHOT_PAGE) break
   }
   return rows
@@ -307,13 +325,20 @@ export async function saveSheetSnapshot(entries) {
   const c = getClient()
   if (!c || !entries?.length) return
   const now = new Date().toISOString()
-  const rows = entries.map(({ leadId, rowNumber, values }) => ({
-    lead_id: leadId, row_number: rowNumber ?? null, values: values || {}, updated_at: now
+  const rows = entries.map(({ leadId, rowNumber, values, mirror }) => ({
+    lead_id: leadId, row_number: rowNumber ?? null, values: values || {}, mirror: mirror || null, updated_at: now
   }))
   for (let i = 0; i < rows.length; i += UPSERT_BATCH_SIZE) {
-    const { error } = await c.from(SNAPSHOT_TABLE).upsert(rows.slice(i, i + UPSERT_BATCH_SIZE), { onConflict: 'lead_id' })
+    const batch = rows.slice(i, i + UPSERT_BATCH_SIZE)
+    const payload = snapshotHasMirror ? batch : batch.map(({ mirror, ...rest }) => rest)
+    const { error } = await c.from(SNAPSHOT_TABLE).upsert(payload, { onConflict: 'lead_id' })
     if (error) {
       if (isMissingSnapshotTable(error)) return
+      if (isMissingMirrorColumn(error) && snapshotHasMirror) {
+        snapshotHasMirror = false
+        i -= UPSERT_BATCH_SIZE // retry this batch without the column
+        continue
+      }
       throw new Error(`supabase save sheet snapshot: ${error.message}`)
     }
   }

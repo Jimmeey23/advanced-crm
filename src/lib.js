@@ -28,9 +28,10 @@ export const fmtDateCompact = (iso) => {
   if (d.toDateString() === yesterday.toDateString()) return 'Yesterday'
   if (d.toDateString() === tomorrow.toDateString()) return 'Tomorrow'
   if (isToday) return 'Today'
-  if (d.getFullYear() === now.getFullYear()) {
-    return d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })
-  }
+  // The year is always shown. Dropping it for the current year saved four
+  // characters and made a lead created in January indistinguishable from one
+  // created in January of any other year — the same omission that lost the
+  // year on the way in from the sheet.
   return d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: '2-digit' })
 }
 
@@ -38,7 +39,7 @@ export const fmtDateTime = (iso) => {
   if (!iso) return '—'
   const d = new Date(iso)
   if (isNaN(d.getTime())) return '—'
-  return d.toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
+  return d.toLocaleString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
 }
 
 export const timeAgo = (iso) => {

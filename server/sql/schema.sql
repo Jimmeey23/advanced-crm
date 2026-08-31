@@ -54,6 +54,9 @@ create table if not exists sheet_row_snapshot (
   lead_id     text primary key,
   row_number  integer,
   values      jsonb not null default '{}'::jsonb,
+  -- What the CRM-owned mirror tab said for this lead at the end of the last
+  -- sync. See migrations/20260901_add_sheet_mirror_snapshot.sql
+  mirror      jsonb,
   updated_at  timestamptz not null default now()
 );
 create index if not exists sheet_row_snapshot_row_number_idx on sheet_row_snapshot (row_number);

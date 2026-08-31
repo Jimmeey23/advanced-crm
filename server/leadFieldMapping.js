@@ -3,6 +3,7 @@
 // go through this. Keeping it in one module means both features get the
 // same alias dictionary and manual-mapping/defaults precedence for free.
 import { parseFlexibleDate } from './csv.js'
+import { canonicalSheetDate } from './sheetDates.js'
 import { normalizeFollowUpFields } from './followUps.js'
 
 // Every Lead field an external source is allowed to populate, and the
@@ -215,7 +216,10 @@ export function extractFollowUps(record) {
       // date was the bug (every imported follow-up showed as done even when
       // scheduled ahead). No date at all means it's a plain historical note,
       // which is done by definition (nothing left to do on it).
-      const normalizedDate = f.date ? parseFlexibleDate(f.date) : null
+      // canonicalSheetDate, not parseFlexibleDate: a follow-up date column in
+      // a Google Sheet now arrives as a serial number, and a year-less cell
+      // must be rejected rather than guessed at.
+      const normalizedDate = f.date ? (canonicalSheetDate(f.date) || null) : null
       const todayKey = new Date().toISOString().slice(0, 10)
       return {
         id: `fu_import_${Date.now().toString(36)}_${i}`,
@@ -225,6 +229,26 @@ export function extractFollowUps(record) {
         done: Boolean(f.comments) && (normalizedDate ? normalizedDate <= todayKey : true)
       }
     })
+}
+
+// Resolves whatever the sheet's Associate/Owner column holds to a real
+// associate. Sheets carry a person's name, an email, or a name typed with
+// different spacing or punctuation from the roster's — and when this fails the
+// lead ends up with no owner at all, which is exactly the case the sheet was
+// meant to decide. Matched, in order: exact name (case/space-insensitive),
+// email, then the name reduced to bare alphanumerics.
+export function matchAssociate(db, value) {
+  const raw = String(value || '').trim()
+  if (!raw) return null
+  const lower = raw.toLowerCase()
+  const associates = db.associates || []
+  const byName = associates.find(a => String(a.name || '').trim().toLowerCase() === lower)
+  if (byName) return byName
+  const byEmail = associates.find(a => String(a.email || '').trim().toLowerCase() === lower)
+  if (byEmail) return byEmail
+  const bare = normalizeKey(raw)
+  if (!bare) return null
+  return associates.find(a => normalizeKey(a.name) === bare) || null
 }
 
 // Turns a resolveLeadFields() result into the payload shape
@@ -240,10 +264,9 @@ export function buildLeadPayloadFromResolved(resolved, db, fallbackSourceName, r
   // to a real associateId, the sheet's chosen owner was silently dropped
   // and the lead fell through to round-robin instead of staying with
   // whoever the sheet says owns it.
-  const associateName = resolved.associateName ? String(resolved.associateName).trim().toLowerCase() : ''
   const associateId = resolved.associateId && db.associates.some(a => a.id === resolved.associateId)
     ? resolved.associateId
-    : (associateName ? db.associates.find(a => String(a.name || '').trim().toLowerCase() === associateName)?.id : undefined)
+    : matchAssociate(db, resolved.associateName)?.id
   const locationId = resolved.locationId && db.locations.some(l => l.id === resolved.locationId) ? resolved.locationId : undefined
   return {
     fullName: resolved.fullName ? String(resolved.fullName).trim() : '',

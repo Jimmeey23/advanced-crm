@@ -21,7 +21,7 @@ import { requireAuth, requireAuthWithQueryToken, scopeLocation, blockAgentWrite,
 import { runReminderDigest, startReminderScheduler } from './reminders.js'
 import { parseCsv, autoMap, normalizeStage, normalizeStatus, parseFlexibleDate } from './csv.js'
 import { STATUS_GROUPS, statusGroupOf } from './leadStatus.js'
-import { resolveLeadFields, buildLeadPayloadFromResolved, suggestMappingFromKeys, isValidEmail, isValidPhone, LEAD_FIELD_ALIASES } from './leadFieldMapping.js'
+import { resolveLeadFields, buildLeadPayloadFromResolved, suggestMappingFromKeys, isValidEmail, isValidPhone, LEAD_FIELD_ALIASES, matchAssociate } from './leadFieldMapping.js'
 import * as googleSheets from './googleSheets.js'
 import * as sheetSync from './sheetSync.js'
 import * as zohoPeople from './zohoPeople.js'
@@ -839,11 +839,14 @@ function createLeadFrom(payload) {
     createdAt: resolveCreatedAt(payload.createdAt),
     followUps: payload.followUps || [],
     lastActivityAt: nowIso(),
-    createdAtByImport: payload._imported || false
+    createdAtByImport: payload._imported || false,
+    // Set by the Google Sheets sync. The sheet is the source of truth for
+    // ownership, so round robin never touches these leads (see assignLead).
+    autoAssignExempt: payload.autoAssignExempt === true
   }
   if (lead.status === 'won') { lead.convertedAt = lead.convertedAt || new Date().toISOString().slice(0, 10) }
   if (!lead.associateId && payload.associateName) {
-    const asn = db.associates.find(a => a.name.toLowerCase() === String(payload.associateName).toLowerCase())
+    const asn = matchAssociate(db, payload.associateName)
     // Only fall back to the associate's home location when the sheet/payload
     // didn't already supply one of its own — a sheet's location column is
     // the actual studio the lead belongs to, which can differ from wherever
@@ -892,7 +895,7 @@ function updateLeadFromPayload(lead, payload) {
     lead.associateId = asn.id; changed = true
     if (!payload.locationId) { lead.locationId = asn.locationId }
   } else if (payload.associateName) {
-    const asn = db.associates.find(a => a.name.toLowerCase() === String(payload.associateName).toLowerCase())
+    const asn = matchAssociate(db, payload.associateName)
     if (asn && lead.associateId !== asn.id) {
       lead.associateId = asn.id; changed = true
       if (!payload.locationId) { lead.locationId = asn.locationId }
@@ -1598,9 +1601,15 @@ app.post('/api/google-sheets/hook', async (req, res) => {
   db.settings.googleSheets.lastHookAt = nowIso()
   try {
     if (req.body?.type === 'ping') return res.json({ ok: true, pong: true })
-    if (req.body?.type && req.body.type !== 'edit') {
+    if (req.body?.type && req.body.type !== 'edit' && req.body.type !== 'mirror-edit') {
       if (sheetSync.needsReconcile(req.body.type)) scheduleReconcile(req.body.type)
       return res.json({ ok: true, queued: 'reconcile' })
+    }
+    if (req.body?.type === 'mirror-edit') {
+      const { header, values, editedAt } = req.body
+      if (!Array.isArray(values)) return res.status(400).json({ error: 'Expected { header, values }' })
+      const mirrored = await sheetSync.applyMirrorEdit({ header, values, editedAt })
+      return res.json({ ok: true, outcome: mirrored.outcome })
     }
     const { rowNumber, header, values, previous, editedAt } = req.body || {}
     if (!Array.isArray(header) || !Array.isArray(values) || !rowNumber) {
@@ -1626,6 +1635,7 @@ app.get('/api/google-sheets/apps-script', (req, res) => {
       .replace('__HOOK_URL__', hookUrl)
       .replace('__HOOK_SECRET__', secret)
       .replace('__SHEET_TAB__', db.settings.googleSheets?.sheetTab || 'Sheet1')
+      .replace('__MIRROR_TAB__', db.settings.googleSheets?.mirrorTab || '')
   })
 })
 
