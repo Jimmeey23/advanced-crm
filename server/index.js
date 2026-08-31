@@ -24,6 +24,7 @@ import { STATUS_GROUPS, statusGroupOf } from './leadStatus.js'
 import { resolveLeadFields, buildLeadPayloadFromResolved, suggestMappingFromKeys, isValidEmail, isValidPhone, LEAD_FIELD_ALIASES, matchAssociate, matchLocation } from './leadFieldMapping.js'
 import * as googleSheets from './googleSheets.js'
 import * as sheetSync from './sheetSync.js'
+import * as momenceLeads from './momenceLeads.js'
 import * as zohoPeople from './zohoPeople.js'
 import { findDuplicateAmong, clusterDuplicates } from './duplicateMatch.js'
 import { normalizeFollowUpFields } from './followUps.js'
@@ -301,8 +302,43 @@ function safePatch(lead, body) {
   // for are dropped by the queue's column lookup, and edits that arrived FROM
   // the sheet are muted, so this never echoes.
   sheetSync.noteAppEdit(lead, [...touched, ...(('stage' in body) ? ['status'] : [])])
+  pushLeadToMomence(lead)
   save()
 }
+
+// Every lead here also lives in the Momence leads portal, which is where studio
+// staff work. An edit that stops at this app leaves the two disagreeing about
+// the same person, so app-side changes are pushed straight back.
+//
+// Fire-and-forget on purpose: the portal is a third party, and a slow or broken
+// Momence must never make saving a lead in this app slow or broken. A failed
+// push is logged and the next edit to that lead retries it in full, because the
+// push always sends the lead's complete current state rather than a delta.
+//
+// Sheet-driven changes deliberately do NOT come through here. A reconcile
+// touches tens of thousands of leads in one pass, and firing a portal write for
+// each would be an outage of our own making; the sheet and the portal are both
+// upstream of the app, not of each other.
+function pushLeadToMomence(lead) {
+  if (!lead?.momenceLeadId) return
+  momenceLeads.pushLead(db, lead, { log: (outcome, detail) => logMomenceLead(outcome, detail) })
+    .then(result => {
+      if (result.outcome === 'pushed') {
+        logMomenceLead('pushed', `lead ${lead.id} -> Momence ${result.momenceId} (${result.fields.join(', ')})`)
+      }
+    })
+    .catch(err => logMomenceLead('error', `lead ${lead.id}: ${err.message}`))
+}
+
+function logMomenceLead(outcome, detail) {
+  db.momenceLeadLogs = db.momenceLeadLogs || []
+  db.momenceLeadLogs.unshift({ id: uid('mlog'), ts: nowIso(), outcome, detail: detail || null })
+  if (db.momenceLeadLogs.length > 300) db.momenceLeadLogs.length = 300
+}
+
+app.get('/api/momence/lead-logs', (req, res) => {
+  res.json((db.momenceLeadLogs || []).slice(0, 50))
+})
 
 function computeFollowUpState(lead) {
   const today = new Date().toISOString().slice(0, 10)
@@ -816,6 +852,9 @@ function createLeadFrom(payload) {
     sourceId: payload.sourceId || null,
     sourceName,
     memberId: payload.memberId || null,
+    // Issued by Momence and carried in the sheet's first column. The join
+    // between a lead here and the same lead in the portal.
+    momenceLeadId: payload.momenceLeadId ? String(payload.momenceLeadId).trim() : null,
     convertedAt: payload.convertedAt || null,
     // db.stages is an unordered admin-editable list (not a pipeline order),
     // so stages[0] is arbitrary and has landed on stages like "Membership
@@ -882,6 +921,7 @@ function updateLeadFromPayload(lead, payload) {
   set('channel', payload.channel)
   set('center', payload.center)
   set('memberId', payload.memberId)
+  set('momenceLeadId', payload.momenceLeadId)
   set('hostId', payload.hostId)
   set('period', payload.period)
   set('trialStatus', payload.trialStatus)

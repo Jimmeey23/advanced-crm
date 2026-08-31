@@ -14,6 +14,11 @@ import { normalizeFollowUpFields } from './followUps.js'
 // integration produces sane leads immediately, before anyone visits the
 // mapping editor.
 export const LEAD_FIELD_ALIASES = {
+  // The Momence customer-lead id, which the sheet carries in its very first
+  // column. Nothing mapped it, so it was dropped on every import — and without
+  // it there is no way to say WHICH lead in the Momence portal an app-side edit
+  // belongs to. It is inbound-only: Momence issues the id, we never write it.
+  momenceLeadId: ['id', 'lead_id', 'leadid', 'record_id', 'recordid', 'customer_lead_id', 'momence_lead_id'],
   fullName: ['name', 'fullname', 'full_name', 'customer_name', 'contact_name', 'lead_name'],
   firstName: ['first_name', 'firstname', 'fname', 'given_name'],
   lastName: ['last_name', 'lastname', 'lname', 'surname', 'family_name'],
@@ -335,6 +340,7 @@ export function buildLeadPayloadFromResolved(resolved, db, fallbackSourceName, r
     valueEstimate: resolved.valueEstimate !== undefined ? Number(resolved.valueEstimate) : undefined,
     center: resolved.center ? String(resolved.center).trim() : undefined,
     memberId: resolved.memberId ? String(resolved.memberId).trim() : undefined,
+    momenceLeadId: resolved.momenceLeadId ? String(resolved.momenceLeadId).trim() : undefined,
     hostId: resolved.hostId ? String(resolved.hostId).trim() : undefined,
     period: resolved.period ? String(resolved.period).trim() : undefined,
     purchasesMade: resolved.purchasesMade !== undefined ? Number(resolved.purchasesMade) : undefined,
