@@ -129,6 +129,8 @@ export default function SettingsPage({ jumpTo }) {
 
   const [webhooks, setWebhooks] = useState([])
   const [newWebhookName, setNewWebhookName] = useState('')
+  const [newWebhookSource, setNewWebhookSource] = useState('')
+  const [newWebhookStage, setNewWebhookStage] = useState('')
   const [creatingWebhook, setCreatingWebhook] = useState(false)
   const [webhookLogs, setWebhookLogs] = useState({})
   const [openWebhookLogs, setOpenWebhookLogs] = useState(null)
@@ -142,6 +144,7 @@ export default function SettingsPage({ jumpTo }) {
   const [sheetsSheetId, setSheetsSheetId] = useState('')
   const [sheetsSheetTab, setSheetsSheetTab] = useState('')
   const [sheetsSyncing, setSheetsSyncing] = useState(false)
+  const [pushScriptCopied, setPushScriptCopied] = useState(false)
   const [sheetsSyncResult, setSheetsSyncResult] = useState(null)
   const [sheetsLogs, setSheetsLogs] = useState(null)
   const [sheetsLogsOpen, setSheetsLogsOpen] = useState(false)
@@ -375,8 +378,13 @@ export default function SettingsPage({ jumpTo }) {
     if (!name) { toast('Give the webhook a name first', 'error'); return }
     setCreatingWebhook(true)
     try {
-      await api.post('/api/webhooks', { name })
+      const defaults = {}
+      if (newWebhookSource) defaults.source = newWebhookSource
+      if (newWebhookStage) defaults.stage = newWebhookStage
+      await api.post('/api/webhooks', { name, defaults })
       setNewWebhookName('')
+      setNewWebhookSource('')
+      setNewWebhookStage('')
       loadWebhooks()
       toast('Webhook created')
     } catch (e) { toast(e.message, 'error') }
@@ -519,15 +527,28 @@ export default function SettingsPage({ jumpTo }) {
     catch (e) { toast(e.message, 'error') }
   }
 
+  // The script carries this deployment's URL and a secret, so it is fetched
+  // rather than documented — a hand-typed URL or secret is the setup step most
+  // likely to go wrong.
+  const copyPushScript = async () => {
+    try {
+      const { script } = await api.get('/api/google-sheets/apps-script')
+      await navigator.clipboard.writeText(script)
+      setPushScriptCopied(true)
+      setTimeout(() => setPushScriptCopied(false), 6000)
+      toast('Push script copied — paste it into the sheet\'s Apps Script editor')
+    } catch (e) { toast(e.message, 'error') }
+  }
+
   const syncSheetNow = async (force) => {
-    if (force && !window.confirm('Force full resync ignores this sheet\'s "already imported" markers and re-pulls every row, recreating a lead for each one that doesn\'t match a current lead by email/phone. Use this after deleting leads from the app so the sheet can repopulate them. Continue?')) return
+    if (force && !window.confirm('Force full resync discards the stored snapshot, so the sheet\'s current value wins every field — any app-side edit the sheet does not know about is overwritten. Continue?')) return
     setSheetsSyncing(true); setSheetsSyncResult(null)
     try {
       const counts = await api.post('/api/google-sheets/sync-now', { force: !!force })
       setSheetsSyncResult({ ok: true, ...counts })
       loadSheetsConfig()
       refreshData()
-      toast(`Synced — ${counts.created} new lead${counts.created === 1 ? '' : 's'}${counts.updated ? `, ${counts.updated} updated` : ''}`)
+      toast(`Reconciled — ${counts.created} created, ${counts.merged || 0} merged${counts.deleted ? `, ${counts.deleted} deleted` : ''}`)
     } catch (e) {
       setSheetsSyncResult({ ok: false, error: e.message })
       toast(e.message, 'error')
@@ -1097,10 +1118,19 @@ export default function SettingsPage({ jumpTo }) {
 
             {activeIntegration === 'webhooks' && (
             <Section bare>
-              <div className="flex items-center gap-2 mb-4">
-                <input className="input flex-1" placeholder="Integration name, e.g. Landing Page Signup Form" value={newWebhookName} onChange={e => setNewWebhookName(e.target.value)} onKeyDown={e => e.key === 'Enter' && createWebhook()} />
+              <div className="flex flex-wrap items-center gap-2 mb-1.5">
+                <input className="input flex-1 min-w-[220px]" placeholder="Integration name, e.g. Landing Page Signup Form" value={newWebhookName} onChange={e => setNewWebhookName(e.target.value)} onKeyDown={e => e.key === 'Enter' && createWebhook()} />
+                <select className="input !w-auto" value={newWebhookSource} onChange={e => setNewWebhookSource(e.target.value)} title="Default source for leads that omit one">
+                  <option value="">Default source (optional)</option>
+                  {sources.map(s => <option key={s} value={s}>{s}</option>)}
+                </select>
+                <select className="input !w-auto" value={newWebhookStage} onChange={e => setNewWebhookStage(e.target.value)} title="Default stage for leads that omit one">
+                  <option value="">Default stage (optional)</option>
+                  {stages.map(s => <option key={s} value={s}>{s}</option>)}
+                </select>
                 <button className="btn btn-primary" onClick={createWebhook} disabled={creatingWebhook}>{creatingWebhook ? <Spinner size={14} /> : <Plus size={14} />} Create webhook</button>
               </div>
+              <p className="text-xs text-slate-500 mb-4">Source/stage presets apply to every incoming lead from this URL that doesn't already specify one — edit them anytime from the webhook's default values below.</p>
               <div className="space-y-3">
                 {webhooks.map(w => (
                   <WebhookRow key={w.id}
@@ -1177,23 +1207,47 @@ export default function SettingsPage({ jumpTo }) {
                     <div className="flex items-center gap-3 mt-3 flex-wrap">
                       <button className="btn btn-primary" onClick={saveSheetTarget}>Save sheet</button>
                       <button className="btn btn-soft" onClick={() => syncSheetNow(false)} disabled={sheetsSyncing || !sheetsConfig?.sheetId}>{sheetsSyncing ? <Spinner size={14} /> : <RefreshCcw size={13} />} Sync now</button>
-                      <button className="btn btn-ghost !text-sm" onClick={() => syncSheetNow(true)} disabled={sheetsSyncing || !sheetsConfig?.sheetId} title="Ignore the sheet's already-imported markers and re-pull every row">Force full resync</button>
+                      <button className="btn btn-ghost !text-sm" onClick={() => syncSheetNow(true)} disabled={sheetsSyncing || !sheetsConfig?.sheetId} title="Ignore the stored snapshot — the sheet's current values win every field">Force full resync</button>
                       <button className="btn btn-ghost !py-2" onClick={toggleSheetsLogs}><ScrollText size={14} /> {sheetsLogsOpen ? 'Hide log' : 'View sync log'}</button>
+                    </div>
+
+                    {/* The push script is what makes the sheet authoritative in real
+                        time rather than every 30 minutes, and installing it is a
+                        manual step inside the spreadsheet — so it gets its own
+                        panel with the script pre-filled rather than a doc link. */}
+                    <div className="mt-3 rounded-lg border border-white/8 bg-black/15 p-3">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className={`w-1.5 h-1.5 rounded-full ${sheetsConfig?.pushInstalled ? 'bg-emerald-400' : 'bg-amber-400'}`} />
+                        <span className="text-sm font-medium text-slate-200">
+                          {sheetsConfig?.pushInstalled ? 'Live push active' : 'Live push not installed'}
+                        </span>
+                        {sheetsConfig?.lastHookAt && (
+                          <span className="text-xs text-slate-500">last push {new Date(sheetsConfig.lastHookAt).toLocaleString()}</span>
+                        )}
+                        <button className="btn btn-soft !py-1.5 !text-xs ml-auto" onClick={copyPushScript} disabled={!sheetsConfig?.sheetId}>
+                          {pushScriptCopied ? 'Copied — now paste it into the sheet' : 'Copy push script'}
+                        </button>
+                      </div>
+                      <p className="mt-2 text-xs text-slate-500">
+                        In the spreadsheet: <span className="text-slate-400">Extensions → Apps Script</span>, replace <code>Code.gs</code> with the copied script,
+                        Save, then run <code>installTriggers</code> once and approve the permission prompt. Every edit in the sheet then reaches the CRM within a second.
+                        Until it is installed, sheet edits are picked up by the 30-minute reconcile instead.
+                      </p>
                     </div>
 
                     {sheetsSyncResult && (
                       <div className={`mt-3 rounded-lg px-3 py-2.5 border text-sm ${sheetsSyncResult.ok ? 'bg-emerald-500/10 border-emerald-400/20 text-emerald-300' : 'bg-rose-500/10 border-rose-400/20 text-rose-300'}`}>
                         {sheetsSyncResult.ok ? (
                           <>
-                            <span className="font-medium">✓ Synced</span> — {sheetsSyncResult.created} created · {sheetsSyncResult.updated || 0} updated · {sheetsSyncResult.duplicates} duplicate · {sheetsSyncResult.skipped} skipped
-                            {sheetsSyncResult.skipped > 0 && <span className="text-emerald-400/70"> ({sheetsSyncResult.alreadyImported || 0} already imported, {sheetsSyncResult.blankRows || 0} blank, {sheetsSyncResult.missingFields || 0} missing name/contact)</span>}
+                            <span className="font-medium">✓ Reconciled</span> — {sheetsSyncResult.created} created · {sheetsSyncResult.merged || 0} merged · {sheetsSyncResult.unchanged || 0} unchanged · {sheetsSyncResult.deleted || 0} deleted · {sheetsSyncResult.skipped} skipped
+                            {sheetsSyncResult.conflicts > 0 && <span className="text-amber-400/80"> ({sheetsSyncResult.conflicts} field conflict{sheetsSyncResult.conflicts === 1 ? '' : 's'} resolved by edit time)</span>}
                           </>
                         ) : <><span className="font-medium">✕ Sync failed</span> — {sheetsSyncResult.error}</>}
                       </div>
                     )}
                     {sheetsConfig?.lastSyncAt && (
                       <p className="mt-2 text-xs text-slate-500">Last synced {new Date(sheetsConfig.lastSyncAt).toLocaleString()}
-                        {sheetsConfig.lastSyncCounts && ` — ${sheetsConfig.lastSyncCounts.created} created, ${sheetsConfig.lastSyncCounts.updated || 0} updated, ${sheetsConfig.lastSyncCounts.duplicates} duplicate, ${sheetsConfig.lastSyncCounts.skipped} skipped`}. Also syncs automatically every 30 minutes.
+                        {sheetsConfig.lastSyncCounts && ` — ${sheetsConfig.lastSyncCounts.created} created, ${sheetsConfig.lastSyncCounts.merged || 0} merged, ${sheetsConfig.lastSyncCounts.deleted || 0} deleted, ${sheetsConfig.lastSyncCounts.skipped} skipped`}. Sheet edits arrive instantly once the push script is installed; a full reconcile also runs every 30 minutes as a safety net.
                       </p>
                     )}
 

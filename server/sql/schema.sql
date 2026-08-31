@@ -48,3 +48,12 @@ on conflict (key) do nothing;
 -- changes made directly in the Supabase dashboard (or by another instance).
 alter publication supabase_realtime add table app_state;
 alter publication supabase_realtime add table leads;
+
+-- See migrations/20260831_add_sheet_row_snapshot.sql
+create table if not exists sheet_row_snapshot (
+  lead_id     text primary key,
+  row_number  integer,
+  values      jsonb not null default '{}'::jsonb,
+  updated_at  timestamptz not null default now()
+);
+create index if not exists sheet_row_snapshot_row_number_idx on sheet_row_snapshot (row_number);

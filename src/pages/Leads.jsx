@@ -252,41 +252,6 @@ export default function Leads({ initialSearch = '', initialAssociateId = '' }) {
   const [aiAlertPosition, setAiAlertPosition] = useState(null)
   const [manualFlagOverrides, setManualFlagOverrides] = useState({})
   const tableJumpRef = useRef(null)
-  const [railAtEdge, setRailAtEdge] = useState(false)
-  // Docks the rail to the leads-table-shell's own right edge/height (in
-  // viewport px) so it renders as a sidebar right after the Actions column
-  // instead of a viewport-fixed strip floating over table cells.
-  const [railDock, setRailDock] = useState(null)
-  useEffect(() => {
-    const checkEdge = (el) => {
-      if (!el) return setRailAtEdge(false)
-      const atEdge = el.scrollWidth - el.clientWidth <= 4 || el.scrollLeft + el.clientWidth >= el.scrollWidth - 4
-      setRailAtEdge(atEdge)
-    }
-    const updateDock = () => {
-      const shell = tableJumpRef.current
-      if (!shell) return setRailDock(null)
-      const rect = shell.getBoundingClientRect()
-      setRailDock({ top: rect.top, height: rect.height, left: rect.right })
-    }
-    const onScroll = (event) => {
-      if (event.target?.classList?.contains('lead-table-scroll')) checkEdge(event.target)
-      updateDock()
-    }
-    document.addEventListener('scroll', onScroll, true)
-    window.addEventListener('resize', updateDock)
-    const el = document.querySelector('.lead-table-scroll')
-    checkEdge(el)
-    updateDock()
-    const resizeObserver = new ResizeObserver(() => { checkEdge(el); updateDock() })
-    if (el) resizeObserver.observe(el)
-    if (tableJumpRef.current) resizeObserver.observe(tableJumpRef.current)
-    return () => {
-      document.removeEventListener('scroll', onScroll, true)
-      window.removeEventListener('resize', updateDock)
-      resizeObserver.disconnect()
-    }
-  }, [view])
   const aiAlertRef = useRef(null)
   const remotePrefsHydrated = useRef(false)
   useEffect(() => {
@@ -768,7 +733,6 @@ export default function Leads({ initialSearch = '', initialAssociateId = '' }) {
 
   return (
     <div className="leads-workspace">
-      <LeadsIntegrationRail boot={boot} leads={items} refreshData={refreshData} toast={toast} dockedVisible={railAtEdge} dock={railDock} />
       {/* bulk selection toolbar */}
       {selected.size > 0 && (
         <div className="card p-3 flex flex-wrap items-center gap-3 border-rose-400/25" style={{ animation: 'fadeIn .15s ease' }}>
@@ -968,6 +932,7 @@ export default function Leads({ initialSearch = '', initialAssociateId = '' }) {
             </div>
           )}
           <button className="btn btn-ghost !py-2" onClick={exportCsv}><Download size={14} /> Export</button>
+          <LeadsIntegrationRail boot={boot} leads={items} refreshData={refreshData} toast={toast} />
           {view === 'table' && (
             <>
               <ViewMenu rowHeight={rowHeight} tableZoom={tableZoom} headerPinned={headerPinned} fixedCols={fixedCols} density={density} tableStyle={tableStyle} onTableStyle={setTableStyle} onRowHeight={saveRowHeight} onZoom={saveTableZoom} onPinHeader={toggleHeaderPinned} onFixedCols={toggleFixedCols} onDensity={toggleDensity} columnsComponent={<ColumnManager columns={columns} setColumns={setColumns} />} />
@@ -1875,8 +1840,17 @@ function RowActionsMenu({ lead, openLead, openQuickAction, onMessage, onTemplate
   const show = () => {
     const rect = buttonRef.current?.getBoundingClientRect()
     if (rect) {
-      const menuHeight = 340
-      setPosition({ left: Math.max(12, Math.min(window.innerWidth - 250, rect.right - 232)), top: rect.bottom + menuHeight > window.innerHeight ? Math.max(12, rect.top - menuHeight) : rect.bottom + 6 })
+      // The menu itself scrolls (max-height: 100vh - 24px) when its content
+      // is taller than the viewport, so this only needs to pick whichever
+      // side of the trigger has more room — not guess an exact menu height.
+      const spaceBelow = window.innerHeight - rect.bottom
+      const spaceAbove = rect.top
+      const openUpward = spaceBelow < 260 && spaceAbove > spaceBelow
+      setPosition({
+        left: Math.max(12, Math.min(window.innerWidth - 250, rect.right - 232)),
+        top: openUpward ? 12 : rect.bottom + 6,
+        maxHeight: openUpward ? rect.top - 18 : undefined
+      })
     }
     setOpen(true)
   }

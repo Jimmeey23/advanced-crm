@@ -122,6 +122,52 @@ export function resolveLeadFields(record, integ) {
   return out
 }
 
+// The inverse of resolveLeadFields: for a sheet's header row, which Lead field
+// does each column carry? Needed because the sync now writes back — an app-side
+// stage change has to land in whichever column the stage came out of.
+//
+// Precedence mirrors resolveLeadFields exactly (explicit mapping, then the
+// alias dictionary) so a column never reads as one field and writes as
+// another. Defaults are deliberately absent: a static default has no column,
+// so there is nowhere to write it.
+//
+// Returns { fields, columnByField } where `fields` is every Lead field the
+// sheet has a column for, and columnByField maps field -> column index. A
+// field appearing in two columns keeps the leftmost, matching the read side's
+// first-match-wins behaviour.
+export function resolveHeaderFields(header, integ = {}) {
+  const mapping = integ.fieldMapping || {}
+  const columnByField = {}
+  const claimed = new Set()
+
+  header.forEach((raw, index) => {
+    const name = String(raw || '').trim()
+    if (!name) return
+    const mapped = mapping[name]
+    if (mapped && LEAD_FIELD_ALIASES[mapped] && !(mapped in columnByField)) {
+      columnByField[mapped] = index
+      claimed.add(index)
+    }
+  })
+
+  header.forEach((raw, index) => {
+    if (claimed.has(index)) return
+    const name = normalizeKey(raw)
+    if (!name) return
+    for (const [field, aliases] of Object.entries(NORMALIZED_ALIASES)) {
+      if (field in columnByField) continue
+      if (aliases.includes(name)) { columnByField[field] = index; break }
+    }
+  })
+
+  // firstName/lastName are inputs to fullName, not fields of their own, so
+  // they are never written back to.
+  delete columnByField.firstName
+  delete columnByField.lastName
+
+  return { fields: Object.keys(columnByField), columnByField }
+}
+
 // "Follow Up 1 Date" / "Follow Up Comments (1)" / "Follow Up 2 Date" / ... —
 // a repeating pair of columns per historical follow-up, not a single flat
 // field, so it can't go through the alias dictionary above (that's one

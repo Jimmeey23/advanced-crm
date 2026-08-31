@@ -269,6 +269,66 @@ export async function releaseSyncLock() {
   if (error) console.error('[supabase] release sync lock failed', error.message)
 }
 
+// ---------------------------------------------------------------------------
+// Sheet snapshot: last-known sheet values per lead. Written after every merge,
+// read on startup. Held in its own table rather than inside app_state because
+// on a large sheet this is the biggest thing we store, and folding it into the
+// app blob would mean rewriting megabytes on every settings save.
+// ---------------------------------------------------------------------------
+const SNAPSHOT_TABLE = 'sheet_row_snapshot'
+const SNAPSHOT_PAGE = 1000
+
+function isMissingSnapshotTable(error) {
+  // The migration may not have been applied yet; the sync degrades to a
+  // local-file snapshot rather than failing outright.
+  return error?.code === '42P01' || /relation .*sheet_row_snapshot.* does not exist/i.test(String(error?.message || ''))
+}
+
+export async function loadSheetSnapshot() {
+  const c = getClient()
+  if (!c) return null
+  const rows = {}
+  for (let from = 0; ; from += SNAPSHOT_PAGE) {
+    const { data, error } = await c
+      .from(SNAPSHOT_TABLE)
+      .select('lead_id,row_number,values')
+      .range(from, from + SNAPSHOT_PAGE - 1)
+    if (error) {
+      if (isMissingSnapshotTable(error)) return null
+      throw new Error(`supabase load sheet snapshot: ${error.message}`)
+    }
+    for (const row of data || []) rows[row.lead_id] = { rowNumber: row.row_number, values: row.values || {} }
+    if (!data || data.length < SNAPSHOT_PAGE) break
+  }
+  return rows
+}
+
+export async function saveSheetSnapshot(entries) {
+  const c = getClient()
+  if (!c || !entries?.length) return
+  const now = new Date().toISOString()
+  const rows = entries.map(({ leadId, rowNumber, values }) => ({
+    lead_id: leadId, row_number: rowNumber ?? null, values: values || {}, updated_at: now
+  }))
+  for (let i = 0; i < rows.length; i += UPSERT_BATCH_SIZE) {
+    const { error } = await c.from(SNAPSHOT_TABLE).upsert(rows.slice(i, i + UPSERT_BATCH_SIZE), { onConflict: 'lead_id' })
+    if (error) {
+      if (isMissingSnapshotTable(error)) return
+      throw new Error(`supabase save sheet snapshot: ${error.message}`)
+    }
+  }
+}
+
+export async function deleteSheetSnapshot(leadIds) {
+  const c = getClient()
+  const ids = uniqueIds(leadIds)
+  if (!c || !ids.length) return
+  for (let i = 0; i < ids.length; i += DELETE_BATCH_SIZE) {
+    const { error } = await c.from(SNAPSHOT_TABLE).delete().in('lead_id', ids.slice(i, i + DELETE_BATCH_SIZE))
+    if (error && !isMissingSnapshotTable(error)) throw new Error(`supabase delete sheet snapshot: ${error.message}`)
+  }
+}
+
 function uniqueIds(ids) {
   return [...new Set((ids || []).map(id => String(id || '').trim()).filter(Boolean))]
 }

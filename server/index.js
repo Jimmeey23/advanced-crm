@@ -15,18 +15,22 @@ import * as respondio from './respondio.js'
 import * as respondioInternal from './respondioInternal.js'
 import * as inbox from './inbox.js'
 import * as mailer from './mailer.js'
+import { randomUUID } from 'node:crypto'
 import * as supabase from './supabaseStore.js'
-import { requireAuth, requireAuthWithQueryToken, scopeLocation, blockAgentWrite, adminCodeHandler, isAllowedLocation, allowedLocationIds, isPublicLeadWebhookPath } from './auth.js'
+import { requireAuth, requireAuthWithQueryToken, scopeLocation, blockAgentWrite, adminCodeHandler, isAllowedLocation, allowedLocationIds, isPublicLeadWebhookPath, isPublicSheetHookPath } from './auth.js'
 import { runReminderDigest, startReminderScheduler } from './reminders.js'
 import { parseCsv, autoMap, normalizeStage, normalizeStatus, parseFlexibleDate } from './csv.js'
 import { STATUS_GROUPS, statusGroupOf } from './leadStatus.js'
 import { resolveLeadFields, buildLeadPayloadFromResolved, suggestMappingFromKeys, isValidEmail, isValidPhone, LEAD_FIELD_ALIASES } from './leadFieldMapping.js'
 import * as googleSheets from './googleSheets.js'
+import * as sheetSync from './sheetSync.js'
 import * as zohoPeople from './zohoPeople.js'
 import { findDuplicateAmong, clusterDuplicates } from './duplicateMatch.js'
 import { normalizeFollowUpFields } from './followUps.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
+// Identifies this instance in the shared Supabase sheet-sync lock row.
+const SHEET_SYNC_OWNER = randomUUID()
 
 // Load USER_* secrets from a local .env file if present (never overrides real env).
 try {
@@ -93,7 +97,7 @@ app.use('/api', (req, res, next) => {
   // browser opens with EventSource — it cannot set an Authorization header, so
   // that one route authenticates itself off `?token=` in its own handler
   // below. Nothing else is exempt from the mandatory bearer token.
-  if (req.path === '/runtime' || req.path === '/events' || isPublicLeadWebhookPath(req.originalUrl)) return next()
+  if (req.path === '/runtime' || req.path === '/events' || isPublicLeadWebhookPath(req.originalUrl) || isPublicSheetHookPath(req.originalUrl)) return next()
   requireAuth(db)(req, res, (err) => {
     if (err) return next(err)
     scopeLocation(req, res, next)
@@ -279,8 +283,9 @@ function withStripePayment(lead) {
 function safePatch(lead, body) {
   const allowed = ['fullName', 'phone', 'email', 'stage', 'status', 'associateId', 'locationId',
     'sourceName', 'sourceId', 'remarks', 'classType', 'center', 'channel', 'memberId', 'valueEstimate', 'convertedAt', 'manualFlags', 'statusGroup', 'ai']
+  const touched = []
   for (const key of allowed) {
-    if (key in body) lead[key] = body[key]
+    if (key in body) { lead[key] = body[key]; touched.push(key) }
   }
   if ('sourceName' in body && !('channel' in body)) {
     lead.channel = db.settings.business?.sourceChannelMap?.[lead.sourceName] || lead.channel || 'Other'
@@ -291,6 +296,11 @@ function safePatch(lead, body) {
   }
   if ('fullName' in body) lead.fullName = String(body.fullName || '').trim()
   lead.updatedAt = nowIso()
+  // Single choke point for app-side field edits, so this is the one place the
+  // sheet write-back has to be told about them. Fields the sheet has no column
+  // for are dropped by the queue's column lookup, and edits that arrived FROM
+  // the sheet are muted, so this never echoes.
+  sheetSync.noteAppEdit(lead, [...touched, ...(('stage' in body) ? ['status'] : [])])
   save()
 }
 
@@ -902,6 +912,9 @@ app.post('/api/leads', (req, res) => {
   if (!lead.associateId && settings.enabled) assignLead(db, lead)
   db.leads.push(lead)
   markDirty(lead.id)
+  // A lead that exists in the app but has no row would break the invariant
+  // that the sheet holds every lead, so it gets one appended on the next flush.
+  sheetSync.noteNewLead(lead)
   save()
   log('lead', `Created lead ${lead.fullName}`, lead.id)
   res.status(201).json(enrichLead(lead, db))
@@ -1394,6 +1407,70 @@ function logSheetSync(outcome, detail) {
   save()
 }
 
+// ---------------------------------------------------------------------------
+// Sheet sync plumbing
+// ---------------------------------------------------------------------------
+
+// The Apps Script's credential. Generated on first use rather than at boot so
+// an install that never connects a sheet never grows one.
+function ensureHookSecret() {
+  const cfg = db.settings.googleSheets = db.settings.googleSheets || {}
+  if (!cfg.hookSecret) {
+    cfg.hookSecret = randomUUID().replace(/-/g, '')
+    save()
+  }
+  return cfg.hookSecret
+}
+
+// Hard delete, as specified: the sheet owns row existence, so a deleted row
+// takes its lead with it. Note this is unrecoverable — the lead's follow-ups,
+// remarks and timeline go too, and none of that exists in the sheet.
+function deleteLeadById(id) {
+  const before = db.leads.length
+  db.leads = db.leads.filter(l => l.id !== id)
+  if (db.leads.length === before) return false
+  markDeleted(id)
+  log('lead', `Deleted lead ${id} — its row was removed from the sheet`)
+  return true
+}
+
+sheetSync.configure({
+  db: () => db,
+  createLeadFrom,
+  updateLeadFromPayload,
+  deleteLead: deleteLeadById,
+  markDirty,
+  logSync: logSheetSync,
+  save
+})
+
+// Same two-layer guard the old importer used: an in-process promise so one
+// instance never runs two passes at once, and Supabase's lock row so two
+// instances sharing a project don't either.
+let reconcileInFlight = null
+async function withSheetSyncLock(fn) {
+  if (reconcileInFlight) throw new Error('A sheet sync is already in progress — wait for it to finish.')
+  const gotLock = await supabase.acquireSyncLock(SHEET_SYNC_OWNER)
+  if (!gotLock) throw new Error('A sheet sync is already in progress on another server instance.')
+  reconcileInFlight = (async () => {
+    try { return await fn() } finally { await supabase.releaseSyncLock() }
+  })()
+  try { return await reconcileInFlight } finally { reconcileInFlight = null }
+}
+
+// Structural sheet events arrive one per affected row — pasting fifty rows
+// fires fifty. Debounced into a single pass.
+let reconcileTimer = null
+function scheduleReconcile(reason) {
+  if (reconcileTimer) return
+  reconcileTimer = setTimeout(() => {
+    reconcileTimer = null
+    withSheetSyncLock(() => sheetSync.reconcile())
+      .catch(e => logSheetSync('error', `reconcile after ${reason}: ${e.message}`))
+  }, 15000)
+  reconcileTimer.unref?.()
+}
+
 function sheetsRedirectUri(req) {
   return `${req.protocol}://${req.get('host')}/api/google-sheets/oauth/callback`
 }
@@ -1474,10 +1551,12 @@ app.post('/api/google-sheets/disconnect', async (req, res) => {
   res.json(googleSheets.sanitizedConfig(db))
 })
 
+// Full two-way reconcile. `force: true` ignores the stored snapshot, so the
+// sheet's current values win every field — the recovery path for a snapshot
+// that has drifted or been lost.
 app.post('/api/google-sheets/sync-now', async (req, res) => {
   try {
-    const counts = await googleSheets.runSync(db, { createLeadFrom, updateLeadFromPayload, findDuplicateLead, assignLead, markDirty, logSync: logSheetSync, force: req.body?.force === true })
-    save()
+    const counts = await withSheetSyncLock(() => sheetSync.reconcile({ force: req.body?.force === true }))
     res.json(counts)
   } catch (e) {
     logSheetSync('error', e.message)
@@ -1485,17 +1564,66 @@ app.post('/api/google-sheets/sync-now', async (req, res) => {
   }
 })
 
+// Pushed by the sheet's own Apps Script (see scripts/sheetSyncAppsScript.gs).
+// A cell edit carries the row, so the common case costs no Sheets read at all;
+// structural changes (a row inserted or deleted) say only that something moved
+// and fall through to a debounced reconcile, the one pass that can diff the
+// sheet's row set against the snapshot.
+app.post('/api/google-sheets/hook', async (req, res) => {
+  const secret = String(db.settings.googleSheets?.hookSecret || '')
+  const offered = String(req.get('X-Sheet-Secret') || '')
+  if (!secret || offered !== secret) return res.status(401).json({ error: 'Bad or missing sheet secret' })
+  if (!googleSheets.isConfigured(db)) return res.status(409).json({ error: 'Google Sheets is not configured' })
+
+  db.settings.googleSheets.lastHookAt = nowIso()
+  try {
+    if (req.body?.type === 'ping') return res.json({ ok: true, pong: true })
+    if (req.body?.type && req.body.type !== 'edit') {
+      if (sheetSync.needsReconcile(req.body.type)) scheduleReconcile(req.body.type)
+      return res.json({ ok: true, queued: 'reconcile' })
+    }
+    const { rowNumber, header, values, previous, editedAt } = req.body || {}
+    if (!Array.isArray(header) || !Array.isArray(values) || !rowNumber) {
+      return res.status(400).json({ error: 'Expected { rowNumber, header, values }' })
+    }
+    const result = await sheetSync.applySheetEdit({ rowNumber, header, values, previous, editedAt })
+    res.json({ ok: true, outcome: result.outcome })
+  } catch (e) {
+    logSheetSync('error', `hook: ${e.message}`)
+    res.status(502).json({ error: e.message })
+  }
+})
+
+// The script to paste into the sheet, with this deployment's URL and secret
+// already filled in — the setup step most likely to be got wrong by hand.
+app.get('/api/google-sheets/apps-script', (req, res) => {
+  const secret = ensureHookSecret()
+  const template = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'sheetSyncAppsScript.gs'), 'utf8')
+  const hookUrl = `${req.protocol}://${req.get('host')}/api/google-sheets/hook`
+  res.json({
+    hookUrl,
+    script: template
+      .replace('__HOOK_URL__', hookUrl)
+      .replace('__HOOK_SECRET__', secret)
+      .replace('__SHEET_TAB__', db.settings.googleSheets?.sheetTab || 'Sheet1')
+  })
+})
+
 app.get('/api/google-sheets/logs', (req, res) => {
   res.json((db.sheetSyncLogs || []).slice(0, 50))
 })
 
-// Background poll: once a sheet is fully configured, sync every 30 minutes
-// without blocking anything — failures are logged, never thrown.
+// Safety net behind the webhook rather than the primary path: catches edits
+// made while the app was down, pushes the script dropped, and row deletions
+// (which arrive as a bare "something changed" event). Failures are logged,
+// never thrown.
+// Load the sheet snapshot once at boot: the merge needs a baseline before the
+// first webhook lands, or that edit would be treated as a first sighting.
+sheetSync.loadSnapshot().catch(e => console.warn(`[sheet-sync] snapshot load failed: ${e.message}`))
+
 setInterval(() => {
   if (!db || !googleSheets.isConfigured(db)) return
-  googleSheets.runSync(db, { createLeadFrom, updateLeadFromPayload, findDuplicateLead, assignLead, markDirty, logSync: logSheetSync })
-    .then(() => save())
-    .catch(e => logSheetSync('error', e.message))
+  withSheetSyncLock(() => sheetSync.reconcile()).catch(e => logSheetSync('error', e.message))
 }, 30 * 60 * 1000)
 
 // ---------- Zoho People (shift-aware round robin) ----------

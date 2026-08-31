@@ -13,7 +13,7 @@ const SYNC_OWNER_ID = randomUUID()
 const OAUTH_BASE = 'https://accounts.google.com/o/oauth2/v2/auth'
 const TOKEN_URL = 'https://oauth2.googleapis.com/token'
 const USERINFO_URL = 'https://www.googleapis.com/oauth2/v2/userinfo'
-const SHEETS_BASE = 'https://sheets.googleapis.com/v4/spreadsheets'
+export const SHEETS_BASE = 'https://sheets.googleapis.com/v4/spreadsheets'
 const SCOPES = [
   'https://www.googleapis.com/auth/spreadsheets',
   'https://www.googleapis.com/auth/userinfo.email'
@@ -47,7 +47,12 @@ export function sanitizedConfig(db) {
     fieldMapping: c.fieldMapping || {},
     defaults: c.defaults || {},
     lastSyncAt: c.lastSyncAt || null,
-    lastSyncCounts: c.lastSyncCounts || null
+    lastSyncCounts: c.lastSyncCounts || null,
+    // Presence only — the secret itself is handed out solely by the
+    // apps-script endpoint, which requires an authenticated session.
+    hasHookSecret: Boolean(c.hookSecret),
+    pushInstalled: Boolean(c.lastHookAt),
+    lastHookAt: c.lastHookAt || null
   }
 }
 
@@ -167,7 +172,7 @@ async function getAccessToken(db) {
 const MAX_RETRIES = 5
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms))
 
-async function sheetsFetch(db, url, opts = {}) {
+export async function sheetsFetch(db, url, opts = {}) {
   for (let attempt = 0; ; attempt++) {
     const token = await getAccessToken(db)
     const res = await fetch(url, {
@@ -200,7 +205,7 @@ export async function readSheetRows(db) {
   return { header: values[0], rows: values.slice(1) }
 }
 
-function colLetter(index) {
+export function colLetter(index) {
   let n = index + 1
   let s = ''
   while (n > 0) {
@@ -226,142 +231,7 @@ async function writeStatusColumn(db, statusColIndex, rowUpdates) {
   })
 }
 
-// Runs one sync pass: reads the sheet, skips rows already marked in the
-// status column, resolves the rest through the shared mapping/alias
-// resolver, dedups against existing leads, creates the new ones, and
-// writes the status column back for every row it just processed.
-// `force: true` ignores the status-column check entirely (still dedups
-// against whatever leads currently exist) — for when the sheet's marker
-// column says "already imported" but the app-side leads it created were
-// since deleted, and the intent is a genuine full re-pull.
-// Without this, two runs overlapping (the 30-minute background poll firing
-// mid-way through a manual "Sync now" on a large sheet, or a double click)
-// both read the sheet before either has written its "Imported" markers back
-// — every row still looks unprocessed to both, so both create a lead for
-// it: a full duplicate set of the sheet. A large sheet (tens of thousands of
-// rows) easily takes long enough for this to happen in practice.
-//
-// This in-process flag only stops two overlapping runs *within the same
-// server instance*. When Supabase is configured, multiple server instances
-// can share one project (see db.js's applyRemoteLeadChange), each with its
-// own syncInFlight — so the same overlap can happen across instances, and
-// this flag alone can't see it. acquireSyncLock()/releaseSyncLock() close
-// that gap with a lock row Postgres enforces atomically via a unique
-// constraint (see supabaseStore.js); this flag stays as the fast local
-// short-circuit and the fallback when Supabase isn't configured at all.
-let syncInFlight = false
-
-export async function runSync(db, { createLeadFrom, updateLeadFromPayload, findDuplicateLead, assignLead, markDirty, logSync, force = false }) {
-  if (!isConfigured(db)) throw new Error('Google Sheets is not fully configured yet.')
-  if (syncInFlight) throw new Error('A sync is already in progress — wait for it to finish before starting another.')
-  syncInFlight = true
-  const gotRemoteLock = await supabase.acquireSyncLock(SYNC_OWNER_ID)
-  if (!gotRemoteLock) {
-    syncInFlight = false
-    throw new Error('A sync is already in progress on another server instance — wait for it to finish before starting another.')
-  }
-  try {
-    return await runSyncInner(db, { createLeadFrom, updateLeadFromPayload, findDuplicateLead, assignLead, markDirty, logSync, force })
-  } finally {
-    syncInFlight = false
-    await supabase.releaseSyncLock()
-  }
-}
-
-async function runSyncInner(db, { createLeadFrom, updateLeadFromPayload, findDuplicateLead, assignLead, markDirty, logSync, force = false }) {
-  const c = config(db)
-  const { header, rows } = await readSheetRows(db)
-  if (!header.length) return { created: 0, duplicates: 0, skipped: 0 }
-
-  let statusColIndex = header.findIndex(h => String(h).trim().toLowerCase() === STATUS_HEADER.toLowerCase())
-  const needsStatusHeader = statusColIndex === -1
-  if (needsStatusHeader) statusColIndex = header.length
-
-  if (needsStatusHeader) {
-    const col = colLetter(statusColIndex)
-    await sheetsFetch(db, `${SHEETS_BASE}/${c.sheetId}/values/${c.sheetTab}!${col}1?valueInputOption=RAW`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ values: [[STATUS_HEADER]] })
-    })
-  }
-
-  let created = 0, updated = 0, duplicates = 0, skipped = 0
-  let alreadyImported = 0, blankRows = 0, missingFields = 0
-  let toMarkImported = []
-  // Flushed periodically rather than once at the very end — on a very large
-  // sheet (tens of thousands of rows) a single run can take long enough that
-  // a crash or redeploy mid-run would otherwise leave every already-created
-  // lead's row unmarked, and the next sync would recreate all of them.
-  const FLUSH_EVERY = 250
-  const flush = async () => {
-    if (!toMarkImported.length) return
-    await writeStatusColumn(db, statusColIndex, toMarkImported)
-    toMarkImported = []
-  }
-
-  for (let i = 0; i < rows.length; i++) {
-    const row = rows[i]
-    const sheetRowNumber = i + 2 // +1 for 0-index, +1 for header row
-    const existingStatus = statusColIndex < row.length ? String(row[statusColIndex] || '').trim() : ''
-    // Only treat OUR OWN marker as "already imported" — a "Sync Status"
-    // column that pre-existed in the sheet (common: this app didn't create
-    // it) can already be full of unrelated values, and skipping every row
-    // that merely has *something* in that column was skipping the entire
-    // sheet on the very first sync.
-    const wasImported = !force && existingStatus.startsWith(IMPORTED_MARK)
-
-    const record = {}
-    header.forEach((h, idx) => { if (h) record[String(h).trim()] = row[idx] })
-    if (!Object.values(record).some(v => String(v || '').trim())) { blankRows++; skipped++; continue }
-
-    const resolved = resolveLeadFields(record, c)
-    const name = resolved.fullName ? String(resolved.fullName).trim() : ''
-    const email = resolved.email ? String(resolved.email).trim() : ''
-    const phone = resolved.phone ? String(resolved.phone).trim() : ''
-    // A non-empty email/phone cell isn't necessarily usable — "N/A", a typo,
-    // a stray note — so this checks actual format validity, not just
-    // presence, and rejects the row rather than creating an unreachable lead.
-    if (!name || (!isValidEmail(email) && !isValidPhone(phone))) { missingFields++; skipped++; continue }
-
-    const dup = findDuplicateLead(email, phone, name)
-    if (dup) {
-      // A row synced before can still change in the sheet afterwards (stage
-      // moved, notes added, a purchase logged) — re-applying it here keeps
-      // the existing lead current instead of the sheet only ever being able
-      // to create leads once and never touch them again.
-      if (updateLeadFromPayload) {
-        const payload = buildLeadPayloadFromResolved(resolved, db, 'Google Sheets', record)
-        if (updateLeadFromPayload(dup, payload)) { updated++; markDirty(dup.id) }
-      }
-      duplicates++
-      if (wasImported) { alreadyImported++ } else { toMarkImported.push({ sheetRowNumber }) }
-    } else if (wasImported) {
-      // Marked imported previously but no matching lead exists anymore
-      // (deleted since) — leave it alone unless this is an explicit force
-      // re-pull, which already ignores the marker entirely.
-      alreadyImported++
-      skipped++
-    } else {
-      // Google Sheets leads keep whatever owner the sheet's own associate
-      // column resolved to — including unassigned. Round-robin must never
-      // override that; it's for leads created without an explicit owner
-      // from a source that doesn't carry one (e.g. the Add Lead form).
-      const lead = createLeadFrom(buildLeadPayloadFromResolved(resolved, db, 'Google Sheets', record))
-      db.leads.push(lead)
-      markDirty(lead.id)
-      created++
-      toMarkImported.push({ sheetRowNumber })
-    }
-
-    if (toMarkImported.length >= FLUSH_EVERY) await flush()
-  }
-
-  await flush()
-
-  const counts = { created, updated, duplicates, skipped, alreadyImported, blankRows, missingFields }
-  db.settings.googleSheets.lastSyncAt = nowIso()
-  db.settings.googleSheets.lastSyncCounts = counts
-  logSync('synced', `${created} created, ${updated} updated, ${duplicates} duplicate, ${skipped} skipped (${alreadyImported} already imported, ${blankRows} blank, ${missingFields} missing name/contact)`)
-  return counts
-}
+// The one-way importer that used to live here (runSync/runSyncInner) is gone.
+// The sheet is now the source of truth rather than an inbox, and reconciling
+// two-way is a different algorithm — see sheetSync.js. Keeping both would have
+// meant two code paths writing the same rows to different rules.

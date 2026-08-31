@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import {
   LayoutDashboard, KanbanSquare, Users, UploadCloud, Settings, Search,
-  Plus, Zap, Link2, ShieldCheck, Sun, Moon, BarChart3, ChevronsLeft, ChevronsRight,
+  Plus, Sun, Moon, BarChart3,
   CalendarDays, CalendarRange, Activity, Inbox as InboxIcon, CalendarClock, LogOut, Table2, BadgePercent, Package
 } from 'lucide-react'
 import { AppProvider, Toasts, useApp } from './store.jsx'
@@ -62,97 +62,60 @@ const NAV_GROUPS = [
 
 const NAV = NAV_GROUPS.flatMap(g => g.items)
 
+// Athena-style icon rail: one fixed 88px column, every destination an equal
+// 48px tile with a short uppercase label under the glyph. Flat list — at rail
+// width group headers cannot be set legibly, so the icons carry wayfinding.
 function Sidebar() {
-  const { view, navigate, boot, alerts, sidebarCollapsed, toggleSidebar, role } = useApp()
-  const momenceOn = boot?.integrations?.momence
-  const rrEnabled = boot?.settings?.roundRobin?.enabled
+  const { view, navigate, boot, alerts, role } = useApp()
+  const [railOpen, setRailOpen] = useState(false)
   const highCount = alerts.filter(a => a.level === 'high').length
+  const items = NAV.filter(item => role === 'admin' || item.id !== 'import')
+
+  useEffect(() => {
+    const toggle = () => setRailOpen(o => !o)
+    window.addEventListener('p57:toggle-rail', toggle)
+    return () => window.removeEventListener('p57:toggle-rail', toggle)
+  }, [])
 
   return (
-    <aside className={`${sidebarCollapsed ? 'w-[72px]' : 'w-[248px]'} shrink-0 h-full flex flex-col app-sidebar transition-[width] duration-200`}>
-      <div className={`px-5 pt-6 pb-5 flex items-center gap-3 ${sidebarCollapsed ? '!px-0 justify-center' : ''}`}>
-        <button type="button" onClick={() => navigate('dashboard')} className="rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-400" aria-label="Go to dashboard" title="Home">
-          <Logo size={40} />
+    <aside className={`${railOpen ? 'fixed inset-y-0 left-0 z-40' : 'hidden'} app-sidebar shrink-0 flex-col lg:flex`}>
+      <div className="app-rail-head">
+        <button
+          type="button"
+          onClick={() => navigate('dashboard')}
+          title={boot?.settings?.org?.name || 'Home'}
+          aria-label="Go to dashboard"
+          className="app-rail-logo"
+        >
+          <Logo size={36} />
         </button>
-        {!sidebarCollapsed && (
-          <div className="min-w-0">
-            <div className="font-display font-bold text-white leading-tight text-md truncate">{boot?.settings?.org?.name || 'Lead Studio'}</div>
-            <div className="text-xs text-slate-400 -mt-0.5 tracking-wide truncate">{boot?.settings?.org?.brand || 'PHYSIQUE 57'}</div>
-          </div>
-        )}
       </div>
-
-      <nav className="app-nav flex-1 px-3 overflow-y-auto scrollbar-thin">
-        {NAV_GROUPS.map(group => {
-          const groupItems = group.items.filter(item => role === 'admin' || item.id !== 'import')
-          if (!groupItems.length) return null
+      <nav className="app-rail scrollbar-thin">
+        {items.map(item => {
+          const Icon = item.icon
           return (
-            <div className="app-nav-group" key={group.label}>
-              {!sidebarCollapsed && <div className="app-nav-group-label">{group.label}</div>}
-              {groupItems.map(item => {
-                const Icon = item.icon
-                const active = view === item.id
-                return (
-                  <button
-                    key={item.id}
-                    onClick={() => navigate(item.id)}
-                    title={sidebarCollapsed ? item.label : undefined}
-                    className={`app-nav-item ${sidebarCollapsed ? 'is-collapsed' : ''} ${active ? 'is-active' : ''}`}
-                  >
-                    <Icon size={16} />
-                    {!sidebarCollapsed && <span className="flex-1 text-left">{item.label}</span>}
-                    {!sidebarCollapsed && item.id === 'dashboard' && highCount > 0 && (
-                      <span className="app-nav-count">{highCount}</span>
-                    )}
-                  </button>
-                )
-              })}
-            </div>
+            <button
+              key={item.id}
+              title={item.label}
+              data-active={view === item.id}
+              onClick={() => { navigate(item.id); setRailOpen(false) }}
+              className="rail-btn"
+            >
+              <Icon size={16} />
+              <span>{railLabel(item.label)}</span>
+              {item.id === 'dashboard' && highCount > 0 && <i className="rail-btn-dot" />}
+            </button>
           )
         })}
       </nav>
-
-      {!sidebarCollapsed && (
-        <div className="px-4 pb-5 space-y-2.5">
-          <button
-            type="button"
-            onClick={() => navigate('settings', { tab: 'alerts', section: 'settings-round-robin' })}
-            title="Open Round-robin settings"
-            className="card !rounded-xl p-3 w-full text-left hover:bg-white/5 transition-colors"
-          >
-            <div className="flex items-center gap-2 text-xs font-semibold text-slate-300 mb-1.5">
-              <Zap size={13} className={rrEnabled ? 'text-amber-400' : 'text-slate-500'} />
-              Round-robin assignment
-            </div>
-            <div className="flex items-center gap-2">
-              <span className={`w-1.5 h-1.5 rounded-full ${rrEnabled ? 'bg-emerald-400' : 'bg-slate-500'}`} />
-              <span className="text-xs text-slate-400">{rrEnabled ? 'Auto-assigning new leads' : 'Manual assignment'}</span>
-            </div>
-          </button>
-          <button
-            type="button"
-            onClick={() => navigate('momence-schedule')}
-            title="Open Momence class schedule"
-            className="card !rounded-xl p-3 flex items-center gap-3 w-full text-left hover:bg-white/5 transition-colors"
-          >
-            {momenceOn ? <Link2 size={15} className="text-emerald-400" /> : <ShieldCheck size={15} className="text-slate-500" />}
-            <div>
-              <div className="text-xs font-semibold text-slate-300">{momenceOn ? 'Momence connected' : 'Momence not linked'}</div>
-              <div className="text-xs text-slate-500">Sales & class history sync</div>
-            </div>
-          </button>
-        </div>
-      )}
-
-      <button
-        className="mx-3 mb-3 flex items-center justify-center gap-2 py-2 rounded-xl text-slate-400 hover:text-white hover:bg-white/5 border border-white/8 text-xs font-medium transition-colors"
-        onClick={toggleSidebar}
-        title={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-      >
-        {sidebarCollapsed ? <ChevronsRight size={15} /> : <><ChevronsLeft size={15} /> Collapse</>}
-      </button>
     </aside>
   )
+}
+
+// Rail tiles fit roughly ten characters, so the label is the first meaningful
+// word of the destination — the same trim Athena applies to "Multi-location".
+function railLabel(label) {
+  return label.split(/[\s-]/)[0]
 }
 
 function Topbar({ onAdd }) {
@@ -175,6 +138,15 @@ function Topbar({ onAdd }) {
 
   return (
     <header className="relative z-30 h-[74px] shrink-0 flex items-center gap-4 px-6 app-topbar">
+      <button
+        type="button"
+        className="w-9 h-9 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center text-slate-300 lg:hidden"
+        onClick={() => window.dispatchEvent(new CustomEvent('p57:toggle-rail'))}
+        title="Show navigation"
+      >
+        <LayoutDashboard size={16} />
+      </button>
+
       <div className="app-page-title flex-1" key={view}>
         <span className="app-page-title-icon"><Activity size={15} /></span>
         <div>
@@ -227,6 +199,21 @@ function Topbar({ onAdd }) {
       </button>
     </header>
   )
+}
+
+// Three-state tone vocabulary: green when the number is the good direction,
+// red when it is the bad one, blue for everything neutral. Amber is
+// deliberately absent — with values scrolling past, two signal colours plus a
+// neutral read faster than four.
+function metricTone(label, value) {
+  const text = String(value ?? '')
+  const key = label.toLowerCase()
+  const num = Number(text.replace(/[^\d.-]/g, ''))
+  if (/^-/.test(text.trim())) return 'bad'
+  if (/^\+/.test(text.trim())) return 'good'
+  if (/unassigned|priority|high|flag|overdue|stalled|lost/.test(key)) return num > 0 ? 'bad' : 'good'
+  if (/conversion|rate|growth|won|converted|completed|revenue|hot/.test(key)) return 'good'
+  return 'plain'
 }
 
 function MarqueeBanner() {
@@ -343,10 +330,10 @@ function MarqueeBanner() {
     <div className="app-marquee" aria-label={`Live metrics for ${view}`} key={view}>
       <div className="app-marquee-track">
         <div className="app-marquee-group">
-          {items.map(item => <span key={item.label}><small>{item.label}</small><strong>{item.value}</strong></span>)}
+          {items.map(item => <span key={item.label} data-tone={metricTone(item.label, item.value)}><small>{item.label}</small><strong>{item.value}</strong></span>)}
         </div>
         <div className="app-marquee-group" aria-hidden="true">
-          {items.map(item => <span key={item.label}><small>{item.label}</small><strong>{item.value}</strong></span>)}
+          {items.map(item => <span key={item.label} data-tone={metricTone(item.label, item.value)}><small>{item.label}</small><strong>{item.value}</strong></span>)}
         </div>
       </div>
     </div>

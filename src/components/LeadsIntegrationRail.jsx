@@ -1,6 +1,6 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { BadgePercent, BrainCircuit, CalendarClock, CheckCircle2, Cloud, CreditCard, Database, FileSpreadsheet, Mail, MessageCircle, Package, RefreshCw, Send, UserRoundCheck, Webhook, X } from 'lucide-react'
+import { BadgePercent, BrainCircuit, CalendarClock, CheckCircle2, ChevronDown, Cloud, CreditCard, Database, FileSpreadsheet, Mail, MessageCircle, Package, RefreshCw, Send, UserRoundCheck, Webhook, X } from 'lucide-react'
 import { api } from '../api.js'
 import { Spinner } from '../ui.jsx'
 import MomenceSchedule from '../pages/MomenceSchedule.jsx'
@@ -21,9 +21,15 @@ function MomenceHub({ setTool }) {
   return <div className="leads-integration-hub">{tools.map(tool => { const Icon = tool.icon; return <button key={tool.id} onClick={() => setTool(tool.id)}><span><Icon size={17} /></span><div><b>{tool.label}</b><small>{tool.detail}</small></div></button> })}</div>
 }
 
-export default function LeadsIntegrationRail({ boot, leads, refreshData, toast, dockedVisible, dock }) {
+// Apps live as tabs inside a toolbar dropdown (like the View menu) rather
+// than a floating rail — the rail used to sit fixed over the table and had
+// no correct way to dock beside an arbitrary-width, horizontally-scrolling
+// table without either covering columns or drifting off-screen.
+export default function LeadsIntegrationRail({ boot, leads, refreshData, toast }) {
+  const [open, setOpen] = useState(false)
   const [tool, setTool] = useState('')
   const [busy, setBusy] = useState('')
+  const menuRef = useRef(null)
   const integrations = boot?.integrations || {}
   const active = useMemo(() => [
     integrations.momence && { id: 'momence', label: 'Momence', icon: CalendarClock },
@@ -36,6 +42,13 @@ export default function LeadsIntegrationRail({ boot, leads, refreshData, toast, 
     boot?.webhookIntegrations?.length > 0 && { id: 'webhooks', label: 'Lead webhooks', icon: Webhook },
     integrations.supabase && { id: 'supabase', label: 'Supabase', icon: Database }
   ].filter(Boolean), [integrations, boot?.webhookIntegrations?.length])
+
+  useEffect(() => {
+    if (!open) return
+    const onClick = e => { if (!menuRef.current?.contains(e.target)) setOpen(false) }
+    document.addEventListener('mousedown', onClick)
+    return () => document.removeEventListener('mousedown', onClick)
+  }, [open])
 
   useEffect(() => {
     if (!tool) return
@@ -53,15 +66,19 @@ export default function LeadsIntegrationRail({ boot, leads, refreshData, toast, 
   if (!active.length) return null
   const panelTitle = { momence: 'Momence', schedule: 'Momence class schedule', memberships: 'Memberships & packages', discounts: 'Discount codes', respondio: 'Respond.io inbox', stripe: 'Stripe payments', gpt: 'AI lead intelligence', mailtrap: 'Mailtrap email', sheets: 'Google Sheets', zoho: 'Zoho People', webhooks: 'Lead webhooks', supabase: 'Supabase sync' }[tool]
 
+  const openTool = id => { setTool(id); setOpen(false) }
+
   return <>
-    <aside
-      className={`leads-integration-rail${dockedVisible || tool ? ' is-docked' : ''}`}
-      aria-label="Active integrations"
-      style={dock ? { top: dock.top, height: dock.height, left: dock.left } : undefined}
-    >
-      <span className="leads-integration-rail-label">Apps</span>
-      {active.map(item => { const Icon = item.icon; const selected = tool === item.id || (item.id === 'momence' && ['schedule', 'memberships', 'discounts'].includes(tool)); return <button key={item.id} className={selected ? 'is-active' : ''} onClick={() => setTool(current => current === item.id ? '' : item.id)} aria-label={item.label} title={item.label} aria-pressed={selected}><Icon size={17} /><span className="integration-live-dot" /></button> })}
-    </aside>
+    <div className="leads-integration-menu" ref={menuRef}>
+      <button type="button" className={`btn btn-ghost !py-2 ${open ? 'btn-soft' : ''}`} onClick={() => setOpen(o => !o)} aria-expanded={open}>
+        <Webhook size={14} /> Apps <ChevronDown size={13} />
+      </button>
+      {open && (
+        <div className="leads-integration-menu-panel" role="menu">
+          {active.map(item => { const Icon = item.icon; return <button key={item.id} role="menuitem" onClick={() => openTool(item.id)}><Icon size={15} /> {item.label}<span className="integration-live-dot" /></button> })}
+        </div>
+      )}
+    </div>
 
     {tool && createPortal(<div className="leads-integration-overlay" data-overlay-root="true">
       <button className="leads-integration-scrim" onClick={() => setTool('')} aria-label="Close integration panel" />

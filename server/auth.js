@@ -17,6 +17,13 @@ export function isPublicLeadWebhookPath(originalUrl) {
   return /^\/api\/webhooks\/leads\/[^/]+\/?$/.test(pathname)
 }
 
+// The sheet's Apps Script has no Supabase session — it authenticates with the
+// shared secret in the X-Sheet-Secret header, checked by the route itself.
+export function isPublicSheetHookPath(originalUrl) {
+  const pathname = String(originalUrl || '').split('?')[0]
+  return /^\/api\/google-sheets\/hook\/?$/.test(pathname)
+}
+
 function getServiceClient() {
   if (serviceClient) return serviceClient
   const url = (process.env.USER_SUPABASE_URL || '').trim()
