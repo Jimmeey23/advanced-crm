@@ -16,8 +16,11 @@
  *                   CRM answers it with a full reconcile, the only pass that
  *                   can work out WHICH row disappeared
  *
- * The CRM writes back to this sheet too (the Sync Status column, and any cell
- * changed in the app). Those writes do not fire onEdit, so they cannot loop.
+ * SHEET_TAB must be the SOURCE tab — the one the upstream export rebuilds. The
+ * CRM never writes to that tab; app-side changes go to the separate CRM tab
+ * configured in Settings, and edits there are ignored by this script, so
+ * nothing can loop. A wholesale rebuild of the source tab arrives as an
+ * onChange event, which the CRM answers with a full reconcile.
  */
 
 var HOOK_URL = '__HOOK_URL__'

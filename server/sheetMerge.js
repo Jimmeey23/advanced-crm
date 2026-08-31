@@ -40,13 +40,19 @@ function later(a, b) {
 //
 // Returns the two changesets to apply plus the conflicts, so callers can log
 // what was overruled rather than have it happen invisibly.
+// `blankMeansMissing` suits a tab rebuilt wholesale by an upstream export: an
+// empty cell there means "upstream did not supply this", not "a person cleared
+// it", so it must never wipe what the CRM has gathered. On a hand-maintained
+// tab the opposite is true — clearing a cell IS an edit — so the flag is off by
+// default.
 export function mergeRow({
   fields,
   sheet = {},
   snapshot = null,
   lead = {},
   fieldUpdatedAt = {},
-  sheetEditedAt = null
+  sheetEditedAt = null,
+  blankMeansMissing = false
 } = {}) {
   const toLead = {}
   const toSheet = {}
@@ -65,6 +71,13 @@ export function mergeRow({
     if (!snapshot) {
       if (sheetValue) toLead[field] = sheet[field]
       else if (leadValue) toSheet[field] = lead[field]
+      continue
+    }
+
+    // A blank cell on an export-rebuilt tab carries no information at all, so
+    // it can neither win a field nor count as a change.
+    if (blankMeansMissing && !sheetValue) {
+      if (leadValue) toSheet[field] = lead[field]
       continue
     }
 

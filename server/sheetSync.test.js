@@ -15,7 +15,7 @@ function makeDb() {
     associates: [],
     locations: [{ id: 'loc_1', name: 'Kwality House' }],
     sources: ['Google Sheets'],
-    settings: { googleSheets: { sheetId: 'sheet1', sheetTab: 'Leads', fieldMapping: {}, defaults: {} }, business: {} }
+    settings: { googleSheets: { sheetId: 'sheet1', sheetTab: 'Leads', mirrorTab: 'CRM', fieldMapping: {}, defaults: {} }, business: {} }
   }
 }
 
@@ -54,30 +54,36 @@ function makeCtx(db, writes) {
 }
 
 // The fake sheet: an array of rows, mutated by the writes the engine sends.
-function install(db, rows) {
-  const writes = { log: [], cells: [], appended: [] }
-  sheetSync.__setTransport({
-    readSheetRows: async () => ({ header: HEADER, rows }),
-    batchUpdate: async (data) => {
+// Two tabs, as in production: `rows` is the upstream export (read-only) and
+// `mirror` is the CRM-owned tab (write-only).
+function mirrorTransport(sourceHeader, rows, mirror, writes) {
+  return {
+    readSheetRows: async () => ({ header: sourceHeader, rows }),
+    readMirrorRows: async () => ({ header: mirror.header, rows: mirror.rows }),
+    writeMirror: async (data) => {
       for (const { range, values } of data) {
-        const m = /!([A-Z]+)(\d+)/.exec(range)
-        const col = m[1].charCodeAt(0) - 65
-        const row = Number(m[2]) - 2
-        if (!rows[row]) rows[row] = new Array(HEADER.length).fill('')
-        rows[row][col] = values[0][0]
-        writes.cells.push({ row: row + 2, col, value: values[0][0] })
+        const m = /!A(\d+)/.exec(range)
+        const row = Number(m[1])
+        if (row === 1) { mirror.header = values[0]; continue }
+        mirror.rows[row - 2] = values[0]
+        writes.mirrorWrites.push({ row, values: values[0] })
       }
     },
-    append: async (values) => {
-      const first = rows.length + 2
-      values.forEach(v => rows.push(v))
-      writes.appended.push(...values)
-      return { updates: { updatedRange: `Leads!A${first}:F${rows.length + 1}` } }
-    },
-    putHeader: async () => {}
-  })
+    appendMirror: async (values) => {
+      values.forEach(v => mirror.rows.push(v))
+      writes.mirrorAppends.push(...values)
+      return {}
+    }
+  }
+}
+
+function install(db, rows) {
+  const writes = { log: [], cells: [], mirrorWrites: [], mirrorAppends: [] }
+  const mirror = { header: [], rows: [] }
+  sheetSync.__setTransport(mirrorTransport(HEADER, rows, mirror, writes))
   sheetSync.__reset()
   sheetSync.configure(makeCtx(db, writes))
+  writes.mirror = mirror
   return writes
 }
 
@@ -88,15 +94,18 @@ function row({ name = '', email = '', phone = '', stage = '', value = '', status
   return r
 }
 
-test('a new sheet row becomes a lead and the row is stamped with its id', async () => {
+test('a new sheet row becomes a lead, and the export tab is never written to', async () => {
   const db = makeDb()
   const rows = [row({ name: 'Asha Rao', email: 'asha@example.com', phone: '9820011111', stage: 'New Enquiry' })]
   install(db, rows)
+  const before = JSON.stringify(rows)
 
   const counts = await sheetSync.reconcile()
   assert.equal(counts.created, 1)
   assert.equal(db.leads.length, 1)
-  assert.match(rows[0][COL.status], new RegExp(`L-${db.leads[0].id}`))
+  // Not even an identity marker: the export rebuilds this tab, so writing to it
+  // is pointless and risks corrupting a row someone else owns.
+  assert.equal(JSON.stringify(rows), before)
 })
 
 test('a second pass over an unchanged sheet changes nothing', async () => {
@@ -124,7 +133,7 @@ test('a sheet edit reaches the app without a full read', async () => {
   assert.equal(db.leads[0].stage, 'Trial Booked')
 })
 
-test('an app edit is written back into the right cell', async () => {
+test('an app edit lands in the CRM tab and leaves the export tab untouched', async () => {
   const db = makeDb()
   const rows = [row({ name: 'Asha Rao', email: 'asha@example.com', phone: '9820011111', stage: 'New Enquiry' })]
   const writes = install(db, rows)
@@ -134,8 +143,11 @@ test('an app edit is written back into the right cell', async () => {
   sheetSync.noteAppEdit(db.leads[0], ['stage'])
   await sheetSync.flush()
 
-  assert.equal(rows[0][COL.stage], 'Membership Sold')
-  assert.ok(writes.cells.some(c => c.col === COL.stage && c.value === 'Membership Sold'))
+  assert.equal(rows[0][COL.stage], 'New Enquiry', 'export tab unchanged')
+  const mirrored = writes.mirror.rows.find(r => r[0] === db.leads[0].id)
+  assert.ok(mirrored, 'lead has a row in the CRM tab')
+  assert.equal(mirrored[4], 'Membership Sold')
+  assert.deepEqual(writes.mirror.header[0], 'Lead ID')
 })
 
 test('an inbound edit does not echo back out to the sheet', async () => {
@@ -169,7 +181,7 @@ test('editing the email cell re-keys the lead instead of creating a duplicate', 
 test('conflicting edits resolve by timestamp, per field', async () => {
   const db = makeDb()
   const rows = [row({ name: 'Asha Rao', email: 'asha@example.com', phone: '9820011111', stage: 'New Enquiry' })]
-  install(db, rows)
+  const writes = install(db, rows)
   await sheetSync.reconcile()
 
   // App moves the stage now; the sheet's competing edit is an hour older.
@@ -181,10 +193,15 @@ test('conflicting edits resolve by timestamp, per field', async () => {
   })
 
   assert.equal(db.leads[0].stage, 'Lost')
-  assert.equal(rows[0][COL.stage], 'Lost')
+  // The app won the field, and its value goes to the CRM tab — the export tab
+  // keeps whatever upstream put there.
+  await sheetSync.flush()
+  const mirrored = writes.mirror.rows.find(r => r[0] === db.leads[0].id)
+  assert.equal(mirrored[4], 'Lost')
+  assert.equal(rows[0][COL.stage], 'Trial Booked')
 })
 
-test('a lead created in the app gets a row appended', async () => {
+test('a lead created in the app gets a row in the CRM tab, not the export tab', async () => {
   const db = makeDb()
   const rows = []
   const writes = install(db, rows)
@@ -195,10 +212,10 @@ test('a lead created in the app gets a row appended', async () => {
   sheetSync.noteNewLead(lead)
   await sheetSync.flush()
 
-  assert.equal(writes.appended.length, 1)
-  assert.equal(rows.length, 1)
-  assert.equal(rows[0][COL.name], 'New Person')
-  assert.match(rows[0][COL.status], /L-lead_app/)
+  assert.equal(rows.length, 0, 'export tab untouched')
+  assert.equal(writes.mirrorAppends.length, 1)
+  assert.equal(writes.mirrorAppends[0][0], 'lead_app')
+  assert.equal(writes.mirrorAppends[0][1], 'New Person')
 })
 
 test('a row deleted from the sheet hard-deletes its lead', async () => {
@@ -250,8 +267,6 @@ test('a row whose status cell and contacts are all overwritten stays bound to it
   assert.equal(db.leads.length, 1)
   assert.equal(db.leads[0].id, id)
   assert.equal(db.leads[0].email, 'someone.else@example.com')
-  // ...and it is re-stamped, so the next pass has the strong key back.
-  assert.match(rows[0][COL.status], new RegExp(`L-${id}`))
 })
 
 test('force ignores the snapshot so the sheet wins every field', async () => {
@@ -275,4 +290,146 @@ test('rows with no name or no usable contact are skipped, not created', async ()
   const counts = await sheetSync.reconcile()
   assert.equal(counts.created, 0)
   assert.equal(counts.skipped, 2)
+})
+
+// ---------------------------------------------------------------------------
+// The sheet this runs against is cleared and repopulated by an upstream export
+// several times a day. These are the cases that behaviour creates.
+// ---------------------------------------------------------------------------
+
+const OWNER_HEADER = ['Name', 'Email', 'Phone', 'Stage', 'Associate', 'Sync Status']
+const OCOL = { name: 0, email: 1, phone: 2, stage: 3, associate: 4, status: 5 }
+
+function ownerRow({ name = '', email = '', phone = '', stage = '', associate = '', status = '' }) {
+  const r = new Array(OWNER_HEADER.length).fill('')
+  r[OCOL.name] = name; r[OCOL.email] = email; r[OCOL.phone] = phone
+  r[OCOL.stage] = stage; r[OCOL.associate] = associate; r[OCOL.status] = status
+  return r
+}
+
+// A db whose leads carry associateId, plus a real associates list, so the
+// owner projection has something to resolve against.
+function ownerDb() {
+  const db = makeDb()
+  db.associates = [
+    { id: 'asc_1', name: 'Imran Shaikh', locationId: 'loc_1' },
+    { id: 'asc_2', name: 'Neha Kapoor', locationId: 'loc_1' }
+  ]
+  return db
+}
+
+function installOwner(db, rows) {
+  const writes = { log: [], cells: [], mirrorWrites: [], mirrorAppends: [] }
+  const mirror = { header: [], rows: [] }
+  sheetSync.__setTransport(mirrorTransport(OWNER_HEADER, rows, mirror, writes))
+  sheetSync.__reset()
+  const ctx = makeCtx(db, writes)
+  // Resolve the owner name the way index.js's real createLeadFrom does.
+  const baseCreate = ctx.createLeadFrom
+  ctx.createLeadFrom = (payload) => {
+    const lead = baseCreate(payload)
+    lead.associateId = payload.associateId || null
+    return lead
+  }
+  const baseUpdate = ctx.updateLeadFromPayload
+  ctx.updateLeadFromPayload = (lead, payload) => {
+    const changed = baseUpdate(lead, payload)
+    if (payload.associateId && payload.associateId !== lead.associateId) { lead.associateId = payload.associateId; return true }
+    return changed
+  }
+  sheetSync.configure(ctx)
+  writes.mirror = mirror
+  return writes
+}
+
+// Column positions in the CRM-owned tab.
+const MCOL = { id: 0, name: 1, email: 2, phone: 3, stage: 4, status: 5, owner: 6 }
+
+test("the sheet's associate column sets the owner, and is not blanked on later passes", async () => {
+  const db = ownerDb()
+  const rows = [ownerRow({ name: 'Asha Rao', email: 'asha@example.com', phone: '9820011111', associate: 'Imran Shaikh' })]
+  const writes = installOwner(db, rows)
+
+  await sheetSync.reconcile()
+  assert.equal(db.leads[0].associateId, 'asc_1')
+
+  // The bug: on the second pass `lead.associateName` read as empty, so the
+  // merge decided the app had cleared the owner and wrote a blank back.
+  writes.mirrorWrites.length = 0
+  await sheetSync.reconcile()
+  assert.equal(rows[0][OCOL.associate], 'Imran Shaikh')
+  assert.equal(db.leads[0].associateId, 'asc_1')
+  // The old bug produced a blank write for this column on every pass; with the
+  // projection in place the field is simply not in the changeset at all.
+  assert.equal(writes.mirrorWrites.length, 0)
+})
+
+test('reassigning the owner in the app writes the associate NAME to the CRM tab', async () => {
+  const db = ownerDb()
+  const rows = [ownerRow({ name: 'Asha Rao', email: 'asha@example.com', phone: '9820011111', associate: 'Imran Shaikh' })]
+  const writes = installOwner(db, rows)
+  await sheetSync.reconcile()
+
+  db.leads[0].associateId = 'asc_2'
+  sheetSync.noteAppEdit(db.leads[0], ['associateId'])
+  await sheetSync.flush()
+
+  const mirrored = writes.mirror.rows.find(r => r[MCOL.id] === db.leads[0].id)
+  assert.equal(mirrored[MCOL.owner], 'Neha Kapoor')
+  assert.equal(rows[0][OCOL.associate], 'Imran Shaikh', 'export tab untouched')
+})
+
+test('changing the owner in the sheet moves the lead to that associate', async () => {
+  const db = ownerDb()
+  const rows = [ownerRow({ name: 'Asha Rao', email: 'asha@example.com', phone: '9820011111', associate: 'Imran Shaikh' })]
+  installOwner(db, rows)
+  await sheetSync.reconcile()
+
+  rows[0][OCOL.associate] = 'Neha Kapoor'
+  await sheetSync.applySheetEdit({ rowNumber: 2, header: OWNER_HEADER, values: rows[0], editedAt: new Date().toISOString() })
+  assert.equal(db.leads[0].associateId, 'asc_2')
+})
+
+test('a cleared-and-repopulated sheet re-binds rows by contact, not by position', async () => {
+  const db = ownerDb()
+  const rows = [
+    ownerRow({ name: 'Asha Rao', email: 'asha@example.com', phone: '9820011111', associate: 'Imran Shaikh' }),
+    ownerRow({ name: 'Biju Nair', email: 'biju@example.com', phone: '9820022222', associate: 'Neha Kapoor' })
+  ]
+  installOwner(db, rows)
+  await sheetSync.reconcile()
+  const ashaId = db.leads.find(l => l.fullName === 'Asha Rao').id
+  const bijuId = db.leads.find(l => l.fullName === 'Biju Nair').id
+
+  // The upstream export rewrites the tab: same people, reversed order, and the
+  // Sync Status column is gone with everything else.
+  rows.length = 0
+  rows.push(ownerRow({ name: 'Biju Nair', email: 'biju@example.com', phone: '9820022222', associate: 'Neha Kapoor' }))
+  rows.push(ownerRow({ name: 'Asha Rao', email: 'asha@example.com', phone: '9820011111', associate: 'Imran Shaikh' }))
+
+  const counts = await sheetSync.reconcile()
+  assert.equal(counts.created, 0, 'no duplicates from the repopulate')
+  assert.equal(db.leads.length, 2)
+  assert.equal(db.leads.find(l => l.id === ashaId).fullName, 'Asha Rao')
+  assert.equal(db.leads.find(l => l.id === bijuId).fullName, 'Biju Nair')
+  assert.equal(db.leads.find(l => l.id === ashaId).associateId, 'asc_1')
+  assert.equal(db.leads.find(l => l.id === bijuId).associateId, 'asc_2')
+})
+
+test('a read that catches the sheet mid-refresh deletes nothing', async () => {
+  const db = ownerDb()
+  const rows = []
+  for (let i = 0; i < 10; i++) {
+    rows.push(ownerRow({ name: `Person ${i}`, email: `p${i}@example.com`, phone: `98200000${i}${i}`, associate: 'Imran Shaikh' }))
+  }
+  const writes = installOwner(db, rows)
+  await sheetSync.reconcile()
+  assert.equal(db.leads.length, 10)
+
+  rows.length = 0 // the export has cleared the tab and not yet written it back
+  const counts = await sheetSync.reconcile()
+
+  assert.equal(counts.deleted, 0)
+  assert.equal(db.leads.length, 10)
+  assert.ok(writes.log.some(line => /mid-refresh read, no leads deleted/.test(line)))
 })

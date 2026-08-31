@@ -128,3 +128,27 @@ test('the stored snapshot is the post-merge state, so a change is detected once 
   const again = mergeRow({ fields, sheet: snap, snapshot: snap, lead: { fullName: 'Asha Rao', stage: 'Membership Sold' } })
   assert.deepEqual(again, { toLead: {}, toSheet: {}, conflicts: [] })
 })
+
+test('on an export-rebuilt tab a blank cell never wipes app data', () => {
+  const got = mergeRow({
+    fields,
+    sheet: { phone: '', stage: 'Trial Booked' },
+    snapshot: { phone: '9820011111', stage: 'New Enquiry' },
+    lead: { phone: '9820011111', stage: 'New Enquiry' },
+    blankMeansMissing: true
+  })
+  // The cleared phone is ignored rather than applied...
+  assert.equal('phone' in got.toLead, false)
+  // ...while a real change on the same row still lands.
+  assert.deepEqual(got.toLead, { stage: 'Trial Booked' })
+})
+
+test('without the flag, clearing a cell is still a deliberate clear', () => {
+  const got = mergeRow({
+    fields,
+    sheet: { phone: '' },
+    snapshot: { phone: '9820011111' },
+    lead: { phone: '9820011111' }
+  })
+  assert.deepEqual(got.toLead, { phone: '' })
+})

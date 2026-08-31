@@ -44,6 +44,7 @@ export function sanitizedConfig(db) {
     connectedEmail: c.connectedEmail || '',
     sheetId: c.sheetId || '',
     sheetTab: c.sheetTab || '',
+    mirrorTab: c.mirrorTab || '',
     fieldMapping: c.fieldMapping || {},
     defaults: c.defaults || {},
     lastSyncAt: c.lastSyncAt || null,

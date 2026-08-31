@@ -45,17 +45,20 @@ export function contactKeys(record) {
 // Resolves a sheet row to an existing lead, most reliable signal first:
 //
 //   1. the `L-<id>` key in the row's Sync Status cell
-//   2. the row number recorded in the snapshot from the last sync
-//   3. normalized email or phone as they are NOW
-//   4. normalized email or phone as they were BEFORE this edit — Apps Script
+//   2. normalized email, then phone, as they are NOW
+//   3. normalized email or phone as they were BEFORE this edit — Apps Script
 //      hands us `oldValue`, which is the only thing that keeps an edit to the
 //      email cell from looking like a brand new lead plus an orphan
+//   4. the row number recorded in the snapshot from the last sync
 //
-// `index` is built by buildLeadIndex below; returning the lead itself (not an
-// id) keeps callers from having to re-look-it-up.
+// Row number is LAST on purpose. It is the only signal that survives an edit to
+// every other column, but it is also the only one that lies outright when the
+// sheet is cleared and repopulated: row 5 after a refresh is a different person
+// from row 5 before it, and trusting position there merges one lead's data onto
+// another wholesale. The contact columns come from the upstream data itself, so
+// they survive a refresh; position does not.
 export function resolveLead(index, { leadKey, rowNumber, current = {}, previous = {} } = {}) {
   if (leadKey && index.byId.has(leadKey)) return { lead: index.byId.get(leadKey), via: 'key' }
-  if (rowNumber && index.byRow.has(rowNumber)) return { lead: index.byRow.get(rowNumber), via: 'row' }
 
   const now = contactKeys(current)
   if (now.email && index.byEmail.has(now.email)) return { lead: index.byEmail.get(now.email), via: 'email' }
@@ -64,6 +67,9 @@ export function resolveLead(index, { leadKey, rowNumber, current = {}, previous 
   const before = contactKeys(previous)
   if (before.email && index.byEmail.has(before.email)) return { lead: index.byEmail.get(before.email), via: 'old-email' }
   if (before.phone && index.byPhone.has(before.phone)) return { lead: index.byPhone.get(before.phone), via: 'old-phone' }
+
+  // Only reached by a row with no key and no readable contact details at all.
+  if (rowNumber && index.byRow.has(rowNumber)) return { lead: index.byRow.get(rowNumber), via: 'row' }
 
   return { lead: null, via: null }
 }

@@ -146,6 +146,7 @@ export default function SettingsPage({ jumpTo }) {
   const [sheetsSheetTab, setSheetsSheetTab] = useState('')
   const [sheetsSyncing, setSheetsSyncing] = useState(false)
   const [pushScriptCopied, setPushScriptCopied] = useState(false)
+  const [sheetsMirrorTab, setSheetsMirrorTab] = useState('')
   const [sheetsSyncResult, setSheetsSyncResult] = useState(null)
   const [sheetsLogs, setSheetsLogs] = useState(null)
   const [sheetsLogsOpen, setSheetsLogsOpen] = useState(false)
@@ -183,6 +184,7 @@ export default function SettingsPage({ jumpTo }) {
     setSheetsClientId(c.clientId || '')
     setSheetsSheetId(c.sheetId || '')
     setSheetsSheetTab(c.sheetTab || '')
+    setSheetsMirrorTab(c.mirrorTab || '')
     setSheetsMappingVersion(v => v + 1)
     // Sheet already configured but never had a mapping detected (e.g. set up
     // before auto-detect existed) — run it once so the editor doesn't sit
@@ -497,7 +499,15 @@ export default function SettingsPage({ jumpTo }) {
 
   const saveSheetTarget = async () => {
     try {
-      await api.put('/api/google-sheets/config', { sheetId: sheetsSheetId.trim(), sheetTab: sheetsSheetTab.trim() })
+      if (sheetsMirrorTab.trim() && sheetsMirrorTab.trim() === sheetsSheetTab.trim()) {
+        toast('The CRM tab must be a different tab from the source tab', 'error')
+        return
+      }
+      await api.put('/api/google-sheets/config', {
+        sheetId: sheetsSheetId.trim(),
+        sheetTab: sheetsSheetTab.trim(),
+        mirrorTab: sheetsMirrorTab.trim()
+      })
       toast('Sheet saved')
       await detectMapping(true)
       loadSheetsConfig()
@@ -1213,7 +1223,16 @@ export default function SettingsPage({ jumpTo }) {
                     </div>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       <div><label className="label">Sheet ID</label><input className="input" value={sheetsSheetId} onChange={e => setSheetsSheetId(e.target.value)} placeholder="from the sheet's URL between /d/ and /edit" /></div>
-                      <div><label className="label">Tab name</label><input className="input" value={sheetsSheetTab} onChange={e => setSheetsSheetTab(e.target.value)} placeholder="e.g. Form Responses 1" /></div>
+                      <div><label className="label">Source tab (read-only)</label><input className="input" value={sheetsSheetTab} onChange={e => setSheetsSheetTab(e.target.value)} placeholder="e.g. Form Responses 1" /></div>
+                      {/* Kept separate because the source tab is rebuilt by an
+                          upstream export several times a day — anything the app
+                          wrote there would be wiped, so CRM state gets a tab of
+                          its own that nothing else touches. */}
+                      <div>
+                        <label className="label">CRM tab (written by the app)</label>
+                        <input className="input" value={sheetsMirrorTab} onChange={e => setSheetsMirrorTab(e.target.value)} placeholder="e.g. CRM State — leave blank to write nothing" />
+                        <p className="mt-1 text-xs text-slate-500">Stage, owner and remarks are mirrored here. The source tab is never written to. Leave blank to keep CRM state in the app only.</p>
+                      </div>
                     </div>
                     <div className="flex items-center gap-3 mt-3 flex-wrap">
                       <button className="btn btn-primary" onClick={saveSheetTarget}>Save sheet</button>

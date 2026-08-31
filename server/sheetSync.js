@@ -19,8 +19,10 @@ import { fileURLToPath } from 'node:url'
 import * as supabase from './supabaseStore.js'
 import { config, isConfigured, readSheetRows, sheetsFetch, colLetter, SHEETS_BASE } from './googleSheets.js'
 import { resolveLeadFields, resolveHeaderFields, buildLeadPayloadFromResolved, isValidEmail, isValidPhone } from './leadFieldMapping.js'
-import { buildStatusCell, parseLeadKey, buildLeadIndex, contactKeys, resolveLead, STATUS_HEADER } from './sheetIdentity.js'
+import { parseLeadKey, buildLeadIndex, contactKeys, resolveLead, STATUS_HEADER } from './sheetIdentity.js'
 import { mergeRow, nextSnapshot } from './sheetMerge.js'
+import { leadView, sheetValueFor, writableFields, isRoundTrippable } from './sheetFields.js'
+import { MIRROR_HEADER, mirrorRowFor, indexMirrorRows, planMirrorWrites } from './sheetMirror.js'
 import { createOutboundQueue } from './sheetOutbound.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -30,21 +32,23 @@ const SNAPSHOT_FILE = path.join(__dirname, '..', 'data', 'sheetSnapshot.json')
 // driven against a fake sheet in tests without stubbing the network.
 const realTransport = {
   readSheetRows: () => readSheetRows(db()),
-  batchUpdate: (data) => sheetsFetch(db(), `${SHEETS_BASE}/${config(db()).sheetId}/values:batchUpdate`, {
+  readMirrorRows: async () => {
+    const c = config(db())
+    const range = encodeURIComponent(c.mirrorTab)
+    const data = await sheetsFetch(db(), `${SHEETS_BASE}/${c.sheetId}/values/${range}`)
+    const values = data.values || []
+    return { header: values[0] || [], rows: values.slice(1) }
+  },
+  writeMirror: (data) => sheetsFetch(db(), `${SHEETS_BASE}/${config(db()).sheetId}/values:batchUpdate`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ valueInputOption: 'RAW', data })
   }),
-  append: (values) => sheetsFetch(
+  appendMirror: (values) => sheetsFetch(
     db(),
-    `${SHEETS_BASE}/${config(db()).sheetId}/values/${encodeURIComponent(`${config(db()).sheetTab}!A1`)}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`,
+    `${SHEETS_BASE}/${config(db()).sheetId}/values/${encodeURIComponent(`${config(db()).mirrorTab}!A1`)}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`,
     { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ values }) }
   ),
-  putHeader: (column, value) => sheetsFetch(
-    db(),
-    `${SHEETS_BASE}/${config(db()).sheetId}/values/${config(db()).sheetTab}!${column}1?valueInputOption=RAW`,
-    { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ values: [[value]] }) }
-  )
 }
 let transport = realTransport
 let externalStores = true
@@ -59,6 +63,15 @@ let snapshotLoaded = false
 // Remembered from the last read so a lead created in the app knows which
 // fields the sheet actually has columns for, without a read of its own.
 let lastPlan = null
+// A pass is treated as a mid-refresh read — rather than as a witnessed mass
+// deletion — when it sees under this share of the rows it knew about AND at
+// least this many rows have gone. The absolute floor matters: without it a
+// two-row sheet losing one row trips the ratio, and ordinary single-row
+// deletions would never be honoured. Deliberately generous in both directions,
+// because a missed delete is a stale lead someone notices while a wrong one
+// destroys history that exists nowhere else.
+const BULK_CLEAR_RATIO = 0.7
+const BULK_CLEAR_FLOOR = 5
 const DEFAULT_APPEND_FIELDS = ['fullName', 'email', 'phone', 'source', 'stage', 'status', 'remarks', 'classType', 'channel', 'valueEstimate', 'createdAt']
 
 // ---------------------------------------------------------------------------
@@ -91,7 +104,6 @@ export function __reset() {
   snapshot.clear()
   snapshotDirty.clear()
   snapshotGone.clear()
-  statusStamps.clear()
   snapshotLoaded = false
   lastPlan = null
 }
@@ -230,19 +242,30 @@ function applyRow(plan, { rowNumber, row, previous = {}, editedAt = null, index,
     // same pass merges onto this lead instead of creating a twin.
     addToIndex(index, created, rowNumber)
     rememberRow(created.id, rowNumber, nextSnapshot({ fields: plan.fields, sheet: values }))
-    stampStatusCell(plan, rowNumber, created.id)
     return { outcome: 'created', lead: created }
   }
 
   const base = ignoreSnapshot ? null : snapshot.get(lead.id)
+  // The lead is compared in the SHEET's vocabulary, not its own — `source` vs
+  // `sourceName`, `notes` vs `remarks`, and the owner as a NAME rather than the
+  // associate id the lead actually stores. Without this the owner column read
+  // as "cleared by the app" on every pass.
   const merged = mergeRow({
     fields: plan.fields,
     sheet: values,
     snapshot: base?.values || null,
-    lead,
+    lead: leadView(lead, plan.fields, db()),
     fieldUpdatedAt: lead.fieldUpdatedAt || {},
-    sheetEditedAt: editedAt
+    sheetEditedAt: editedAt,
+    // The source tab is rebuilt wholesale by an upstream export, so a blank
+    // cell there means "not supplied", never "cleared by a person".
+    blankMeansMissing: true
   })
+  // A field with no reader is inbound-only: the sheet may set it, but we never
+  // write a guess back into that column.
+  for (const field of Object.keys(merged.toSheet)) {
+    if (!isRoundTrippable(field)) delete merged.toSheet[field]
+  }
 
   if (Object.keys(merged.toLead).length) {
     // Muted: this is the sheet talking, so nothing here may echo back out.
@@ -259,7 +282,6 @@ function applyRow(plan, { rowNumber, row, previous = {}, editedAt = null, index,
   if (Object.keys(merged.toSheet).length) queue.enqueueLead(lead.id, merged.toSheet)
 
   rememberRow(lead.id, rowNumber, nextSnapshot({ fields: plan.fields, sheet: values, ...merged }))
-  if (!parseLeadKey(statusCell)) stampStatusCell(plan, rowNumber, lead.id)
 
   const changed = Object.keys(merged.toLead).length || Object.keys(merged.toSheet).length
   return { outcome: changed ? 'merged' : 'unchanged', lead, conflicts: merged.conflicts }
@@ -295,9 +317,18 @@ function stampFieldTimes(lead, fields, at) {
 // Called for app-side edits, from index.js's mutation paths.
 export function noteAppEdit(lead, fields) {
   if (!lead || !fields?.length) return
-  stampFieldTimes(lead, fields, new Date().toISOString())
-  if (!queue) return
-  queue.enqueueLead(lead.id, Object.fromEntries(fields.map(f => [f, lead[f]])))
+  // An app edit names lead properties; the sheet wants its own field names and
+  // its own representation (the owner as a name, remarks as `notes`).
+  const outgoing = {}
+  for (const field of fields) {
+    if (field === 'associateId') { outgoing.associateName = sheetValueFor(lead, 'associateName', db()) }
+    else if (field === 'sourceName') { outgoing.source = lead.sourceName }
+    else if (field === 'remarks') { outgoing.notes = lead.remarks }
+    else if (isRoundTrippable(field)) outgoing[field] = lead[field]
+  }
+  stampFieldTimes(lead, Object.keys(outgoing), new Date().toISOString())
+  if (!queue || !Object.keys(outgoing).length) return
+  queue.enqueueLead(lead.id, outgoing)
 }
 
 // A lead created in the app. Queues every sheet-backed field so the flush has
@@ -305,9 +336,14 @@ export function noteAppEdit(lead, fields) {
 // from the sheet in the first place.
 export function noteNewLead(lead) {
   if (!lead || !queue) return
-  const plan = lastPlan
-  const fields = plan ? plan.fields : DEFAULT_APPEND_FIELDS
-  noteAppEdit(lead, fields.filter(field => lead[field] !== undefined && lead[field] !== null && lead[field] !== ''))
+  const fields = writableFields(lastPlan ? lastPlan.fields : DEFAULT_APPEND_FIELDS)
+  const values = {}
+  for (const field of fields) {
+    const value = sheetValueFor(lead, field, db())
+    if (value !== '' && value !== null && value !== undefined) values[field] = value
+  }
+  stampFieldTimes(lead, Object.keys(values), new Date().toISOString())
+  queue.enqueueLead(lead.id, values)
 }
 
 export function applyingFromSheet(fn) {
@@ -318,84 +354,50 @@ export function applyingFromSheet(fn) {
 // outbound
 // ---------------------------------------------------------------------------
 
-const statusStamps = new Map()
-
-function stampStatusCell(plan, rowNumber, leadId) {
-  if (!rowNumber) return
-  statusStamps.set(rowNumber, buildStatusCell(leadId))
-}
-
+// Nothing is written to the source tab any more — not even the identity marker.
+// The upstream export rebuilds that tab several times a day, so a marker there
+// survives only until the next refresh; identity rests on the contact columns,
+// which come from the upstream data itself. Existing `L-<id>` markers are still
+// READ, so sheets stamped before this change keep their strong key until the
+// next rebuild wipes it.
+// Write-back goes to the CRM-owned mirror tab, never to the source tab. The
+// source tab is an upstream export: anything written there is destroyed by the
+// next refresh, and a half-overwritten export row is worse than none.
+//
+// The queue hands us individual cells, but the mirror is a fixed layout the app
+// owns outright, so the whole row is rewritten per affected lead — one range per
+// lead instead of one per field, and no chance of a row left half-updated.
 async function writeCells(cells) {
-  const c = config(db())
   if (externalStores && !isConfigured(db())) return
-  const { header } = await transport.readSheetRows()
-  const plan = columnPlan(header, c)
-  const data = []
-  const appended = []
-
-  for (const cell of cells) {
-    const column = plan.columnByField[cell.field]
-    if (column === undefined) continue // the sheet has no column for this field
-    const rowNumber = snapshot.get(cell.leadId)?.rowNumber
-    if (!rowNumber) { appended.push(cell.leadId); continue }
-    data.push({
-      range: `${c.sheetTab}!${colLetter(column)}${rowNumber}`,
-      values: [[cell.value ?? '']]
-    })
-  }
-
-  for (const [rowNumber, value] of statusStamps) {
-    data.push({ range: `${c.sheetTab}!${colLetter(plan.statusColIndex)}${rowNumber}`, values: [[value]] })
-  }
-  statusStamps.clear()
-
-  if (data.length) await transport.batchUpdate(data)
-
-  // Leads created in the app have no row yet. Appended in ONE request rather
-  // than one per lead — a CSV import of five thousand leads would otherwise be
-  // five thousand API calls, well past the per-minute write quota.
-  await appendLeadRows(plan, [...new Set(appended)])
-}
-
-async function appendLeadRows(plan, leadIds) {
-  if (!leadIds.length) return
   const c = config(db())
-  const width = Math.max(plan.header.length, plan.statusColIndex + 1)
-  const leads = leadIds.map(id => db().leads.find(l => l.id === id)).filter(Boolean)
+  if (!c.mirrorTab) return // no mirror tab configured: app edits simply stay in the app
+
+  const leadIds = new Set(cells.map(cell => cell.leadId).filter(Boolean))
+  if (!leadIds.size) return
+
+  const leads = [...leadIds].map(id => db().leads.find(l => l.id === id)).filter(Boolean)
   if (!leads.length) return
 
-  const rows = leads.map(lead => {
-    const row = new Array(width).fill('')
-    for (const field of plan.fields) row[plan.columnByField[field]] = lead[field] ?? ''
-    row[plan.statusColIndex] = buildStatusCell(lead.id)
-    return row
-  })
+  const { header, rows } = await transport.readMirrorRows()
+  if (!header.length) await transport.writeMirror([{ range: mirrorRange(c, 1, MIRROR_HEADER.length), values: [MIRROR_HEADER] }])
 
-  const res = await transport.append(rows)
+  const { updates, appends } = planMirrorWrites(leads, indexMirrorRows(rows), db())
 
-  // The response names the whole appended block; rows landed in the order sent,
-  // so the first row number plus the offset gives each lead its own.
-  const firstRow = parseAppendedRow(res?.updates?.updatedRange)
-  leads.forEach((lead, i) => {
-    const values = {}
-    for (const field of plan.fields) values[field] = String(lead[field] ?? '')
-    rememberRow(lead.id, firstRow ? firstRow + i : null, values)
-  })
+  if (updates.length) {
+    await transport.writeMirror(updates.map(({ rowNumber, values }) => ({
+      range: mirrorRange(c, rowNumber, values.length),
+      values: [values]
+    })))
+  }
+  if (appends.length) await transport.appendMirror(appends.map(a => a.values))
 }
 
-// "'Leads'!A1234:R1240" -> 1234
-export function parseAppendedRow(range) {
-  const match = /![A-Z]+(\d+)/.exec(String(range || ''))
-  return match ? Number(match[1]) : null
+function mirrorRange(c, rowNumber, width) {
+  return `${c.mirrorTab}!A${rowNumber}:${colLetter(width - 1)}${rowNumber}`
 }
 
-export async function flush() {
-  const result = queue ? await queue.flush() : { written: 0 }
-  // Identity stamps ride along with a batch when there is one; on a pass that
-  // queued no cells they would otherwise sit here until the next edit, and the
-  // rows would keep resolving by the weaker contact match in the meantime.
-  if (statusStamps.size) await writeCells([])
-  return result
+export function flush() {
+  return queue ? queue.flush() : Promise.resolve({ written: 0 })
 }
 
 // ---------------------------------------------------------------------------
@@ -444,7 +446,19 @@ export async function reconcile({ force = false } = {}) {
   if (!header.length) return { created: 0, merged: 0, unchanged: 0, skipped: 0, deleted: 0 }
 
   const plan = columnPlan(header, config(db()))
-  if (plan.statusColIndex >= header.length) await addStatusHeader(plan)
+
+  // This sheet is cleared and repopulated several times a day by an upstream
+  // export. A read that lands in the gap between "cleared" and "repopulated"
+  // sees an empty or half-filled tab — and taken literally, that means every
+  // lead's row was deleted. Deleting is unrecoverable (remarks, follow-ups and
+  // payment history exist nowhere in the sheet), so a pass that would remove a
+  // large share of the workspace is treated as a bad read and gives up on
+  // deletions entirely rather than acting on it.
+  const priorRowCount = snapshot.size
+  const missingRows = priorRowCount - rows.length
+  const looksTruncated = priorRowCount > 0
+    && rows.length < priorRowCount * BULK_CLEAR_RATIO
+    && missingRows >= BULK_CLEAR_FLOOR
 
   const counts = { created: 0, merged: 0, unchanged: 0, skipped: 0, deleted: 0, conflicts: 0 }
   const seen = new Set()
@@ -482,11 +496,16 @@ export async function reconcile({ force = false } = {}) {
   // The asymmetry is deliberate: a missed delete is a stale lead someone
   // notices, while a wrong delete destroys remarks, follow-ups and payment
   // history that exist nowhere in the sheet, with no undo.
+  if (looksTruncated) {
+    ctx.logSync('warn', `sheet returned ${rows.length} rows against ${priorRowCount} known — treating as a mid-refresh read, no leads deleted`)
+  }
+
   const occupantOf = new Map()
   for (const [leadId, entry] of snapshot) if (entry.rowNumber) occupantOf.set(entry.rowNumber, leadId)
 
   for (const [leadId, entry] of [...snapshot]) {
     if (seen.has(leadId)) continue
+    if (looksTruncated) continue
     const row = entry.rowNumber
     if (row && blankRows.has(row)) continue
 
@@ -508,6 +527,3 @@ export async function reconcile({ force = false } = {}) {
   return counts
 }
 
-async function addStatusHeader(plan) {
-  await transport.putHeader(colLetter(plan.statusColIndex), STATUS_HEADER)
-}

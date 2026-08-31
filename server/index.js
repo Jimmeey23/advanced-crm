@@ -1488,6 +1488,10 @@ app.put('/api/google-sheets/config', async (req, res) => {
     ...(typeof body.clientSecret === 'string' && body.clientSecret ? { clientSecret: body.clientSecret.trim() } : {}),
     ...(typeof body.sheetId === 'string' ? { sheetId: body.sheetId.trim() } : {}),
     ...(typeof body.sheetTab === 'string' ? { sheetTab: body.sheetTab.trim() } : {}),
+    // The CRM-owned tab. Must not be the source tab: writing app state into the
+    // upstream export would be destroyed by its next refresh, and could
+    // overwrite rows the export owns.
+    ...(typeof body.mirrorTab === 'string' ? { mirrorTab: body.mirrorTab.trim() } : {}),
     ...(body.fieldMapping && typeof body.fieldMapping === 'object' ? { fieldMapping: body.fieldMapping } : {}),
     ...(body.defaults && typeof body.defaults === 'object' ? { defaults: body.defaults } : {})
   }
