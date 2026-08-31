@@ -107,12 +107,56 @@ export function normalizeMemberships(...responses) {
     if (!Number.isInteger(id) || id <= 0 || seen.has(id)) continue
     seen.add(id)
     const type = String(raw.type || raw.membershipType || '')
+    const group = type === 'package-money'
+      ? 'Money packages'
+      : type === 'package-events'
+        ? 'Class packages'
+        : raw.autoRenew
+          ? 'Recurring memberships'
+          : 'Fixed-term memberships'
+    const slug = value => encodeURIComponent(String(value || '').trim().replace(/\s+/g, '-'))
+    const numberOrNull = value => value === null || value === undefined || value === '' || !Number.isFinite(Number(value)) ? null : Number(value)
     result.push({
       id,
       name: String(raw.name || raw.title || `Membership #${id}`),
       type,
-      group: type === 'subscription' ? 'Subscriptions' : 'Packages',
-      disabled: Boolean(raw.disabled)
+      group,
+      disabled: Boolean(raw.disabled),
+      hostId: Number(raw.hostId) || null,
+      hostName: String(raw.hostName || ''),
+      price: numberOrNull(raw.price),
+      priceType: String(raw.priceType || ''),
+      minimumPrice: numberOrNull(raw.minimumPrice),
+      maximumPrice: numberOrNull(raw.maximumPrice),
+      duration: numberOrNull(raw.duration),
+      durationUnit: String(raw.durationUnit || ''),
+      numberOfEvents: numberOrNull(raw.numberOfEvents),
+      money: numberOrNull(raw.money),
+      description: String(raw.description || ''),
+      benefits: Array.isArray(raw.benefits) ? raw.benefits.map(item => typeof item === 'string' ? item : String(item?.name || item?.description || '')).filter(Boolean) : [],
+      tags: Array.isArray(raw.tags) ? raw.tags.map(item => typeof item === 'string' ? item : String(item?.name || item?.label || '')).filter(Boolean) : [],
+      isIntroOffer: Boolean(raw.isIntroOffer),
+      autoRenew: Boolean(raw.autoRenew),
+      minimumAutoRenews: numberOrNull(raw.minimumAutoRenews),
+      maximumAutoRenews: numberOrNull(raw.maximumAutoRenews),
+      activateOnFirstUse: Boolean(raw.activateOnFirstUse),
+      activationDeadlineInDays: numberOrNull(raw.activationDeadlineInDays),
+      freeTrial: Boolean(raw.freeTrial),
+      freeTrialDurationInDays: raw.freeTrial ? numberOrNull(raw.freeTrialDurationInDays) : null,
+      usageLimitForSessions: numberOrNull(raw.usageLimitForSessions),
+      usageLimitForAppointments: numberOrNull(raw.usageLimitForAppointments),
+      includesOnDemand: Boolean(raw.includesOnDemand),
+      isGuestPassEnabled: Boolean(raw.isGuestPassEnabled),
+      guestCombinedUsageLimit: numberOrNull(raw.guestCombinedUsageLimit),
+      isSingleBuy: Boolean(raw.isSingleBuy),
+      featured: Boolean(raw.featured),
+      activeSignups: numberOrNull(raw.activeSignups),
+      isSharedByOtherHost: Boolean(raw.isSharedByOtherHost),
+      minEligibleAge: numberOrNull(raw.minEligibleAge),
+      maxEligibleAge: numberOrNull(raw.maxEligibleAge),
+      createdAt: raw.createdAt || null,
+      modifiedAt: raw.modifiedAt || null,
+      purchaseUrl: raw.hostName ? `https://momence.com/${slug(raw.hostName)}/membership/${slug(raw.name || raw.title || `Membership-${id}`)}/${id}` : null
     })
   }
   return result
@@ -226,8 +270,8 @@ export function createDiscountCodeHandlers({
     },
     async memberships(req, res) {
       try {
-        const { market } = context(req)
-        res.json({ memberships: await service.memberships(market) })
+        const { market, markets } = context(req)
+        res.json({ memberships: await service.memberships(market), markets })
       } catch (error) { fail(res, error) }
     },
     async create(req, res) {

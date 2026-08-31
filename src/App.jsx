@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react'
 import {
   LayoutDashboard, KanbanSquare, Users, UploadCloud, Settings, Search,
   Plus, Zap, Link2, ShieldCheck, Sun, Moon, BarChart3, ChevronsLeft, ChevronsRight,
-  CalendarDays, CalendarRange, Activity, Inbox as InboxIcon, CalendarClock, LogOut, Table2, BadgePercent
+  CalendarDays, CalendarRange, Activity, Inbox as InboxIcon, CalendarClock, LogOut, Table2, BadgePercent, Package
 } from 'lucide-react'
 import { AppProvider, Toasts, useApp } from './store.jsx'
 import { useFetch } from './hooks.js'
@@ -23,6 +23,7 @@ import SettingsPage from './pages/Settings.jsx'
 import Pivot from './pages/Pivot.jsx'
 import MomenceSchedule, { formatTone, personName, time as fmtSessionTime } from './pages/MomenceSchedule.jsx'
 import DiscountCodes from './pages/DiscountCodes.jsx'
+import Memberships from './pages/Memberships.jsx'
 import LeadDrawer from './components/LeadDrawer.jsx'
 import AddLeadModal from './components/AddLeadModal.jsx'
 import CommandPalette from './components/CommandPalette.jsx'
@@ -49,7 +50,8 @@ const NAV_GROUPS = [
     { id: 'leads', label: 'Leads', title: 'Lead Directory', icon: Users },
     { id: 'inbox', label: 'Inbox', title: 'Unified Inbox', icon: InboxIcon },
     { id: 'momence-schedule', label: 'Class schedule', title: 'Momence Class Schedule', icon: CalendarClock },
-    { id: 'discount-codes', label: 'Discount codes', title: 'Momence Discount Codes', icon: BadgePercent }
+    { id: 'discount-codes', label: 'Discount codes', title: 'Momence Discount Codes', icon: BadgePercent },
+    { id: 'memberships', label: 'Memberships', title: 'Memberships & Packages', icon: Package }
   ] },
   { label: 'Manage', items: [
     { id: 'import', label: 'Import CSV', title: 'Lead Import Centre', icon: UploadCloud },
@@ -416,6 +418,7 @@ function Shell() {
     case 'inbox': return <Inbox />
     case 'momence-schedule': return <MomenceSchedule />
     case 'discount-codes': return <DiscountCodes />
+    case 'memberships': return <Memberships />
     case 'import': return <Import />
     case 'team': return <Team />
     case 'pivot': return <Pivot />

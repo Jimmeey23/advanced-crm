@@ -55,13 +55,24 @@ test('serializes fixed discounts and rejects invalid business values', () => {
 })
 
 test('normalizes and deduplicates memberships from varied response shapes', () => {
-  assert.deepEqual(normalizeMemberships(
+  const memberships = normalizeMemberships(
     [{ id: 1, name: 'Annual', type: 'subscription' }],
     { items: [{ id: 2, name: '10 Pack', type: 'package-events' }, { id: 1, name: 'Annual duplicate' }] }
-  ), [
-    { id: 1, name: 'Annual', type: 'subscription', group: 'Subscriptions', disabled: false },
-    { id: 2, name: '10 Pack', type: 'package-events', group: 'Packages', disabled: false }
+  )
+  assert.equal(memberships.length, 2)
+  assert.deepEqual(memberships.map(({ id, name, type, group, disabled }) => ({ id, name, type, group, disabled })), [
+    { id: 1, name: 'Annual', type: 'subscription', group: 'Fixed-term memberships', disabled: false },
+    { id: 2, name: '10 Pack', type: 'package-events', group: 'Class packages', disabled: false }
   ])
+})
+
+test('membership catalog exposes detailed read-only fields and a public purchase URL', () => {
+  const [membership] = normalizeMemberships([{ id: 97885, hostId: 13752, hostName: 'Physique 57 Mumbai', name: 'Studio 12 Class Package', type: 'subscription', price: 17000, duration: 90, durationUnit: 'days', autoRenew: false, numberOfEvents: 12, description: 'Twelve studio sessions' }])
+  assert.equal(membership.group, 'Fixed-term memberships')
+  assert.equal(membership.price, 17000)
+  assert.equal(membership.duration, 90)
+  assert.equal(membership.description, 'Twelve studio sessions')
+  assert.equal(membership.purchaseUrl, 'https://momence.com/Physique-57-Mumbai/membership/Studio-12-Class-Package/97885')
 })
 
 test('service builds allowlisted paths and complete mutation requests', async () => {

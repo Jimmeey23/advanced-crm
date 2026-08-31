@@ -1823,6 +1823,7 @@ app.get('/api/analytics/team', (req, res) => {
 
 app.get('/api/momence-discount-codes', momenceDiscountHandlers.list)
 app.get('/api/momence-discount-codes/memberships', momenceDiscountHandlers.memberships)
+app.get('/api/momence-memberships', momenceDiscountHandlers.memberships)
 app.get('/api/momence-discount-codes/requests', momenceDiscountHandlers.requests)
 app.post('/api/momence-discount-codes/requests', momenceDiscountHandlers.createRequest)
 app.put('/api/momence-discount-codes/requests/:id/decision', momenceDiscountHandlers.decideRequest)
