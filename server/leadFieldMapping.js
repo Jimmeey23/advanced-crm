@@ -275,6 +275,31 @@ export function matchAssociate(db, value) {
   return associates.find(a => normalizeKey(a.name) === bare) || null
 }
 
+// The studio the sheet names, as a real location. The sheet carries a Center
+// column holding a studio NAME ("Kenkere House, Bengaluru"); the app files
+// leads by locationId. Nothing joined the two, so `center` was stored as loose
+// text and locationId fell back to the first studio in the list or to whichever
+// studio the assigned associate happens to work at — which is how ~11,000 leads
+// ended up filed under Kwality House while their own Center column said
+// Bengaluru or Bandra.
+export function matchLocation(db, value) {
+  const raw = String(value || '').trim()
+  if (!raw) return null
+  const locations = db.locations || []
+  const lower = raw.toLowerCase()
+  const exact = locations.find(l => String(l.name || '').trim().toLowerCase() === lower)
+  if (exact) return exact
+  const bare = normalizeKey(raw)
+  if (!bare) return null
+  const loose = locations.find(l => normalizeKey(l.name) === bare)
+  if (loose) return loose
+  // "Kenkere House" against "Kenkere House, Bengaluru": the sheet sometimes
+  // carries the studio without its city. Only accepted when exactly one studio
+  // starts with what the cell says, so an ambiguous prefix matches nothing.
+  const prefixed = locations.filter(l => normalizeKey(l.name).startsWith(bare) && bare.length >= 5)
+  return prefixed.length === 1 ? prefixed[0] : null
+}
+
 // Turns a resolveLeadFields() result into the payload shape
 // createLeadFrom() expects, dropping associateId/locationId if they don't
 // match a real record rather than silently creating a lead pointed at a
@@ -291,7 +316,9 @@ export function buildLeadPayloadFromResolved(resolved, db, fallbackSourceName, r
   const associateId = resolved.associateId && db.associates.some(a => a.id === resolved.associateId)
     ? resolved.associateId
     : matchAssociate(db, resolved.associateName)?.id
-  const locationId = resolved.locationId && db.locations.some(l => l.id === resolved.locationId) ? resolved.locationId : undefined
+  const locationId = resolved.locationId && db.locations.some(l => l.id === resolved.locationId)
+    ? resolved.locationId
+    : (matchLocation(db, resolved.center)?.id || undefined)
   return {
     fullName: resolved.fullName ? String(resolved.fullName).trim() : '',
     email: resolved.email ? String(resolved.email).trim() : '-',

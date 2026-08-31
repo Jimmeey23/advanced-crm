@@ -693,3 +693,125 @@ test('a source column that is blank everywhere never writes "-" onto a lead', as
   assert.notEqual(db.leads[0].sourceName, '-')
   assert.notEqual(db.leads[0].sourceName, 'N/A')
 })
+
+// ---------------------------------------------------------------------------
+// studio and owner come from the sheet
+// ---------------------------------------------------------------------------
+
+const PLACE_HEADER = ['Name', 'Email', 'Phone', 'Center', 'Associate', 'Sync Status']
+const PCOL = { name: 0, email: 1, phone: 2, center: 3, associate: 4, status: 5 }
+
+function placeDb() {
+  const db = makeDb()
+  db.locations = [
+    { id: 'loc_kemps', name: 'Kwality House, Kemps Corner' },
+    { id: 'loc_kenkere', name: 'Kenkere House, Bengaluru' }
+  ]
+  db.associates = [
+    { id: 'asc_1', name: 'Imran Shaikh', locationId: 'loc_kemps' },
+    { id: 'asc_2', name: 'Prathap kp', locationId: 'loc_kenkere' }
+  ]
+  return db
+}
+
+function installPlaces(db, rows) {
+  const writes = { log: [], cells: [], mirrorWrites: [], mirrorAppends: [] }
+  const mirror = { header: [], rows: [] }
+  sheetSync.__setTransport(mirrorTransport(PLACE_HEADER, rows, mirror, writes))
+  sheetSync.__reset()
+  const ctx = makeCtx(db, writes)
+  const baseCreate = ctx.createLeadFrom
+  ctx.createLeadFrom = (payload) => {
+    const lead = baseCreate(payload)
+    lead.center = payload.center || null
+    lead.associateId = payload.associateId || null
+    // index.js's fallback: with no studio of its own a lead lands on the first
+    // one in the list. That fallback is what the Center column must pre-empt.
+    lead.locationId = payload.locationId || db.locations[0].id
+    return lead
+  }
+  sheetSync.configure(ctx)
+  writes.mirror = mirror
+  return writes
+}
+
+function placeRow({ name = '', email = '', phone = '', center = '', associate = '' }) {
+  const r = new Array(PLACE_HEADER.length).fill('')
+  r[PCOL.name] = name; r[PCOL.email] = email; r[PCOL.phone] = phone
+  r[PCOL.center] = center; r[PCOL.associate] = associate
+  return r
+}
+
+test("the sheet's Center column decides the lead's studio", async () => {
+  const db = placeDb()
+  const rows = [placeRow({
+    name: 'Asha Rao', email: 'asha@example.com', phone: '9820011111',
+    center: 'Kenkere House, Bengaluru', associate: 'Prathap kp'
+  })]
+  installPlaces(db, rows)
+
+  await sheetSync.reconcile()
+  assert.equal(db.leads[0].locationId, 'loc_kenkere')
+})
+
+test('a lead already filed under the wrong studio is moved back', async () => {
+  const db = placeDb()
+  const rows = [placeRow({
+    name: 'Asha Rao', email: 'asha@example.com', phone: '9820011111',
+    center: 'Kenkere House, Bengaluru', associate: 'Prathap kp'
+  })]
+  installPlaces(db, rows)
+  await sheetSync.reconcile()
+
+  // The state ~11,000 leads were in: Center says Bengaluru, the record says
+  // Kemps Corner, and Center never changes again so no merge ever notices.
+  db.leads[0].locationId = 'loc_kemps'
+  await sheetSync.reconcile()
+  assert.equal(db.leads[0].locationId, 'loc_kenkere')
+})
+
+test('an owner changed behind the sheet\'s back is put back', async () => {
+  const db = placeDb()
+  const rows = [placeRow({
+    name: 'Asha Rao', email: 'asha@example.com', phone: '9820011111',
+    center: 'Kenkere House, Bengaluru', associate: 'Prathap kp'
+  })]
+  installPlaces(db, rows)
+  await sheetSync.reconcile()
+  assert.equal(db.leads[0].associateId, 'asc_2')
+
+  db.leads[0].associateId = 'asc_1'
+  await sheetSync.reconcile()
+  assert.equal(db.leads[0].associateId, 'asc_2')
+})
+
+test('an owner the team list has never heard of is reported, not applied', async () => {
+  const db = placeDb()
+  const rows = [placeRow({
+    name: 'Asha Rao', email: 'asha@example.com', phone: '9820011111',
+    center: 'Kenkere House, Bengaluru', associate: 'Someone Unknown'
+  })]
+  const writes = installPlaces(db, rows)
+
+  await sheetSync.reconcile()
+  assert.equal(db.leads[0].associateId, null)
+  assert.ok(writes.log.some(line => line.startsWith('warn') && line.includes('Someone Unknown')))
+})
+
+test('a Center naming no studio at all leaves the lead where it is', async () => {
+  const db = placeDb()
+  const rows = [placeRow({ name: 'Asha Rao', email: 'asha@example.com', phone: '9820011111', center: 'Pop up' })]
+  installPlaces(db, rows)
+
+  await sheetSync.reconcile()
+  assert.equal(db.leads[0].locationId, 'loc_kemps') // the fallback, untouched
+})
+
+test('a studio named without its city still resolves', async () => {
+  const db = placeDb()
+  const rows = [placeRow({ name: 'Asha Rao', email: 'asha@example.com', phone: '9820011111', center: 'Kenkere House' })]
+  installPlaces(db, rows)
+
+  await sheetSync.reconcile()
+  assert.equal(db.leads[0].locationId, 'loc_kenkere')
+})

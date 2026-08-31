@@ -18,7 +18,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import * as supabase from './supabaseStore.js'
 import { config, isConfigured, readSheetRows, sheetsFetch, colLetter, SHEETS_BASE } from './googleSheets.js'
-import { resolveLeadFields, resolveHeaderFields, buildLeadPayloadFromResolved, isValidEmail, isValidPhone, isBlankish } from './leadFieldMapping.js'
+import { resolveLeadFields, resolveHeaderFields, buildLeadPayloadFromResolved, isValidEmail, isValidPhone, isBlankish, matchLocation, matchAssociate } from './leadFieldMapping.js'
 import { parseLeadKey, buildLeadIndex, contactKeys, resolveLead, STATUS_HEADER } from './sheetIdentity.js'
 import { mergeRow, nextSnapshot } from './sheetMerge.js'
 import { leadView, sheetValueFor, writableFields, isRoundTrippable } from './sheetFields.js'
@@ -211,6 +211,46 @@ function recordFrom(header, row) {
   return record
 }
 
+// Set for the duration of a reconcile so applyRow can report unmatched owner
+// names without threading a collector through every call.
+let unknownOwnerSink = null
+
+function noteOwner(plan, record, resolvedAssociateId) {
+  if (!unknownOwnerSink || resolvedAssociateId) return
+  const column = plan.header[plan.columnByField.associateName]
+  const named = column ? record[String(column).trim()] : ''
+  if (isBlankish(named)) return
+  const key = String(named).trim()
+  unknownOwnerSink.set(key, (unknownOwnerSink.get(key) || 0) + 1)
+}
+
+// Puts the lead with whoever the sheet's Associate column names. An unmatched
+// name leaves the current owner alone and is reported at the end of the pass —
+// reassigning to nobody would be a worse answer than a stale owner someone can
+// see flagged.
+function repairOwner(plan, lead, record) {
+  if (!ownsAssignment(plan)) return false
+  const column = plan.header[plan.columnByField.associateName]
+  const named = column ? record[String(column).trim()] : ''
+  if (isBlankish(named)) return false
+  const associate = matchAssociate(db(), named)
+  if (!associate) { noteOwner(plan, record, null); return false }
+  if (lead.associateId === associate.id) return false
+  queue.applyingFromSheet(() => { lead.associateId = associate.id })
+  return true
+}
+
+// Points a lead at the studio its Center cell names. Returns whether anything
+// moved. A Center naming no studio at all ("Pop up", a one-off venue) leaves
+// the lead where it is rather than filing it under an arbitrary default.
+function repairLocation(lead, center) {
+  if (isBlankish(center)) return false
+  const location = matchLocation(db(), center)
+  if (!location || lead.locationId === location.id) return false
+  queue.applyingFromSheet(() => { lead.locationId = location.id })
+  return true
+}
+
 // True when the sheet actually has an owner column — only then does it have an
 // opinion about assignment worth suppressing round robin for.
 function ownsAssignment(plan) {
@@ -307,8 +347,10 @@ function applyRow(plan, { rowNumber, row, previous = {}, editedAt = null, index,
     if (!name || (!isValidEmail(email) && !isValidPhone(phone))) {
       return { outcome: 'skipped', reason: 'no name or usable contact' }
     }
+    const payload = buildLeadPayloadFromResolved(resolved, db(), 'Google Sheets', record)
+    noteOwner(plan, record, payload.associateId)
     const created = ctx.createLeadFrom({
-      ...buildLeadPayloadFromResolved(resolved, db(), 'Google Sheets', record),
+      ...payload,
       // The sheet decides who owns its leads. Round robin is off for anything
       // that came in through this path, whether or not the Associate cell was
       // filled in — see assignLead in roundRobin.js.
@@ -366,9 +408,26 @@ function applyRow(plan, { rowNumber, row, previous = {}, editedAt = null, index,
   }
   if (Object.keys(merged.toSheet).length) queue.enqueueLead(lead.id, merged.toSheet)
 
+  // The studio is derived, not merged: `center` is the sheet's column and
+  // `locationId` is the app's own field, so a lead whose Center never changes
+  // would keep a wrong studio forever — which is exactly the state ~11,000
+  // leads were left in. Re-derived on every pass instead, which costs a map
+  // lookup and heals them all without a migration.
+  // Owner and studio are both re-derived from the sheet on every pass rather
+  // than merged. They are the two fields the sheet was declared the authority
+  // on — round robin is off for these leads precisely so the Associate column
+  // decides — and a merged field can drift: once the app's value differs and
+  // the sheet's cell then stops changing, the three-way merge reads it as "the
+  // app edited this" and defends the app's value forever.
+  const repaired = [
+    repairOwner(plan, lead, record),
+    repairLocation(lead, values.center)
+  ].some(Boolean)
+  if (repaired) ctx.markDirty(lead.id)
+
   rememberRow(lead.id, rowNumber, nextSnapshot({ fields: plan.fields, sheet: values, ...merged }))
 
-  const changed = Object.keys(merged.toLead).length || Object.keys(merged.toSheet).length
+  const changed = repaired || Object.keys(merged.toLead).length || Object.keys(merged.toSheet).length
   return { outcome: changed ? 'merged' : 'unchanged', lead, conflicts: merged.conflicts }
 }
 
@@ -711,6 +770,13 @@ export async function reconcile({ force = false } = {}) {
     && missingRows >= BULK_CLEAR_FLOOR
 
   const counts = { created: 0, merged: 0, unchanged: 0, skipped: 0, deleted: 0, conflicts: 0, mirrorIn: mirrorIn.ingested, mirrorOut: 0 }
+  // Owner names the roster has never heard of. Silently ignoring them is what
+  // let the sheet and the app disagree about who owns a lead indefinitely: the
+  // sheet says a name, nothing matches it, and the lead quietly keeps whoever
+  // it already had. Collected across the pass and reported once — one warning
+  // per unknown name, not per row.
+  const unknownOwners = new Map()
+  unknownOwnerSink = unknownOwners
   const seen = new Set()
   const blankRows = new Set()
   // Built once. Rebuilding it per row turned a 40k-row sheet into 40k passes
@@ -766,6 +832,12 @@ export async function reconcile({ force = false } = {}) {
     }
     forgetRow(leadId)
     if (ctx.deleteLead(leadId)) counts.deleted++
+  }
+
+  unknownOwnerSink = null
+  if (unknownOwners.size) {
+    const worst = [...unknownOwners].sort((a, b) => b[1] - a[1]).slice(0, 8)
+    ctx.logSync('warn', `${unknownOwners.size} owner name(s) in the sheet match nobody on the team, so those leads kept their existing owner: ${worst.map(([name, n]) => `${name} (${n})`).join(', ')}`)
   }
 
   await flush()
