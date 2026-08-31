@@ -233,7 +233,12 @@ const SYNC_LOCK_KEY = 'sheet_sync_lock'
 // A sync running long enough to be considered abandoned (crashed process,
 // killed deploy) rather than just slow — past this, a new attempt is
 // allowed to steal the lock instead of being blocked forever.
-const SYNC_LOCK_STALE_MS = 60 * 60 * 1000
+// How long a lock may sit untouched before another instance may steal it. Short,
+// because the holder heartbeats it (see touchSyncLock) — a lock that stops being
+// refreshed means the process holding it is gone, not that it is busy. It used
+// to be an hour with no heartbeat at all, so a pass killed mid-flight blocked
+// every sync for the next 60 minutes.
+const SYNC_LOCK_STALE_MS = 5 * 60 * 1000
 
 // Atomic cross-instance lock for the Google Sheets sync, backed by the
 // unique constraint on app_state.key: Postgres itself rejects the insert if
@@ -260,6 +265,22 @@ export async function acquireSyncLock(ownerId) {
   const { error: updateErr } = await c.from(META_TABLE).update({ data: { ownerId, acquiredAt: now }, updated_at: now }).eq('key', SYNC_LOCK_KEY)
   if (updateErr) throw new Error(`supabase steal sync lock: ${updateErr.message}`)
   return true
+}
+
+// Refreshes the lock's timestamp while a long pass is still running, so a
+// reconcile over 24,000 rows never has its own lock stolen out from under it.
+// Only the holder may refresh: a stolen lock stays stolen.
+export async function touchSyncLock(ownerId) {
+  const c = getClient()
+  if (!c) return true
+  const { data, error } = await c.from(META_TABLE).select('data').eq('key', SYNC_LOCK_KEY).maybeSingle()
+  if (error || data?.data?.ownerId !== ownerId) return false
+  const now = new Date().toISOString()
+  const { error: updateErr } = await c
+    .from(META_TABLE)
+    .update({ data: { ownerId, acquiredAt: now }, updated_at: now })
+    .eq('key', SYNC_LOCK_KEY)
+  return !updateErr
 }
 
 export async function releaseSyncLock() {

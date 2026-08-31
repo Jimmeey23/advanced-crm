@@ -21,7 +21,7 @@ import { requireAuth, requireAuthWithQueryToken, scopeLocation, blockAgentWrite,
 import { runReminderDigest, startReminderScheduler } from './reminders.js'
 import { parseCsv, autoMap, normalizeStage, normalizeStatus, parseFlexibleDate } from './csv.js'
 import { STATUS_GROUPS, statusGroupOf } from './leadStatus.js'
-import { resolveLeadFields, buildLeadPayloadFromResolved, suggestMappingFromKeys, isValidEmail, isValidPhone, LEAD_FIELD_ALIASES, matchAssociate } from './leadFieldMapping.js'
+import { resolveLeadFields, buildLeadPayloadFromResolved, suggestMappingFromKeys, isValidEmail, isValidPhone, LEAD_FIELD_ALIASES, matchAssociate, matchLocation } from './leadFieldMapping.js'
 import * as googleSheets from './googleSheets.js'
 import * as sheetSync from './sheetSync.js'
 import * as zohoPeople from './zohoPeople.js'
@@ -1456,14 +1456,40 @@ sheetSync.configure({
 // instance never runs two passes at once, and Supabase's lock row so two
 // instances sharing a project don't either.
 let reconcileInFlight = null
+// Refreshed while a pass runs so the lock reads as held-and-alive rather than
+// merely held. Without it a reconcile over 24,000 rows and a reconcile whose
+// process died look identical from another instance.
+const SYNC_LOCK_HEARTBEAT_MS = 60 * 1000
+
 async function withSheetSyncLock(fn) {
   if (reconcileInFlight) throw new Error('A sheet sync is already in progress — wait for it to finish.')
   const gotLock = await supabase.acquireSyncLock(SHEET_SYNC_OWNER)
   if (!gotLock) throw new Error('A sheet sync is already in progress on another server instance.')
+  const heartbeat = setInterval(() => {
+    supabase.touchSyncLock(SHEET_SYNC_OWNER).catch(() => {})
+  }, SYNC_LOCK_HEARTBEAT_MS)
+  heartbeat.unref?.()
   reconcileInFlight = (async () => {
-    try { return await fn() } finally { await supabase.releaseSyncLock() }
+    try { return await fn() } finally {
+      clearInterval(heartbeat)
+      await supabase.releaseSyncLock()
+    }
   })()
   try { return await reconcileInFlight } finally { reconcileInFlight = null }
+}
+
+// A `finally` only runs if the process lives long enough to reach it. Ctrl-C, a
+// deploy, a container restart mid-pass — all of those used to leave the lock row
+// behind, and every sync afterwards was refused until it aged out.
+let releasingLock = false
+for (const signal of ['SIGINT', 'SIGTERM']) {
+  process.on(signal, () => {
+    if (releasingLock) return
+    releasingLock = true
+    const done = () => process.exit(0)
+    if (!reconcileInFlight) return done()
+    supabase.releaseSyncLock().catch(() => {}).finally(done)
+  })
 }
 
 // Structural sheet events arrive one per affected row — pasting fifty rows
@@ -1584,13 +1610,31 @@ app.post('/api/google-sheets/disconnect', async (req, res) => {
 // that has drifted or been lost.
 app.post('/api/google-sheets/sync-now', async (req, res) => {
   try {
-    const counts = await withSheetSyncLock(() => sheetSync.reconcile({ force: req.body?.force === true }))
+    const counts = await runSheetReconcile({ force: req.body?.force === true })
     res.json(counts)
   } catch (e) {
-    logSheetSync('error', e.message)
     res.status(502).json({ error: e.message })
   }
 })
+
+// Every scheduled and manual pass goes through here so a failure is recorded on
+// the config, not only in the log. A sync that has been refused for an hour and
+// a sync nobody has asked for both leave `lastSyncAt` untouched — without the
+// error beside it there is no way to tell those apart from the outside.
+async function runSheetReconcile(options = {}) {
+  db.settings.googleSheets.lastSyncAttemptAt = nowIso()
+  try {
+    const counts = await withSheetSyncLock(() => sheetSync.reconcile(options))
+    db.settings.googleSheets.lastSyncError = null
+    save()
+    return counts
+  } catch (e) {
+    db.settings.googleSheets.lastSyncError = e.message
+    logSheetSync('error', e.message)
+    save()
+    throw e
+  }
+}
 
 // Pushed by the sheet's own Apps Script (see scripts/sheetSyncAppsScript.gs).
 // A cell edit carries the row, so the common case costs no Sheets read at all;
@@ -1658,7 +1702,7 @@ sheetSync.loadSnapshot().catch(e => console.warn(`[sheet-sync] snapshot load fai
 
 setInterval(() => {
   if (!db || !googleSheets.isConfigured(db)) return
-  withSheetSyncLock(() => sheetSync.reconcile()).catch(e => logSheetSync('error', e.message))
+  runSheetReconcile().catch(() => {}) // already logged and recorded on the config
 }, 30 * 60 * 1000)
 
 // ---------- Zoho People (shift-aware round robin) ----------
@@ -4700,11 +4744,39 @@ function backfillFollowUps(db) {
   }
 }
 
+// A lead's Center names its studio; locationId is how the app files it. For a
+// long time nothing joined the two, so locationId fell back to the first studio
+// in the list (or the assigned associate's home) and ~16,000 leads sat under
+// Kwality House while their own Center column said Bengaluru or Bandra.
+//
+// Resolving it at import time fixes new leads, but only the sheet sync ever
+// revisits an existing one — which leaves every CSV-imported lead wrong until
+// somebody happens to edit it. Run here instead: idempotent, one map lookup per
+// lead, and it covers leads whatever they arrived through.
+//
+// A Center naming no studio at all ("Pop up", a one-off venue) is left alone
+// rather than filed under a default.
+function backfillLeadLocations(db) {
+  let touched = 0
+  for (const lead of db.leads) {
+    const location = matchLocation(db, lead.center)
+    if (!location || lead.locationId === location.id) continue
+    lead.locationId = location.id
+    markDirty(lead.id)
+    touched++
+  }
+  if (touched) {
+    console.log(`[physique57-leads] filed ${touched} lead(s) under the studio their Center column names`)
+    save()
+  }
+}
+
 async function start() {
   await init()
   db = load()
   if (!Array.isArray(db.webhookIntegrations)) db.webhookIntegrations = []
   if (!Array.isArray(db.webhookLogs)) db.webhookLogs = []
+  backfillLeadLocations(db)
   backfillFollowUps(db)
   backfillAssociatePhotos(db)
   startReminderScheduler(db)

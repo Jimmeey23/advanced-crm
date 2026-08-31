@@ -50,6 +50,11 @@ export function sanitizedConfig(db) {
     defaults: c.defaults || {},
     lastSyncAt: c.lastSyncAt || null,
     lastSyncCounts: c.lastSyncCounts || null,
+    // When a pass was last attempted, and why it failed if it did. A stale
+    // `lastSyncAt` on its own cannot distinguish "nothing has run" from "every
+    // run for the last hour was refused".
+    lastSyncAttemptAt: c.lastSyncAttemptAt || null,
+    lastSyncError: c.lastSyncError || null,
     // Presence only — the secret itself is handed out solely by the
     // apps-script endpoint, which requires an authenticated session.
     hasHookSecret: Boolean(c.hookSecret),

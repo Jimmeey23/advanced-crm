@@ -155,11 +155,16 @@ function SyncBadge() {
 
   const at = config.lastSyncAt
   const age = at ? Date.now() - new Date(at).getTime() : Infinity
-  const tone = !at || age >= SYNC_BROKEN_MS ? 'bad' : age >= SYNC_STALE_MS ? 'warn' : 'good'
+  // A failing pass is worse than an old one: the sync is not merely late, it is
+  // actively being refused, and that is worth the red regardless of the age.
+  const failing = Boolean(config.lastSyncError)
+  const tone = failing || !at || age >= SYNC_BROKEN_MS ? 'bad' : age >= SYNC_STALE_MS ? 'warn' : 'good'
   const counts = config.lastSyncCounts
-  const detail = counts
-    ? `${counts.created || 0} created · ${counts.merged || 0} merged · ${counts.deleted || 0} deleted`
-    : 'No counts recorded yet'
+  const detail = failing
+    ? `Last attempt ${config.lastSyncAttemptAt ? timeAgo(config.lastSyncAttemptAt) : 'unknown'} failed:\n${config.lastSyncError}`
+    : counts
+      ? `${counts.created || 0} created · ${counts.merged || 0} merged · ${counts.deleted || 0} deleted`
+      : 'No counts recorded yet'
 
   return (
     <button
@@ -170,7 +175,7 @@ function SyncBadge() {
     >
       <RefreshCw size={13} />
       <span className="topbar-sync-label">Sheet</span>
-      <span className="topbar-sync-value">{at ? timeAgo(at) : 'never'}</span>
+      <span className="topbar-sync-value">{failing ? 'failing' : at ? timeAgo(at) : 'never'}</span>
     </button>
   )
 }
