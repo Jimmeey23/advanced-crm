@@ -47,15 +47,54 @@ function getServiceClient() {
   return serviceClient
 }
 
+// Addresses that are admins by standing decision, rather than by typing the
+// admin code once. A person on this list gets the role the first time they sign
+// in — there is no window in which they are an agent — and an existing row of
+// theirs is corrected on their next request, so adding an address here is
+// enough whether or not the account already exists.
+//
+// Configured with ADMIN_EMAILS (comma-separated) and falling back to the list
+// below, so a new admin can be added on the server without a deploy.
+const DEFAULT_ADMIN_EMAILS = [
+  'jimmeey@physique57india.com',
+  'saachi@physique57india.com',
+  'mitali@physique57india.com'
+]
+
+export function adminEmailList() {
+  const configured = String(process.env.ADMIN_EMAILS || '')
+    .split(',').map(e => e.trim().toLowerCase()).filter(Boolean)
+  return new Set(configured.length ? configured : DEFAULT_ADMIN_EMAILS.map(e => e.toLowerCase()))
+}
+
+export function isStandingAdmin(email) {
+  const target = String(email || '').trim().toLowerCase()
+  return Boolean(target) && adminEmailList().has(target)
+}
+
 async function resolveAppUser(client, userId, email) {
+  const standingAdmin = isStandingAdmin(email)
   const { data: existing, error: readErr } = await client
     .from('app_users').select('role').eq('user_id', userId).maybeSingle()
   if (readErr) throw new Error(`app_users read failed: ${readErr.message}`)
-  if (existing) return existing.role
+
+  if (existing) {
+    // Only ever an upgrade. The list says who must be an admin; it does not say
+    // who must not be, so an admin promoted by code or by hand keeps the role.
+    if (standingAdmin && existing.role !== 'admin') {
+      const { error: upgradeErr } = await client
+        .from('app_users').update({ role: 'admin' }).eq('user_id', userId)
+      if (upgradeErr) throw new Error(`app_users upgrade failed: ${upgradeErr.message}`)
+      return 'admin'
+    }
+    return existing.role
+  }
+
+  const role = standingAdmin ? 'admin' : 'agent'
   const { error: insertErr } = await client
-    .from('app_users').insert({ user_id: userId, email, role: 'agent' })
+    .from('app_users').insert({ user_id: userId, email, role })
   if (insertErr) throw new Error(`app_users insert failed: ${insertErr.message}`)
-  return 'agent'
+  return role
 }
 
 function findAssociateByEmail(db, email) {
