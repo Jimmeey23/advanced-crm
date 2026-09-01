@@ -2127,6 +2127,64 @@ html[data-theme="light"] .lead-group-table {
   background: #ffffff;
 }
 
+/* Grouped leads live inside the single leads table: one <tbody> per group,
+   headed by a full-width row. Keeping them in the same <table> means every
+   group shares column widths, the pinned <thead> and one horizontal scroll,
+   instead of each group looking like a table of its own. */
+.leads-data-table .lead-group-row > td {
+  padding: 0;
+  border-top: 1px solid rgba(255,255,255,.09);
+  border-bottom: 1px solid rgba(255,255,255,.07);
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--accent) 12%, transparent), transparent 46%),
+    rgba(255,255,255,.035);
+  cursor: pointer;
+}
+.leads-data-table .lead-group-body:first-child .lead-group-row > td { border-top: 0; }
+.leads-data-table .lead-group-row:hover > td {
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--accent) 17%, transparent), transparent 50%),
+    rgba(255,255,255,.055);
+}
+.leads-data-table .lead-group-row.is-open > td {
+  border-bottom-color: color-mix(in srgb, var(--accent) 30%, rgba(255,255,255,.09));
+}
+/* The cell spans the full table width, so pin its contents to the left edge
+   of the viewport -- the group label stays readable while scrolling across
+   columns, matching the sticky lead/stage columns. */
+.lead-group-row-inner {
+  position: sticky;
+  left: 0;
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  width: max-content;
+  max-width: 100%;
+  padding: 10px 15px;
+}
+.leads-data-table .lead-group-body.is-collapsed > .lead-group-row > td {
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--accent) 7%, transparent), transparent 46%),
+    rgba(255,255,255,.02);
+}
+html[data-theme="light"] .leads-data-table .lead-group-row > td {
+  border-top-color: rgba(15,23,42,.12);
+  border-bottom-color: rgba(15,23,42,.11);
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--accent) 11%, transparent), transparent 46%),
+    #f1f5f9;
+}
+html[data-theme="light"] .leads-data-table .lead-group-row:hover > td {
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--accent) 15%, transparent), transparent 50%),
+    #e9eef5;
+}
+html[data-theme="light"] .leads-data-table .lead-group-body.is-collapsed > .lead-group-row > td {
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--accent) 7%, transparent), transparent 46%),
+    #f8fafc;
+}
+
 /* Dashboard lead performance chart */
 .lead-performance-panel {
   position: relative;

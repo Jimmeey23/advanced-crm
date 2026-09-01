@@ -1415,38 +1415,19 @@ function GroupSummary({ list }) {
 
 function TableView({ items, boot, lookup, openLead, openQuickAction, changeStage, changeAssociate, changeLeadField, toggleManualFlag, grouped, collapsed, toggleGroup, onMessage, onTemplateMessage, selected, toggleSelect, toggleSelectAll, columns, density, rowHeight, tableZoom, colWidths, setColWidths, manualFlagOverrides, headerPinned = true, fixedCols = false, focusLeadIds = [], clearFocus, sortBy, sortDir, setSortBy, setSortDir, columnCountsQuery }) {
   const focusedItems = focusLeadIds.length ? items.filter(l => focusLeadIds.includes(l.id)) : items
+  // Grouping stays inside ONE table: each group becomes a <tbody> with a
+  // spanning header row, so every group shares the same column widths,
+  // sticky header and horizontal scroll instead of rendering as its own
+  // detached table.
   if (grouped) {
-    return (
-      <div className="lead-group-stack">
-        {grouped.map(g => {
-          const isOpen = !collapsed[g.key]
-          return (
-            <div key={g.key} className={`lead-group-block ${isOpen ? 'is-open' : ''}`}>
-              <button className="lead-group-header" onClick={() => toggleGroup(g.key)}>
-                <span className="lead-group-chevron">
-                  <ChevronRight size={14} className={`transition-transform ${isOpen ? 'rotate-90' : ''}`} />
-                </span>
-                <span className="lead-group-title-wrap">
-                  <span className="lead-group-kicker">Grouped segment</span>
-                  <span className="lead-group-title">{g.key}</span>
-                </span>
-                <GroupSummary list={g.list} />
-              </button>
-              {isOpen && (
-                <div className="lead-group-table">
-                  <TableGrid items={focusLeadIds.length ? g.list.filter(l => focusLeadIds.includes(l.id)) : g.list} boot={boot} lookup={lookup} openLead={openLead} openQuickAction={openQuickAction} changeStage={changeStage} changeAssociate={changeAssociate} changeLeadField={changeLeadField} toggleManualFlag={toggleManualFlag} onMessage={onMessage} onTemplateMessage={onTemplateMessage} selected={selected} toggleSelect={toggleSelect} toggleSelectAll={toggleSelectAll} columns={columns} density={density} rowHeight={rowHeight} tableZoom={tableZoom} colWidths={colWidths} setColWidths={setColWidths} manualFlagOverrides={manualFlagOverrides} headerPinned={headerPinned} fixedCols={fixedCols} focusLeadIds={focusLeadIds} clearFocus={clearFocus} sortBy={sortBy} sortDir={sortDir} setSortBy={setSortBy} setSortDir={setSortDir} columnCountsQuery={columnCountsQuery} />
-                </div>
-              )}
-            </div>
-          )
-        })}
-      </div>
-    )
+    const groupSections = grouped.map(g => ({ key: g.key, list: focusLeadIds.length ? g.list.filter(l => focusLeadIds.includes(l.id)) : g.list }))
+    const orderedItems = groupSections.flatMap(g => g.list)
+    return <TableGrid items={orderedItems} groups={groupSections} collapsed={collapsed} toggleGroup={toggleGroup} boot={boot} lookup={lookup} openLead={openLead} openQuickAction={openQuickAction} changeStage={changeStage} changeAssociate={changeAssociate} changeLeadField={changeLeadField} toggleManualFlag={toggleManualFlag} onMessage={onMessage} onTemplateMessage={onTemplateMessage} selected={selected} toggleSelect={toggleSelect} toggleSelectAll={toggleSelectAll} columns={columns} density={density} rowHeight={rowHeight} tableZoom={tableZoom} colWidths={colWidths} setColWidths={setColWidths} manualFlagOverrides={manualFlagOverrides} headerPinned={headerPinned} fixedCols={fixedCols} focusLeadIds={focusLeadIds} clearFocus={clearFocus} sortBy={sortBy} sortDir={sortDir} setSortBy={setSortBy} setSortDir={setSortDir} columnCountsQuery={columnCountsQuery} />
   }
   return <TableGrid items={focusedItems} boot={boot} lookup={lookup} openLead={openLead} openQuickAction={openQuickAction} changeStage={changeStage} changeAssociate={changeAssociate} changeLeadField={changeLeadField} toggleManualFlag={toggleManualFlag} onMessage={onMessage} onTemplateMessage={onTemplateMessage} selected={selected} toggleSelect={toggleSelect} toggleSelectAll={toggleSelectAll} columns={columns} density={density} rowHeight={rowHeight} tableZoom={tableZoom} colWidths={colWidths} setColWidths={setColWidths} manualFlagOverrides={manualFlagOverrides} headerPinned={headerPinned} fixedCols={fixedCols} focusLeadIds={focusLeadIds} clearFocus={clearFocus} sortBy={sortBy} sortDir={sortDir} setSortBy={setSortBy} setSortDir={setSortDir} columnCountsQuery={columnCountsQuery} />
 }
 
-function TableGrid({ items, boot, lookup, openLead, openQuickAction, changeStage, changeAssociate, changeLeadField, toggleManualFlag, onMessage, onTemplateMessage, selected, toggleSelect, toggleSelectAll, columns, density, rowHeight = 58, tableZoom = 100, colWidths = {}, setColWidths, manualFlagOverrides = {}, headerPinned = true, fixedCols = false, focusLeadIds = [], clearFocus, sortBy, sortDir, setSortBy, setSortDir, columnCountsQuery }) {
+function TableGrid({ items, groups = null, collapsed = {}, toggleGroup, boot, lookup, openLead, openQuickAction, changeStage, changeAssociate, changeLeadField, toggleManualFlag, onMessage, onTemplateMessage, selected, toggleSelect, toggleSelectAll, columns, density, rowHeight = 58, tableZoom = 100, colWidths = {}, setColWidths, manualFlagOverrides = {}, headerPinned = true, fixedCols = false, focusLeadIds = [], clearFocus, sortBy, sortDir, setSortBy, setSortDir, columnCountsQuery }) {
   const { role } = useApp()
   // Agents may now edit name/phone/email/status/source (owner stays locked
   // behind the request flow) — confirm first since these are core lead
@@ -1608,6 +1589,13 @@ function TableGrid({ items, boot, lookup, openLead, openQuickAction, changeStage
     for (const ch of activeChannels) next[ch] = 54
     setColWidths?.(next)
   }
+  // select + lead + stage + created + dynamic cols + remarks + FU cells + actions
+  const totalColCount = 4 + visibleCols.length + 1 + activeChannels.length + 1
+  const rowIndexById = new Map(displayedItems.map((l, i) => [l.id, i]))
+  const displayedIds = new Set(displayedItems.map(l => l.id))
+  const sections = groups
+    ? groups.map(g => ({ key: g.key, group: g, open: !collapsed[g.key], rows: g.list.filter(l => displayedIds.has(l.id)) }))
+    : [{ key: '__all', group: null, open: true, rows: displayedItems }]
   const startResize = (id, fallback) => (e) => {
     e.preventDefault()
     e.stopPropagation()
@@ -1663,8 +1651,26 @@ function TableGrid({ items, boot, lookup, openLead, openQuickAction, changeStage
             </th>
           </tr>
         </thead>
-        <tbody>
-          {displayedItems.map((l, idx) => {
+        {sections.map(section => (
+        <tbody key={section.key} className={groups ? `lead-group-body ${section.open ? 'is-open' : 'is-collapsed'}` : undefined}>
+          {section.group && (
+            <tr className={`lead-group-row ${section.open ? 'is-open' : ''}`} onClick={() => toggleGroup?.(section.key)}>
+              <td colSpan={totalColCount}>
+                <span className="lead-group-row-inner">
+                  <span className="lead-group-chevron">
+                    <ChevronRight size={14} className={`transition-transform ${section.open ? 'rotate-90' : ''}`} />
+                  </span>
+                  <span className="lead-group-title-wrap">
+                    <span className="lead-group-kicker">Grouped segment</span>
+                    <span className="lead-group-title">{section.key}</span>
+                  </span>
+                  <GroupSummary list={section.rows} />
+                </span>
+              </td>
+            </tr>
+          )}
+          {(section.open ? section.rows : []).map((l) => {
+            const idx = rowIndexById.get(l.id)
             const owner = lookup.asnById[l.associateId]
             const nextFu = l.followUps?.find(f => f.date && f.done === false && f.date !== '-')
             const dueIn = nextFu ? daysFromNow(nextFu.date) : null
@@ -1819,6 +1825,7 @@ function TableGrid({ items, boot, lookup, openLead, openQuickAction, changeStage
             )
           })}
         </tbody>
+        ))}
       </table>
       {scoreTip && <ScoreDetailsPopover tip={scoreTip} onClose={() => setScoreTip(null)} />}
     </div>
