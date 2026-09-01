@@ -4918,8 +4918,19 @@ function backfillFollowUps(db) {
       if (normalized.comments !== f.comments) patch.comments = normalized.comments
       if (!f.id) patch.id = uid('fu')
       if (!f.channel) patch.channel = fuChannels[idx % fuChannels.length]
-      const shouldBeDone = Boolean(normalized.comments) && (normalized.date ? normalized.date <= todayKey : true)
-      if (f.done === undefined || f.done !== shouldBeDone) patch.done = shouldBeDone
+      // Only ever fills in a missing value. This used to recompute `done` for
+      // every follow-up on every boot, which was wrong twice over: `done` is
+      // user-owned (the PUT route below takes an explicit req.body.done), so
+      // recomputing silently reverted anyone who had ticked or unticked a row
+      // by hand; and because the heuristic depends on todayKey, follow-ups
+      // crossed their date and got rewritten again the next day, so the pass
+      // never converged -- it re-dirtied ~1,100 leads on every single start,
+      // and each of those upserts came back through Realtime as an echo.
+      // Nothing needs the recompute: "overdue" is already derived at read time
+      // from `!f.done && f.date < today` wherever it is displayed.
+      if (f.done === undefined) {
+        patch.done = Boolean(normalized.comments) && (normalized.date ? normalized.date <= todayKey : true)
+      }
       if (Object.keys(patch).length) { changed = true; return { ...f, ...patch } }
       return f
     })

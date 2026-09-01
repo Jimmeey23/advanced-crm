@@ -16,6 +16,38 @@ const deleted = new Set()
 let lastLocalWriteAt = 0
 let remoteChangeCb = null
 
+// Ids this process just wrote to Supabase, so we can recognise our own writes
+// when Realtime echoes them straight back and drop them without doing any work.
+//
+// This used to be a flat "ignore everything for 2s after any local write"
+// window, which silently failed on exactly the case that matters: a bulk pass
+// upserting thousands of leads takes far longer than 2s to drain, so the tail
+// of its own echo sailed past the check and got applied -- thousands of
+// pointless array scans and full-state disk writes, on both ends of a round
+// trip that produced no new information. Matching on the id is exact and
+// doesn't care how long the burst runs.
+//
+// Entries expire on a timer rather than on first sight: Realtime can deliver
+// an echo more than once, and a never-pruned set would grow without bound.
+const selfWrittenLeadIds = new Map()
+const SELF_WRITE_TTL_MS = 60 * 1000
+
+function markSelfWritten(ids) {
+  const expiry = Date.now() + SELF_WRITE_TTL_MS
+  for (const id of ids) selfWrittenLeadIds.set(id, expiry)
+}
+
+// Returns true if `id` is an echo of something we wrote. Prunes lazily -- this
+// runs on every inbound Realtime event, so it must stay cheap; a periodic sweep
+// of the whole map would be more work than it saves.
+function isSelfWrite(id) {
+  const expiry = selfWrittenLeadIds.get(id)
+  if (expiry === undefined) return false
+  if (Date.now() > expiry) { selfWrittenLeadIds.delete(id); return false }
+  selfWrittenLeadIds.delete(id)
+  return true
+}
+
 function ensureSettingsShape(target) {
   if (!target.settings) target.settings = {}
   if ((target.settings.taxonomyVersion || 0) < 2) {
@@ -106,7 +138,9 @@ function syncSupabase() {
   clearTimeout(syncTimer)
   syncTimer = setTimeout(async () => {
     try {
+      const written = [...getDirty(), ...getDeleted()]
       await supabase.persistState(state, getDirty(), getDeleted())
+      markSelfWritten(written)
       dirty.clear()
       deleted.clear()
       lastLocalWriteAt = Date.now()
@@ -126,7 +160,9 @@ export async function saveNow() {
   clearTimeout(syncTimer)
   writeFile()
   if (!supabase.isEnabled()) { dirty.clear(); deleted.clear(); return }
+  const written = [...getDirty(), ...getDeleted()]
   await supabase.persistState(state, getDirty(), getDeleted())
+  markSelfWritten(written)
   dirty.clear()
   deleted.clear()
   lastLocalWriteAt = Date.now()
@@ -172,7 +208,7 @@ function applyRemoteLeadChange({ eventType, id, data }) {
     // or a genuine concurrent duplicate from another instance sails past
     // the dedup merge check just because we happened to write something
     // else in the last 2s.
-    if (Date.now() - lastLocalWriteAt < 2000) return
+    if (isSelfWrite(id) || Date.now() - lastLocalWriteAt < 2000) return
     if (eventType === 'DELETE') state.leads.splice(idx, 1)
     else if (data) state.leads[idx] = data
   } else if (eventType !== 'DELETE' && data) {
