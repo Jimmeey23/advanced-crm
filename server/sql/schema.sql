@@ -44,8 +44,22 @@ insert into app_state (key, data)
 values ('settings', '{}'::jsonb)
 on conflict (key) do nothing;
 
+-- See migrations/20260901_split_inbox_table.sql. The inbox is kept out of the
+-- app_state blob because it is large (~7.4 MB) and app_state is rewritten in
+-- full on every save.
+create table if not exists app_inbox (
+  key        text primary key,
+  data       jsonb not null default '{}'::jsonb,
+  updated_at timestamptz not null default now()
+);
+
 -- Enables two-way sync: lets the server's Supabase Realtime subscription see
 -- changes made directly in the Supabase dashboard (or by another instance).
+--
+-- app_inbox is deliberately NOT in this publication. Nothing subscribes to it,
+-- and publishing it would put every inbox write back on the wire as a
+-- multi-megabyte broadcast to the very server that just made it -- which is
+-- exactly the cost splitting the table out was meant to remove.
 alter publication supabase_realtime add table app_state;
 alter publication supabase_realtime add table leads;
 

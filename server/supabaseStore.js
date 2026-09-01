@@ -3,6 +3,7 @@
 // Supabase: app_state stores the full app snapshot plus a compact settings
 // overlay, while "leads" holds one row per lead. The overlay lets settings
 // saves avoid rewriting large runtime caches such as the messaging inbox.
+import { createHash } from 'node:crypto'
 import { createClient } from '@supabase/supabase-js'
 import WebSocket from 'ws'
 import { normalizeEmail, normalizePhone } from './duplicateMatch.js'
@@ -15,11 +16,58 @@ const LEADS_TABLE = 'leads'
 const META_TABLE = 'app_state'
 const META_KEY = 'app'
 const SETTINGS_META_KEY = 'settings'
+// The inbox lives in its own table rather than inside the app_state['app']
+// blob. It is by far the largest thing we store outside `leads` (~7.4 MB at
+// 18k messages), and persistState() runs on every save -- including saves that
+// only touched one lead -- so folding it into the blob meant rewriting and
+// re-broadcasting all of it thousands of times a day. See
+// migrations/20260901_split_inbox_table.sql.
+const INBOX_TABLE = 'app_inbox'
+const INBOX_KEY = 'inbox'
 const DELETE_BATCH_SIZE = 50
 const UPSERT_BATCH_SIZE = 500
 
 let client = null
 let supportsNormalizedLeadColumns = true
+// Set to false the first time app_inbox turns out not to exist (migration not
+// applied yet); the inbox then keeps riding along in the app_state blob as it
+// used to, so an un-migrated deployment degrades in cost, not in correctness.
+let supportsInboxTable = true
+
+// Hashes of what we last successfully wrote for each app_state/app_inbox row.
+// Every one of these rows is rewritten wholesale, so re-sending a payload byte
+// -identical to the one already stored buys nothing and costs a TOAST rewrite,
+// WAL, table bloat and (for app_state) a realtime broadcast. Most saves change
+// a lead and nothing else, so this skips the large majority of them.
+const lastWrittenHash = new Map()
+
+function hashPayload(value) {
+  return createHash('sha1').update(JSON.stringify(value ?? null)).digest('hex')
+}
+
+// Returns false when `value` is already what's stored under `cacheKey`.
+// Callers must only record the hash *after* the write succeeds, so a failed
+// write is always retried rather than being skipped as "already saved".
+function changedSince(cacheKey, value) {
+  return lastWrittenHash.get(cacheKey) !== hashPayload(value)
+}
+
+function rememberWritten(cacheKey, value) {
+  lastWrittenHash.set(cacheKey, hashPayload(value))
+}
+
+// The inbox is loaded after boot, so between startup and that load landing
+// there is a window where state.inbox is empty-but-not-actually-empty. Writing
+// during that window would overwrite the real stored inbox with a blank one,
+// so db.js keeps this off until the load resolves.
+let inboxPersistEnabled = false
+export function setInboxPersistEnabled(enabled) {
+  inboxPersistEnabled = Boolean(enabled)
+}
+
+function isMissingInboxTable(error) {
+  return error?.code === '42P01' || /relation .*app_inbox.* does not exist/i.test(String(error?.message || ''))
+}
 
 function isMissingNormalizedLeadColumn(error) {
   const message = String(error?.message || '')
@@ -99,8 +147,50 @@ export async function loadState() {
     payments: persisted.payments || [],
     discountCodeRequests: persisted.discountCodeRequests || [],
     sheetSyncLogs: persisted.sheetSyncLogs || [],
-    inbox: meta.inbox || { messages: [], conversations: {} }
+    // Deliberately absent: the inbox is fetched separately by loadInbox(), off
+    // the boot path. Detoasting ~7.4 MB of it in the same startup sequence
+    // that also pages in every lead is what pushed this query past Supabase's
+    // statement timeout. `legacyInbox` covers the pre-migration layout, where
+    // the inbox is still embedded in this blob.
+    legacyInbox: meta.inbox || null
   }
+}
+
+// Fetched after boot. Returns null when there is nothing stored yet (fresh
+// project, or the migration has not been applied and the inbox still lives in
+// the app_state blob -- loadState surfaces that one as `legacyInbox`).
+export async function loadInbox() {
+  const c = getClient()
+  if (!c || !supportsInboxTable) return null
+  const { data, error } = await c.from(INBOX_TABLE).select('data').eq('key', INBOX_KEY).maybeSingle()
+  if (error) {
+    if (isMissingInboxTable(error)) {
+      supportsInboxTable = false
+      console.warn('[supabase] app_inbox table missing; inbox stays in the app_state blob until server/sql/migrations/20260901_split_inbox_table.sql is applied')
+      return null
+    }
+    throw new Error(`supabase load inbox: ${error.message}`)
+  }
+  return data?.data || null
+}
+
+// Writes the inbox to its own row. No-op when unchanged since the last
+// successful write, which is the common case -- the inbox only moves when a
+// respond.io webhook or sync brings in a message.
+export async function persistInbox(inbox) {
+  const c = getClient()
+  if (!c || !supportsInboxTable || !inboxPersistEnabled || !inbox) return
+  if (!changedSince(INBOX_KEY, inbox)) return
+  const { error } = await c.from(INBOX_TABLE).upsert({ key: INBOX_KEY, data: inbox, updated_at: new Date().toISOString() })
+  if (error) {
+    if (isMissingInboxTable(error)) {
+      supportsInboxTable = false
+      console.warn('[supabase] app_inbox table missing; inbox stays in the app_state blob until server/sql/migrations/20260901_split_inbox_table.sql is applied')
+      return
+    }
+    throw new Error(`supabase persist inbox: ${error.message}`)
+  }
+  rememberWritten(INBOX_KEY, inbox)
 }
 
 export async function persistState(state, dirtyLeadIds = [], deletedLeadIds = []) {
@@ -144,12 +234,32 @@ export async function persistState(state, dirtyLeadIds = [], deletedLeadIds = []
     webhookLogs: state.webhookLogs,
     payments: state.payments || [],
     discountCodeRequests: state.discountCodeRequests || [],
-    sheetSyncLogs: state.sheetSyncLogs,
-    inbox: state.inbox
+    sheetSyncLogs: state.sheetSyncLogs
   }
-  const { error: metaErr } = await c.from(META_TABLE).upsert({ key: META_KEY, data: meta, updated_at: new Date().toISOString() })
-  if (metaErr) throw new Error(`supabase persist meta: ${metaErr.message}`)
+  // Pre-migration fallback only: with no app_inbox table to write to, the
+  // inbox has to keep riding inside this blob or it would stop persisting.
+  // Before the inbox has loaded we cannot build a truthful blob -- omitting
+  // the key would delete the stored inbox, and including the empty in-memory
+  // one would blank it -- so on that layout the meta write waits. Leads are
+  // upserted separately below and are unaffected.
+  const legacyInboxLayout = !supportsInboxTable
+  if (legacyInboxLayout && !inboxPersistEnabled) return await persistLeads(c, state, dirtyLeadIds)
+  if (legacyInboxLayout && state.inbox) meta.inbox = state.inbox
 
+  if (changedSince(META_KEY, meta)) {
+    const { error: metaErr } = await c.from(META_TABLE).upsert({ key: META_KEY, data: meta, updated_at: new Date().toISOString() })
+    if (metaErr) throw new Error(`supabase persist meta: ${metaErr.message}`)
+    rememberWritten(META_KEY, meta)
+  }
+
+  if (supportsInboxTable && state.inbox) await persistInbox(state.inbox)
+
+  await persistLeads(c, state, dirtyLeadIds)
+}
+
+// Upserts just the dirty leads. Split out of persistState so the pre-migration
+// inbox path can still flush leads on a save where the meta blob has to wait.
+async function persistLeads(c, state, dirtyLeadIds) {
   const ids = uniqueIds(dirtyLeadIds)
   if (ids.length) {
     const now = new Date().toISOString()
@@ -225,8 +335,10 @@ export async function persistMetaState(state) {
     discountCodeRequests: state.discountCodeRequests || [],
     sheetSyncLogs: state.sheetSyncLogs
   }
+  if (!changedSince(SETTINGS_META_KEY, settingsMeta)) return
   const { error } = await c.from(META_TABLE).upsert({ key: SETTINGS_META_KEY, data: settingsMeta, updated_at: new Date().toISOString() })
   if (error) throw new Error(`supabase persist meta: ${error.message}`)
+  rememberWritten(SETTINGS_META_KEY, settingsMeta)
 }
 
 const SYNC_LOCK_KEY = 'sheet_sync_lock'
@@ -408,6 +520,6 @@ export function describe() {
   return {
     enabled: isEnabled(),
     url: process.env.USER_SUPABASE_URL ? new URL(process.env.USER_SUPABASE_URL).host : null,
-    tables: { leads: LEADS_TABLE, meta: META_TABLE }
+    tables: { leads: LEADS_TABLE, meta: META_TABLE, inbox: INBOX_TABLE }
   }
 }

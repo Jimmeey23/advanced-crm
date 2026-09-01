@@ -170,9 +170,15 @@ const momenceDiscountHandlers = createDiscountCodeHandlers({
   makeId: () => uid('dcr')
 })
 
+// These three log arrays all live in the app_state meta blob, which is
+// rewritten wholesale on every save, so their length is a direct multiplier on
+// how much we ship to Supabase. Every endpoint that serves them slices to 50,
+// so retaining 300 bought nothing but write volume.
+const LOG_RETENTION = 100
+
 function log(type, text, leadId = null) {
   db.activity.unshift({ id: uid('act'), ts: nowIso(), type, text, leadId })
-  if (db.activity.length > 300) db.activity.length = 300
+  if (db.activity.length > LOG_RETENTION) db.activity.length = LOG_RETENTION
   save()
 }
 
@@ -1180,7 +1186,7 @@ function findDuplicateLead(email, phone, name) {
 
 function logWebhookCall(integrationId, outcome, detail) {
   db.webhookLogs.unshift({ id: uid('whlog'), integrationId, ts: nowIso(), outcome, detail: detail || null })
-  if (db.webhookLogs.length > 300) db.webhookLogs.length = 300
+  if (db.webhookLogs.length > LOG_RETENTION) db.webhookLogs.length = LOG_RETENTION
   save()
 }
 
@@ -1493,7 +1499,7 @@ app.post('/api/webhooks/momence/:market', async (req, res) => {
 function logSheetSync(outcome, detail) {
   db.sheetSyncLogs = db.sheetSyncLogs || []
   db.sheetSyncLogs.unshift({ id: uid('shlog'), ts: nowIso(), outcome, detail: detail || null })
-  if (db.sheetSyncLogs.length > 300) db.sheetSyncLogs.length = 300
+  if (db.sheetSyncLogs.length > LOG_RETENTION) db.sheetSyncLogs.length = LOG_RETENTION
   save()
 }
 

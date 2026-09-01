@@ -207,6 +207,35 @@ function applyRemoteMetaChange({ data }) {
   if (remoteChangeCb) remoteChangeCb()
 }
 
+// The inbox is the single largest thing we store outside `leads`, and pulling
+// it in the same breath as every lead is what pushed startup past Supabase's
+// statement timeout. Fetch it after the server is already up instead. Inbox
+// writes stay disabled until this lands, so the empty placeholder that
+// inbox.ensure() creates in the meantime can never overwrite what's stored.
+function loadInboxInBackground() {
+  supabase.loadInbox().then(inbox => {
+    if (inbox && state) {
+      // Merge rather than assign: a webhook that arrived while this was in
+      // flight has already appended to the placeholder, and dropping those
+      // messages would lose them for good.
+      const local = state.inbox || { messages: [], conversations: {} }
+      const seen = new Set((inbox.messages || []).map(m => m.id))
+      state.inbox = {
+        ...inbox,
+        messages: [...(inbox.messages || []), ...(local.messages || []).filter(m => !seen.has(m.id))],
+        conversations: { ...(inbox.conversations || {}), ...(local.conversations || {}) }
+      }
+      scheduleRemoteWrite()
+      if (remoteChangeCb) remoteChangeCb()
+    }
+    console.log(`[db] inbox loaded (${(state?.inbox?.messages || []).length} messages)`)
+  }).catch(e => {
+    console.error('[db] inbox load failed, keeping local copy', e.message)
+  }).finally(() => {
+    supabase.setInboxPersistEnabled(true)
+  })
+}
+
 // Async bootstrap: pull the dataset from Supabase if configured.
 // Must be awaited before the first load() so the remote state is used.
 export async function init() {
@@ -214,10 +243,23 @@ export async function init() {
     console.log('[db] Supabase not configured — using local JSON storage')
     return
   }
+  // Every path below that doesn't hand off to loadInboxInBackground() keeps
+  // the local (or seeded) inbox, which is authoritative in those cases.
+  supabase.setInboxPersistEnabled(true)
   try {
     const remote = await supabase.loadState()
     if (remote && remote.leads) {
-      state = ensureSettingsShape(remote)
+      const { legacyInbox, ...rest } = remote
+      state = ensureSettingsShape(rest)
+      if (legacyInbox) {
+        // Pre-migration layout: the inbox came back inside the meta blob, so
+        // it is already here and safe to write.
+        state.inbox = legacyInbox
+        supabase.setInboxPersistEnabled(true)
+      } else {
+        supabase.setInboxPersistEnabled(false)
+        loadInboxInBackground()
+      }
       writeFile()
       console.log(`[db] loaded state from Supabase (${remote.leads.length} leads)`)
       supabase.subscribeChanges({ onLeadChange: applyRemoteLeadChange, onMetaChange: applyRemoteMetaChange })
