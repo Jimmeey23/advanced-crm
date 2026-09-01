@@ -30,11 +30,12 @@ function makeCtx(db, writes) {
       email: payload.email || '',
       phone: payload.phone || '',
       stage: payload.stage || 'New Enquiry',
-      valueEstimate: payload.valueEstimate ?? null
+      valueEstimate: payload.valueEstimate ?? null,
+      momenceLeadId: payload.momenceLeadId || null
     }),
     updateLeadFromPayload: (lead, payload) => {
       let changed = false
-      for (const key of ['fullName', 'email', 'phone', 'stage', 'valueEstimate']) {
+      for (const key of ['fullName', 'email', 'phone', 'stage', 'valueEstimate', 'momenceLeadId']) {
         const value = payload[key]
         if (value === undefined || value === null || value === '') continue
         if (String(lead[key] ?? '') !== String(value)) { lead[key] = value; changed = true }
@@ -858,4 +859,49 @@ test('a snapshot full of dead leads does not switch deletion detection off', asy
   const counts = await sheetSync.reconcile()
   assert.ok(!writes.log.some(line => line.includes('mid-refresh')), 'a real read must not be dismissed as mid-refresh')
   assert.equal(counts.sheetRows, 1)
+})
+
+// The Momence lead id is the key the portal push is addressed to. It is
+// inbound-only, which used to mean "no reader", which the merge read as "the
+// app cleared this field" on every pass — so it never reached a lead, and the
+// portal push silently skipped every edit.
+test('the sheet\'s Momence lead id lands on the lead, and is never written back', async () => {
+  const header = ['ID', 'Name', 'Email', 'Phone', 'Stage', 'Sync Status']
+  const db = makeDb()
+  const rows = [['4415887', 'Asha Rao', 'asha@example.com', '9820011111', 'New Enquiry', '']]
+  const writes = { log: [], cells: [], mirrorWrites: [], mirrorAppends: [] }
+  const mirror = { header: [], rows: [] }
+  sheetSync.__setTransport(mirrorTransport(header, rows, mirror, writes))
+  sheetSync.__reset()
+  sheetSync.configure(makeCtx(db, writes))
+
+  await sheetSync.reconcile()
+  assert.equal(db.leads[0].momenceLeadId, '4415887')
+
+  // The id column is Momence's, not ours: nothing the app does may propose a
+  // value for it, and the export tab is never written to at all.
+  const before = JSON.stringify(rows)
+  db.leads[0].stage = 'Trial Booked'
+  sheetSync.noteAppEdit(db.leads[0], ['stage'])
+  await sheetSync.flushPending?.()
+  assert.equal(JSON.stringify(rows), before)
+  assert.ok(!writes.mirrorWrites.some(w => w.values.includes('4415887')) || mirror.header.every(h => h !== 'ID'))
+})
+
+test('an existing lead missing the Momence id is backfilled on the next pass', async () => {
+  const header = ['ID', 'Name', 'Email', 'Phone', 'Stage', 'Sync Status']
+  const db = makeDb()
+  const rows = [['4415887', 'Asha Rao', 'asha@example.com', '9820011111', 'New Enquiry', '']]
+  const writes = { log: [], cells: [], mirrorWrites: [], mirrorAppends: [] }
+  const mirror = { header: [], rows: [] }
+  sheetSync.__setTransport(mirrorTransport(header, rows, mirror, writes))
+  sheetSync.__reset()
+  sheetSync.configure(makeCtx(db, writes))
+
+  await sheetSync.reconcile()
+  // Simulate the leads created before the id was ever resolved: snapshot still
+  // carries the sheet's value, so the merge sees no sheet-side change.
+  db.leads[0].momenceLeadId = null
+  await sheetSync.reconcile()
+  assert.equal(db.leads[0].momenceLeadId, '4415887')
 })

@@ -28,6 +28,10 @@ import * as momenceLeads from './momenceLeads.js'
 import * as zohoPeople from './zohoPeople.js'
 import { findDuplicateAmong, clusterDuplicates } from './duplicateMatch.js'
 import { normalizeFollowUpFields } from './followUps.js'
+import {
+  reportVelocity, reportSourceRoi, reportRankings, reportPipelineAgeing,
+  reportTopLeads, reportWeekdayPattern, reportFollowUpHealth, reportInsights
+} from './reportAggregates.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 // Identifies this instance in the shared Supabase sheet-sync lock row.
@@ -319,12 +323,50 @@ function safePatch(lead, body) {
 // touches tens of thousands of leads in one pass, and firing a portal write for
 // each would be an outage of our own making; the sheet and the portal are both
 // upstream of the app, not of each other.
+// Edits arrive in bursts — a stage change, then a remark, then a follow-up, all
+// within a few seconds of each other. Each push reads the portal lead and PUTs
+// its whole field set back, so firing one per keystroke-sized edit is wasteful
+// and can interleave badly. Pushes for the same lead are therefore coalesced
+// into one, a beat after the last edit: still immediate to a person, and one
+// write instead of five.
+const MOMENCE_PUSH_DELAY_MS = 1200
+const momencePushTimers = new Map()
+
 function pushLeadToMomence(lead) {
-  if (!lead?.momenceLeadId) return
-  momenceLeads.pushLead(db, lead, { log: (outcome, detail) => logMomenceLead(outcome, detail) })
+  if (!lead?.id) return
+  const existing = momencePushTimers.get(lead.id)
+  if (existing) clearTimeout(existing)
+  const timer = setTimeout(() => {
+    momencePushTimers.delete(lead.id)
+    // Re-read the lead: the point of waiting was to send its final state.
+    runMomencePush(leadById(lead.id) || lead)
+  }, MOMENCE_PUSH_DELAY_MS)
+  // A pending push must never hold the process open on shutdown.
+  timer.unref?.()
+  momencePushTimers.set(lead.id, timer)
+}
+
+function runMomencePush(lead) {
+  momenceLeads.pushLead(db, lead, {
+    log: (outcome, detail) => logMomenceLead(outcome, detail),
+    // The sheet usually already knows which portal lead this is, so the id is
+    // taken from the last snapshot before any portal search is attempted.
+    sheetLookup: (l) => sheetSync.snapshotFieldFor(l.id, 'momenceLeadId')
+  })
     .then(result => {
+      // An id learned by lookup is written onto the lead, so this costs one
+      // search per lead ever rather than one per edit.
+      if (result.learnedId && lead.momenceLeadId !== result.learnedId) {
+        lead.momenceLeadId = result.learnedId
+        markDirty(lead.id)
+        save()
+      }
       if (result.outcome === 'pushed') {
         logMomenceLead('pushed', `lead ${lead.id} -> Momence ${result.momenceId} (${result.fields.join(', ')})`)
+      } else if (result.outcome === 'skipped') {
+        logMomenceLead('skipped', `lead ${lead.id}: ${result.reason}`)
+      } else if (result.outcome === 'unchanged') {
+        logMomenceLead('unchanged', `lead ${lead.id} -> Momence ${result.momenceId}: no field Momence carries actually changed`)
       }
     })
     .catch(err => logMomenceLead('error', `lead ${lead.id}: ${err.message}`))
@@ -3588,18 +3630,34 @@ app.get('/api/analytics/report', (req, res) => {
 
   const locationArg = scope === 'studio' ? entityId : null
   const associateArg = scope === 'associate' ? entityId : null
+
+  // The insight aggregates share one resolved window, and the narrative
+  // readings are generated from the aggregates rather than recomputed — one
+  // source of truth for the sentence the UI, the CSV and the PDF all show.
+  const entityLeads = scopedLeads(scope, entityId)
+  const rankings = scope === 'studio'
+    ? reportRankings(periodLeaderboard(start, end, entityId || null), periodLeaderboard(prev.start, prev.end, entityId || null))
+    : []
+  const velocity = reportVelocity(entityLeads, start, end)
+  const sourceRoi = reportSourceRoi(entityLeads, start, end)
+  const ageing = reportPipelineAgeing(entityLeads)
+  const topLeads = reportTopLeads(entityLeads, start, end)
+  const followUp = reportFollowUpHealth(entityLeads, start, end)
   const cohortBucketRange = period.customRange ? 'week' : period.range === 'year' ? 'month' : period.range
   const cohortOffset = period.customRange ? 0 : (REPORT_PRESETS[period.preset]?.offset ?? 0)
+
+  const comparisons = {
+    current: { label: period.label, ...reportMetrics(scope, entityId, start, end) },
+    previousPeriod: { label: `${prev.start.toISOString().slice(0, 10)} to ${new Date(prev.end.getTime() - 86400000).toISOString().slice(0, 10)}`, ...reportMetrics(scope, entityId, prev.start, prev.end) },
+    yoy: { label: `${yoy.start.toISOString().slice(0, 10)} to ${new Date(yoy.end.getTime() - 86400000).toISOString().slice(0, 10)}`, ...reportMetrics(scope, entityId, yoy.start, yoy.end) }
+  }
+  const insights = reportInsights({ comparisons, sourceRoi, rankings, velocity, ageing, followUp })
 
   res.json({
     scope, entityId, entityName,
     entities,
     period: { label: period.label, start: start.toISOString().slice(0, 10), end: new Date(end.getTime() - 86400000).toISOString().slice(0, 10), preset: period.preset || 'custom' },
-    comparisons: {
-      current: { label: period.label, ...reportMetrics(scope, entityId, start, end) },
-      previousPeriod: { label: `${prev.start.toISOString().slice(0, 10)} to ${new Date(prev.end.getTime() - 86400000).toISOString().slice(0, 10)}`, ...reportMetrics(scope, entityId, prev.start, prev.end) },
-      yoy: { label: `${yoy.start.toISOString().slice(0, 10)} to ${new Date(yoy.end.getTime() - 86400000).toISOString().slice(0, 10)}`, ...reportMetrics(scope, entityId, yoy.start, yoy.end) }
-    },
+    comparisons,
     trend,
     stageBreakdown: reportBreakdown(scope, entityId, start, end, 'stage'),
     sourceBreakdown: reportBreakdown(scope, entityId, start, end, 'source'),
@@ -3609,27 +3667,110 @@ app.get('/api/analytics/report', (req, res) => {
     cohortConversion: periodCohortConversion(cohortBucketRange, cohortOffset, now, locationArg, associateArg),
     // Only meaningful when looking at one studio (who's driving its numbers) —
     // a single associate has no peers to rank against here.
-    leaderboard: scope === 'studio' ? periodLeaderboard(start, end, entityId || null) : []
+    leaderboard: scope === 'studio' ? periodLeaderboard(start, end, entityId || null) : [],
+    rankings, velocity, sourceRoi, ageing, topLeads,
+    weekdayPattern: reportWeekdayPattern(entityLeads, start, end),
+    followUpHealth: followUp,
+    goals: periodGoalTracking(period.range, start, end, period.customRange, locationArg),
+    lostBySource: periodLostBySource(start, end, locationArg),
+    insights
   })
 })
 
-// Drill-down for a single stage/source row on the report above — the exact
-// same period/scope filters, narrowed to one group value, returning enough
-// per-lead detail to list and open each one.
+// Drill-down for any row, bar, slice or tile on the report above — the same
+// period and scope filters, narrowed by one or more dimensions. Every widget
+// on the page routes through this one endpoint rather than each growing its
+// own list view, so "show me the leads behind this number" means the same
+// thing everywhere and always returns the same lead shape.
+const DRILL_FIELDS = {
+  stage: (l, v) => (l.stage || 'Unspecified') === v,
+  source: (l, v) => (l.sourceName || 'Unspecified') === v,
+  status: (l, v) => (l.status || 'open') === v,
+  classType: (l, v) => (l.classType || 'Unspecified') === v,
+  associateId: (l, v) => (l.associateId || '') === v,
+  weekday: (l, v) => String(new Date(l.createdAt).getDay()) === String(v),
+  // Age buckets match reportPipelineAgeing's boundaries exactly — a drill that
+  // disagreed with the bar it came from would be worse than no drill.
+  ageBucket: (l, v) => {
+    const age = Math.max(0, Math.round((Date.now() - new Date(l.createdAt).getTime()) / 86400000))
+    if (v === '0-7') return age <= 7
+    if (v === '8-30') return age > 7 && age <= 30
+    if (v === '31-90') return age > 30 && age <= 90
+    return age > 90
+  }
+}
+
 app.get('/api/analytics/report/drill', (req, res) => {
   const resolved = resolveReportScope(req)
   if (!resolved) return res.status(403).json({ error: 'Not permitted for this location' })
   const { scope, entityId } = resolved
   const period = resolveReportPeriod(req, new Date())
   const inRange = periodInRangeFn(period.start, period.end)
-  const groupField = req.query.stage !== undefined ? 'stage' : 'source'
-  const groupValue = req.query.stage !== undefined ? req.query.stage : req.query.source
-  const leads = scopedLeads(scope, entityId)
-    .filter(l => inRange(l.createdAt))
-    .filter(l => ((groupField === 'stage' ? l.stage : l.sourceName) || 'Unspecified') === groupValue)
-    .slice(0, 100)
-    .map(l => ({ id: l.id, fullName: l.fullName, stage: l.stage, status: l.status, source: l.sourceName, revenue: l.valueEstimate || 0, createdAt: l.createdAt }))
-  res.json({ leads })
+
+  const active = Object.keys(DRILL_FIELDS).filter(f => req.query[f] !== undefined && req.query[f] !== '')
+  // `dateField` decides which event puts a lead in the window: creation for
+  // intake questions, conversion for revenue ones. An "open pipeline" drill
+  // is point-in-time and skips the window entirely.
+  const dateField = req.query.dateField === 'convertedAt' ? 'convertedAt' : req.query.dateField === 'none' ? null : 'createdAt'
+  const sortBy = req.query.sortBy === 'value' ? 'value' : 'createdAt'
+
+  let leads = scopedLeads(scope, entityId)
+  if (dateField) leads = leads.filter(l => inRange(l[dateField]))
+  for (const field of active) leads = leads.filter(l => DRILL_FIELDS[field](l, req.query[field]))
+
+  const total = leads.length
+  const rows = leads
+    .sort((a, b) => sortBy === 'value'
+      ? (Number(b.valueEstimate) || 0) - (Number(a.valueEstimate) || 0)
+      : new Date(b.createdAt) - new Date(a.createdAt))
+    .slice(0, 200)
+    .map(l => ({
+      id: l.id, fullName: l.fullName, stage: l.stage, status: l.status,
+      source: l.sourceName, classType: l.classType || null,
+      associateId: l.associateId || null,
+      associateName: (db.associates.find(a => a.id === l.associateId) || {}).name || null,
+      locationName: (db.locations.find(loc => loc.id === l.locationId) || {}).name || null,
+      phone: l.phone || null, email: l.email || null,
+      revenue: l.valueEstimate || 0,
+      followUpsDone: (l.followUps || []).filter(f => f.done).length,
+      lastRemark: l.remarks || null,
+      createdAt: l.createdAt, convertedAt: l.convertedAt || null
+    }))
+  res.json({ leads: rows, total, truncated: total > rows.length })
+})
+
+// Side-by-side comparison of up to four entities over the same window. One
+// request rather than four parallel report calls, because the whole point is
+// that every column is computed from the identical period resolution.
+app.get('/api/analytics/report/compare', (req, res) => {
+  const scope = req.query.scope === 'associate' ? 'associate' : 'studio'
+  const requested = String(req.query.entityIds || '').split(',').map(s => s.trim()).filter(Boolean).slice(0, 4)
+  const entities = reportEntitiesFor(req, scope)
+  const allowedIds = new Set(entities.map(e => e.id))
+  const ids = requested.filter(id => allowedIds.has(id))
+  if (!ids.length) return res.json({ scope, period: null, columns: [] })
+
+  const now = new Date()
+  const period = resolveReportPeriod(req, now)
+  const prev = precedingPeriod(period.start, period.end)
+
+  const columns = ids.map(id => {
+    const current = reportMetrics(scope, id, period.start, period.end)
+    const previous = reportMetrics(scope, id, prev.start, prev.end)
+    return {
+      id,
+      name: entities.find(e => e.id === id)?.name || 'Unknown',
+      current,
+      previous,
+      velocity: reportVelocity(scopedLeads(scope, id), period.start, period.end),
+      topSources: reportSourceRoi(scopedLeads(scope, id), period.start, period.end).slice(0, 3)
+    }
+  })
+  res.json({
+    scope,
+    period: { label: period.label, start: period.start.toISOString().slice(0, 10), end: new Date(period.end.getTime() - 86400000).toISOString().slice(0, 10) },
+    columns
+  })
 })
 
 app.get('/api/analytics/performance/by-location', (req, res) => {

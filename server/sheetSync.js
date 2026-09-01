@@ -21,7 +21,7 @@ import { config, isConfigured, readSheetRows, sheetsFetch, colLetter, SHEETS_BAS
 import { resolveLeadFields, resolveHeaderFields, buildLeadPayloadFromResolved, isValidEmail, isValidPhone, isBlankish, matchLocation, matchAssociate } from './leadFieldMapping.js'
 import { parseLeadKey, buildLeadIndex, contactKeys, resolveLead, STATUS_HEADER } from './sheetIdentity.js'
 import { mergeRow, nextSnapshot } from './sheetMerge.js'
-import { leadView, sheetValueFor, writableFields, isRoundTrippable } from './sheetFields.js'
+import { leadView, sheetValueFor, writableFields, isRoundTrippable, inboundOnlyFields, readLeadField } from './sheetFields.js'
 import { MIRROR_HEADER, MIRROR_FIELDS, mirrorRowFor, mirrorValues, leadIdFromMirrorRow, indexMirrorRows, planMirrorWrites } from './sheetMirror.js'
 import { createOutboundQueue } from './sheetOutbound.js'
 import { isSheetDateField, canonicalSheetDate } from './sheetDates.js'
@@ -403,6 +403,17 @@ function applyRow(plan, { rowNumber, row, previous = {}, editedAt = null, index,
     if (!isRoundTrippable(field)) delete merged.toSheet[field]
   }
 
+  // Inbound-only fields cannot be settled by the merge — with nothing writable
+  // on the app's side, any difference resolves to "write back to the sheet",
+  // which is then dropped by the loop above and the value never reaches the
+  // lead. The sheet simply owns them, so they are applied directly.
+  for (const field of inboundOnlyFields(plan.fields)) {
+    const sheetValue = values[field]
+    if (isBlankish(sheetValue)) continue
+    if (String(readLeadField(lead, field, db()) ?? '') === String(sheetValue)) continue
+    merged.toLead[field] = sheetValue
+  }
+
   if (Object.keys(merged.toLead).length) {
     // Muted: this is the sheet talking, so nothing here may echo back out.
     queue.applyingFromSheet(() => {
@@ -471,6 +482,16 @@ function stampFieldTimes(lead, fields, at) {
 }
 
 // Called for app-side edits, from index.js's mutation paths.
+// The sheet's own value for one of a lead's fields, out of the last snapshot.
+// The Momence push uses it to answer "which portal lead is this?" without a
+// network round trip, for the very common case where the sheet has already
+// told us and the lead record simply has not caught up yet.
+export function snapshotFieldFor(leadId, field) {
+  const entry = snapshot.get(leadId)
+  const value = entry?.values?.[field]
+  return value === undefined || value === null || value === '' ? null : String(value)
+}
+
 export function noteAppEdit(lead, fields) {
   if (!lead || !fields?.length) return
   // An app edit names lead properties; the sheet wants its own field names and

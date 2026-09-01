@@ -94,6 +94,20 @@ export function AppProvider({ children }) {
     setViewParams(params)
   }, [])
 
+  // A shared report link is `#<view>?<state>`. The app has no router, so the
+  // hash is read once on boot and then owned by whichever page wrote it —
+  // pages call history.replaceState themselves as their controls change,
+  // which keeps the address bar shareable without a navigation on every
+  // filter keystroke.
+  useEffect(() => {
+    const raw = window.location.hash.replace(/^#/, '')
+    if (!raw) return
+    const [name, query = ''] = raw.split('?')
+    if (!name) return
+    setView(name)
+    setViewParams(Object.fromEntries(new URLSearchParams(query)))
+  }, [])
+
   const openLead = useCallback((leadId) => setDrawerLeadId(leadId), [])
   const closeLead = useCallback(() => setDrawerLeadId(null), [])
 

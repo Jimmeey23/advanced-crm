@@ -110,15 +110,87 @@ function findByAlias(record, field) {
   return hits
 }
 
+// Form builders rarely post a flat object. Typical shapes seen in the wild:
+//
+//   { "data": { "first_name": "A", "email": "a@b.c" } }        nested object
+//   { "fields": [ { "label": "Email", "value": "a@b.c" } ] }   label/value list
+//   { "answers": { "q1": { "label": "Phone", "value": "…" } } } keyed answers
+//
+// The alias dictionary only ever looked at top-level keys, so every one of
+// those produced "Missing required field(s): name, a valid email or phone
+// number" even though the fields were plainly in the payload. Flattening first
+// means the dictionary sees `first_name` / `email` wherever they are nested.
+//
+// Both the leaf key and its dotted path are emitted (`data.first_name` as well
+// as `first_name`), so an explicit fieldMapping can still target one specific
+// branch when two branches carry the same leaf name. First value wins, so an
+// outer key is never overwritten by a deeper one.
+const LABEL_KEYS = ['label', 'name', 'key', 'title', 'field', 'id']
+const VALUE_KEYS = ['value', 'values', 'answer', 'text', 'content']
+
+function pickLabelValuePair(entry) {
+  if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return null
+  const labelKey = LABEL_KEYS.find(k => typeof entry[k] === 'string' && entry[k].trim())
+  const valueKey = VALUE_KEYS.find(k => k in entry)
+  if (!labelKey || !valueKey) return null
+  return { label: entry[labelKey], value: entry[valueKey] }
+}
+
+export function flattenRecord(record, maxDepth = 4) {
+  const out = {}
+  const put = (key, value) => {
+    if (key === undefined || key === null || key === '') return
+    if (out[key] === undefined || isBlankish(out[key])) out[key] = value
+  }
+
+  const walk = (value, path, depth) => {
+    if (value === null || value === undefined) return
+    if (Array.isArray(value)) {
+      // A list of label/value objects is a form's answer set, not data with
+      // meaningful indices; anything else keeps its index in the path.
+      const pairs = value.map(pickLabelValuePair)
+      if (value.length && pairs.every(Boolean)) {
+        for (const { label, value: v } of pairs) walk(v, [...path, String(label)], depth + 1)
+        return
+      }
+      if (value.every(v => v === null || typeof v !== 'object')) {
+        put(path.join('.'), value.filter(v => v !== null && v !== undefined).join(', '))
+        if (path.length > 1) put(path[path.length - 1], value.filter(v => v !== null && v !== undefined).join(', '))
+        return
+      }
+      if (depth >= maxDepth) return
+      value.forEach((item, i) => walk(item, [...path, String(i)], depth + 1))
+      return
+    }
+    if (typeof value === 'object') {
+      const pair = pickLabelValuePair(value)
+      if (pair && path.length) return walk(pair.value, path, depth + 1)
+      if (depth >= maxDepth) return
+      for (const [k, v] of Object.entries(value)) walk(v, [...path, k], depth + 1)
+      return
+    }
+    put(path.join('.'), value)
+    if (path.length > 1) put(path[path.length - 1], value)
+  }
+
+  if (!record || typeof record !== 'object') return out
+  for (const [k, v] of Object.entries(record)) walk(v, [k], 1)
+  return out
+}
+
 // Resolves every eligible Lead field from an incoming flat record, in
 // priority order: (1) the integration's own explicit fieldMapping, (2) the
 // built-in alias dictionary above, (3) the integration's configured static
 // defaults. Returns only the fields that resolved to a non-empty value.
 // `integ` just needs `.fieldMapping` and `.defaults` objects — a webhook
 // integration and a Google Sheets config both satisfy that shape.
-export function resolveLeadFields(record, integ) {
+export function resolveLeadFields(rawRecord, integ) {
   const mapping = integ.fieldMapping || {}
   const defaults = integ.defaults || {}
+  // Flattening is a no-op for the already-flat sheet rows that also come
+  // through here, and the difference between a lead and a 400 for anything
+  // that posts a nested form payload.
+  const record = flattenRecord(rawRecord)
   // All the keys mapped onto a field, in mapping order — a field mapped from
   // two columns takes the first of them that actually carries a value.
   const reverseMapping = {}

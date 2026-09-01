@@ -1,47 +1,45 @@
-import React, { useEffect, useState } from 'react'
+// Performance — the funnel over time.
+//
+// Where the studio/associate report answers "how did this period go", this
+// page answers "what is the shape of the last 7 days / 12 months". It shares
+// the report kit with those pages, so a stat tile, a table and a chart behave
+// the same here as they do there: sortable columns, switchable chart type, a
+// table view of every plot, and a row that opens the leads behind it.
+import React, { useEffect, useMemo, useState } from 'react'
 import {
-  Users, Trophy, IndianRupee, CalendarCheck2, CalendarClock, ChevronRight,
-  BarChart3, RotateCcw, TrendingUp, TrendingDown, Wallet, SlidersHorizontal, X
+  Users, Trophy, IndianRupee, CalendarCheck2, CalendarClock, TrendingDown,
+  BarChart3, Wallet, SlidersHorizontal, X, ListOrdered, Percent
 } from 'lucide-react'
-import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip } from 'recharts'
 import { useApp } from '../store.jsx'
 import { api, buildQuery } from '../api.js'
 import { Spinner } from '../ui.jsx'
 import { fmtDate, money } from '../lib.js'
-import MetricCard from '../components/MetricCard.jsx'
 import { lifecycle } from '../chartPalette.js'
+import {
+  Section, StatTile, TileGrid, Segmented, RankTable, ChartFrame,
+  SavedViews, pctChange
+} from '../components/report/kit.jsx'
 
-const ACCENT_HEX = { violet: '#8b5cf6', emerald: '#10b981', rose: '#f43f5e', amber: '#f59e0b', sky: '#38bdf8' }
-function momOf(series) {
-  if (series.length < 2) return null
-  const prev = series[series.length - 2].value
-  const cur = series[series.length - 1].value
-  if (!prev) return null
-  return ((cur - prev) / prev) * 100
-}
-
-// Lifecycle roles come from the shared, validated palette so "won" is the
-// same green on every page and both themes get their own steps.
-const useColors = () => { const { theme } = useApp(); return lifecycle(theme === 'light' ? 'light' : 'dark') }
-const CURRENT_MONTH = new Date().toISOString().slice(0, 7)
 const EMPTY_FILTERS = { studio: '', associate: '' }
+const num = (n) => Number(n || 0).toLocaleString('en-IN')
 
 export default function Performance() {
-  const { openLead, dataVersion, boot, role, locationIds } = useApp()
-  const COLORS = useColors()
-  const [range, setRange] = useState('month')
-  const [filters, setFilters] = useState(() => (role === 'agent' && locationIds[0])
-    ? { ...EMPTY_FILTERS, studio: locationIds[0] }
-    : EMPTY_FILTERS)
+  const { openLead, dataVersion, boot, role, locationIds, theme, viewParams, toast } = useApp()
+  const mode = theme === 'light' ? 'light' : 'dark'
+  const COLORS = lifecycle(mode)
+
+  const [range, setRange] = useState(() => (viewParams.range === 'week' ? 'week' : 'month'))
+  const [filters, setFilters] = useState(() => ({
+    studio: viewParams.studio || ((role === 'agent' && locationIds[0]) ? locationIds[0] : ''),
+    associate: viewParams.associate || ''
+  }))
   const [panelOpen, setPanelOpen] = useState(false)
   const [data, setData] = useState(null)
   const [details, setDetails] = useState(null)
   const [loading, setLoading] = useState(false)
-  const [drawerBucket, setDrawerBucket] = useState(null)
+  const [openBucket, setOpenBucket] = useState(null)
+  const [detailTab, setDetailTab] = useState('all')
 
-  // `boot` (and therefore locationIds) is usually still empty on first render,
-  // so the lazy initializer above can't lock the filter. Re-apply the lock once
-  // the agent's locations actually arrive.
   useEffect(() => {
     if (role !== 'agent' || !locationIds[0]) return
     setFilters(f => (f.studio === locationIds[0] ? f : { ...f, studio: locationIds[0] }))
@@ -54,8 +52,12 @@ export default function Performance() {
   const scopeQuery = buildQuery({ range, studio: filters.studio, associate: filters.associate })
 
   useEffect(() => {
+    window.history.replaceState(null, '', `#performance?${new URLSearchParams({ range, ...(filters.studio ? { studio: filters.studio } : {}), ...(filters.associate ? { associate: filters.associate } : {}) })}`)
+  }, [range, filters.studio, filters.associate])
+
+  useEffect(() => {
     setLoading(true)
-    setDrawerBucket(null)
+    setOpenBucket(null)
     Promise.all([
       api.get(`/api/analytics/performance?${scopeQuery}`),
       api.get(`/api/analytics/performance/details?${scopeQuery}`)
@@ -65,292 +67,256 @@ export default function Performance() {
       .finally(() => setLoading(false))
   }, [scopeQuery, dataVersion])
 
-  const chartData = (data?.buckets || []).map(b => ({ ...b, missed: b.missed || 0, lost: b.lost || 0 }))
-  const t = data?.totals || {}
+  const buckets = useMemo(
+    () => (data?.buckets || []).map(b => ({
+      ...b,
+      missed: b.missed || 0,
+      lost: b.lost || 0,
+      winRate: b.newLeads ? Math.round((b.won / b.newLeads) * 100) : 0,
+      avgDeal: b.won ? Math.round(b.revenue / b.won) : 0,
+      followUpRate: b.followUps ? Math.round(((b.followUps - (b.missed || 0)) / b.followUps) * 100) : 0
+    })),
+    [data]
+  )
 
-  const nonEmpty = chartData.filter(b => (b.newLeads || 0) + (b.won || 0) + (b.revenue || 0) + (b.followUps || 0) > 0)
-  const bestBy = (fn) => nonEmpty.reduce((best, b) => (best && fn(best) >= fn(b) ? best : b), null)
-  const bestNew = bestBy(b => b.newLeads || 0)
-  const bestWon = bestBy(b => b.won || 0)
-  const bestRevenue = bestBy(b => b.revenue || 0)
-  const worstFollowUp = nonEmpty.reduce((worst, b) => {
-    if (!(b.followUps > 0)) return worst
-    const rate = ((b.followUps - (b.missed || 0)) / b.followUps)
-    return (!worst || rate < worst.rate) ? { ...b, rate } : worst
-  }, null)
+  const t = data?.totals || {}
   const winRate = t.newLeads ? Math.round((t.won / t.newLeads) * 100) : 0
   const avgDeal = t.won ? t.revenue / t.won : 0
   const avgPerLead = t.newLeads ? t.revenue / t.newLeads : 0
 
-  const newLeadsTrend = chartData.map(b => ({ label: b.label, value: b.newLeads || 0 }))
-  const wonTrend = chartData.map(b => ({ label: b.label, value: b.won || 0 }))
-  const revenueTrend = chartData.map(b => ({ label: b.label, value: b.revenue || 0 }))
-  const followUpTrend = chartData.map(b => ({ label: b.label, value: b.followUps ? Math.round(((b.followUps - (b.missed || 0)) / b.followUps) * 100) : 0 }))
-  const lostTrend = chartData.map(b => ({ label: b.label, value: b.lost || 0 }))
+  // The best and worst buckets are the two facts a person actually reads off a
+  // twelve-bar chart, so they are stated rather than left to be squinted at.
+  const nonEmpty = buckets.filter(b => b.newLeads || b.won || b.revenue || b.followUps)
+  const bestBy = (fn) => nonEmpty.reduce((best, b) => (best && fn(best) >= fn(b) ? best : b), null)
+  const bestNew = bestBy(b => b.newLeads)
+  const bestRevenue = bestBy(b => b.revenue)
+  const worstFollowUp = nonEmpty.filter(b => b.followUps > 0).reduce((worst, b) => (!worst || b.followUpRate < worst.followUpRate ? b : worst), null)
+
+  const detailFor = (bucket) => details?.buckets?.find(x => x.key === bucket?.key)
+  const detailRows = useMemo(() => {
+    const det = detailFor(openBucket)
+    if (!det) return []
+    const list = (value) => Array.isArray(value) ? value : []
+    const groups = [
+      ['New', 'newLeads'], ['Won', 'won'], ['Lost', 'lost'], ['Missed FU', 'missed']
+    ]
+    return groups.flatMap(([category, key]) => list(det[key]).filter(Boolean).map((l, i) => ({
+      ...l,
+      id: `${category}-${l.id || i}`,
+      leadId: l.id,
+      category,
+      associateName: (boot?.associates || []).find(a => a.id === l.associateId)?.name || 'Unassigned',
+      centerName: l.center || (boot?.locations || []).find(loc => loc.id === l.locationId)?.name || '—',
+      note: l.comments || l.remarks || ''
+    })))
+  }, [openBucket, details, boot])
+  const shownDetailRows = detailTab === 'all' ? detailRows : detailRows.filter(r => r.category === detailTab)
+
+  const viewState = { range, studio: filters.studio, associate: filters.associate }
+  const applyView = (state) => {
+    setRange(state.range === 'week' ? 'week' : 'month')
+    setFilters({ studio: state.studio || '', associate: state.associate || '' })
+  }
+  const copyLink = async () => {
+    try { await navigator.clipboard.writeText(window.location.href); toast('Link copied') }
+    catch (e) { toast('Could not copy the link', 'error') }
+  }
 
   return (
-    <div className="p-6 space-y-5">
-      <div className="flex flex-wrap items-center gap-3">
-        <div>
-          <h2 className="font-display text-lg font-bold text-white flex items-center gap-2">
-            <BarChart3 size={18} className="text-rose-400" /> Performance
-          </h2>
-          <p className="text-sm text-slate-500 mt-0.5">Leads, wins, losses, revenue and follow-up discipline across the funnel.</p>
+    <div className="rp-page">
+      <header className="rp-header">
+        <div className="rp-header-titles">
+          <h2>Performance</h2>
+          <p>Leads, wins, losses, revenue and follow-up discipline across the funnel — click any period to see the leads inside it.</p>
         </div>
-
-        <div className="ml-auto flex items-center gap-2">
-          <button className={`btn ${panelOpen ? 'btn-soft' : 'btn-ghost'} !py-2`} onClick={() => setPanelOpen(o => !o)}>
-            <SlidersHorizontal size={14} /> Filters {hasFilters && <span className="chip !px-1.5 !py-0.5 !text-xs bg-rose-500/20 text-rose-300">!</span>}
+        <div className="rp-header-controls">
+          <Segmented
+            ariaLabel="Range"
+            value={range}
+            onChange={setRange}
+            options={[{ value: 'week', label: 'Last 7 days' }, { value: 'month', label: 'Last 12 months' }]}
+          />
+          <button type="button" className={`rp-btn ${panelOpen || hasFilters ? 'rp-btn-primary' : ''}`} onClick={() => setPanelOpen(o => !o)}>
+            <SlidersHorizontal size={13} /> Filters{hasFilters ? ' · on' : ''}
           </button>
-          {hasFilters && <button className="btn btn-ghost !py-2" onClick={clearFilters}><X size={14} /> Clear</button>}
-          <div className="flex items-center gap-1 rounded-xl bg-white/5 border border-white/10 p-1">
-            {['week', 'month'].map(r => (
-              <button
-                key={r}
-                onClick={() => setRange(r)}
-                className={`px-3 py-1.5 rounded-lg text-sm font-semibold transition-all ${
-                  range === r ? 'bg-gradient-to-r from-rose-500/20 to-fuchsia-500/15 text-white' : 'text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                {r === 'week' ? 'Last 7 days' : 'Last 12 months'}
-              </button>
-            ))}
-          </div>
+          {hasFilters && <button type="button" className="rp-btn" onClick={clearFilters}><X size={13} /> Clear</button>}
         </div>
+      </header>
+
+      <div className="rp-context">
+        <BarChart3 size={13} />
+        <b>{filters.studio ? (boot?.locations || []).find(l => l.id === filters.studio)?.name : 'All studios'}</b>
+        {filters.associate && <><span>·</span><b>{(boot?.associates || []).find(a => a.id === filters.associate)?.name}</b></>}
+        <span>·</span>
+        <span>{range === 'week' ? 'Last 7 days' : 'Last 12 months'}</span>
+        <span style={{ marginLeft: 'auto' }} />
+        <SavedViews page="performance" state={viewState} onApply={applyView} onCopyLink={copyLink} />
       </div>
 
       {panelOpen && (
-        <div className="card p-4 grid grid-cols-1 sm:grid-cols-2 gap-3" style={{ animation: 'fadeIn .15s ease' }}>
-          <div>
-            <label className="text-xs uppercase tracking-wider text-slate-500 font-semibold mb-1 block">Studio</label>
-            <select className="input !py-1.5" value={filters.studio} onChange={setF('studio')} disabled={role === 'agent'}>
-              <option value="">All studios</option>
-              {(boot?.locations || []).map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
-            </select>
+        <Section title="Filters" icon={SlidersHorizontal}>
+          <div className="rp-grid-3">
+            <label>
+              <span className="rp-tile-label" style={{ display: 'block', marginBottom: 5 }}>Studio</span>
+              <select className="input" value={filters.studio} onChange={setF('studio')} disabled={role === 'agent'}>
+                <option value="">All studios</option>
+                {(boot?.locations || []).map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
+              </select>
+            </label>
+            <label>
+              <span className="rp-tile-label" style={{ display: 'block', marginBottom: 5 }}>Associate</span>
+              <select className="input" value={filters.associate} onChange={setF('associate')}>
+                <option value="">All associates</option>
+                {(boot?.associates || []).filter(a => a.active !== false).map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+              </select>
+            </label>
           </div>
-          <div>
-            <label className="text-xs uppercase tracking-wider text-slate-500 font-semibold mb-1 block">Associate</label>
-            <select className="input !py-1.5" value={filters.associate} onChange={setF('associate')}>
-              <option value="">All associates</option>
-              {(boot?.associates || []).filter(a => a.active !== false).map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
-            </select>
-          </div>
-        </div>
+        </Section>
       )}
 
-      {loading && (
-        <div className="py-20 text-center text-slate-500"><Spinner size={22} /></div>
-      )}
+      {loading && <div className="rp-loading"><Spinner size={22} /></div>}
 
       {!loading && data && (
-        <div className="space-y-5">
-          <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-3">
-            <MetricCard
-              icon={Users} title="New leads" value={t.newLeads} color={ACCENT_HEX.violet}
-              description={`Best: ${bestNew ? `${bestNew.label} (${bestNew.newLeads})` : '—'} · ${t.won || 0} converted (${winRate}%) · avg ${money(avgPerLead)}/lead`}
-              trend={newLeadsTrend} mom={momOf(newLeadsTrend)} yoy={data.yoy?.newLeads}
-            />
-            <MetricCard
-              icon={Trophy} title="Won deals" value={t.won} color={ACCENT_HEX.emerald}
-              description={`Win rate ${winRate}% · avg deal ${money(avgDeal)} · best ${bestWon ? `${bestWon.label} (${bestWon.won})` : '—'}`}
-              trend={wonTrend} mom={momOf(wonTrend)} yoy={data.yoy?.won}
-            />
-            <MetricCard
-              icon={TrendingDown} title="Lost deals" value={t.lost || 0} color={ACCENT_HEX.rose}
-              description={`Loss rate ${t.lossRate || 0}% of decided deals · ${money(t.lostRevenue || 0)} in lost pipeline value`}
-              trend={lostTrend} mom={momOf(lostTrend)} yoy={data.yoy?.lost}
-            />
-            <MetricCard
-              icon={IndianRupee} title="Revenue" value={money(t.revenue)} color={ACCENT_HEX.amber}
-              description={`Avg deal ${money(avgDeal)} · ${money(avgPerLead)}/lead · best ${bestRevenue ? `${bestRevenue.label} (${money(bestRevenue.revenue)})` : '—'}`}
-              trend={revenueTrend} mom={momOf(revenueTrend)} yoy={data.yoy?.revenue}
-            />
-            <MetricCard
-              icon={Wallet} title="Open pipeline" value={money(t.openPipelineValue || 0)} color={ACCENT_HEX.sky}
-              description="Estimated value of leads still open right now, within the current filter scope."
-              trend={[]} mom={null}
-            />
-            <MetricCard
-              icon={CalendarCheck2} title="Follow-up completion" value={`${t.followUpRate || 0}%`} color={ACCENT_HEX.amber}
-              description={`${t.missed || 0} missed of ${t.followUps || 0} · worst ${worstFollowUp ? `${worstFollowUp.label} (${Math.round(worstFollowUp.rate * 100)}%)` : '—'}`}
-              trend={followUpTrend} mom={momOf(followUpTrend)} yoy={data.yoy?.followUpRate}
-            />
+        <>
+          <Section title="Totals" subtitle={`Across the ${range === 'week' ? 'last 7 days' : 'last 12 months'}; change is against the same period last year`} icon={BarChart3} className="is-flush">
+            <TileGrid cols={6}>
+              <StatTile icon={Users} label="New leads" value={num(t.newLeads)} delta={data.yoy?.newLeads} sub={bestNew ? `best ${bestNew.label} (${num(bestNew.newLeads)})` : undefined} />
+              <StatTile icon={Trophy} label="Won" value={num(t.won)} delta={data.yoy?.won} sub={`${winRate}% of intake`} tone="good" />
+              <StatTile icon={TrendingDown} label="Lost" value={num(t.lost)} delta={data.yoy?.lost} invertDelta sub={`${t.lossRate || 0}% of decided`} tone={t.lost ? 'bad' : undefined} />
+              <StatTile icon={IndianRupee} label="Revenue" value={money(t.revenue)} delta={data.yoy?.revenue} sub={bestRevenue ? `best ${bestRevenue.label}` : undefined} />
+              <StatTile icon={Wallet} label="Open pipeline" value={money(t.openPipelineValue || 0)} sub="value of leads still open" />
+              <StatTile
+                icon={CalendarCheck2} label="Follow-up done" value={`${t.followUpRate || 0}%`}
+                delta={data.yoy?.followUpRate} deltaUnit="pt"
+                tone={(t.followUpRate || 0) >= 80 ? 'good' : (t.followUpRate || 0) >= 50 ? 'warn' : 'bad'}
+                sub={worstFollowUp ? `worst ${worstFollowUp.label} (${worstFollowUp.followUpRate}%)` : undefined}
+              />
+            </TileGrid>
+          </Section>
+
+          <div className="rp-grid-2">
+            <Section title="Funnel over time" subtitle="Counts per period" icon={BarChart3}>
+              <ChartFrame
+                data={buckets}
+                xKey="label"
+                defaultType="bar"
+                height={260}
+                valueFormat={num}
+                series={[
+                  { key: 'newLeads', label: 'New leads', color: COLORS.newLeads },
+                  { key: 'won', label: 'Won', color: COLORS.won },
+                  { key: 'lost', label: 'Lost', color: COLORS.lost },
+                  { key: 'missed', label: 'Missed follow-ups', color: COLORS.missed }
+                ]}
+                onPointClick={(label) => {
+                  const bucket = buckets.find(b => b.label === label)
+                  if (bucket) { setOpenBucket(bucket); setDetailTab('all') }
+                }}
+              />
+            </Section>
+
+            {/* Revenue plots on its own axis-free chart rather than sharing one
+                with counts — a rupee value and a lead count never belong to the
+                same y-scale. */}
+            <Section title="Revenue over time" subtitle="Won revenue per period" icon={IndianRupee}>
+              <ChartFrame
+                data={buckets}
+                xKey="label"
+                defaultType="area"
+                height={260}
+                valueFormat={money}
+                series={[{ key: 'revenue', label: 'Revenue' }]}
+              />
+            </Section>
           </div>
 
-          <div className="card p-4">
-            <div className="flex items-center gap-4 text-xs text-slate-400 mb-3">
-              <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm" style={{ background: COLORS.newLeads }} /> New</span>
-              <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm" style={{ background: COLORS.won }} /> Won</span>
-              <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm" style={{ background: COLORS.lost }} /> Lost</span>
-              <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm" style={{ background: COLORS.missed }} /> Missed FU</span>
-            </div>
-            <div className="chart-3d h-[280px]">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={chartData} margin={{ top: 5, right: 5, left: -18, bottom: 0 }}>
-                  <CartesianGrid stroke="rgba(255,255,255,0.06)" vertical={false} />
-                  <XAxis dataKey="label" tick={{ fill: 'var(--axis)', fontSize: 11 }} axisLine={false} tickLine={false} />
-                  <YAxis tick={{ fill: 'var(--axis)', fontSize: 11 }} axisLine={false} tickLine={false} />
-                  <Tooltip cursor={{ fill: 'rgba(255,255,255,0.04)' }} contentStyle={tooltipStyle()} />
-                  <Bar dataKey="newLeads" name="New leads" fill={COLORS.newLeads} radius={[4, 4, 0, 0]} activeBar={{ opacity: 1 }} />
-                  <Bar dataKey="won" name="Won" fill={COLORS.won} radius={[4, 4, 0, 0]} activeBar={{ opacity: 1 }} />
-                  <Bar dataKey="lost" name="Lost" fill={COLORS.lost} radius={[4, 4, 0, 0]} activeBar={{ opacity: 1 }} />
-                  <Bar dataKey="missed" name="Missed follow-ups" fill={COLORS.missed} radius={[4, 4, 0, 0]} activeBar={{ opacity: 1 }} />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          </div>
+          <Section title="Conversion and discipline" subtitle="Rates per period, on one scale" icon={Percent}>
+            <ChartFrame
+              data={buckets}
+              xKey="label"
+              defaultType="line"
+              height={210}
+              valueFormat={v => `${v}%`}
+              series={[
+                { key: 'winRate', label: 'Win rate', color: COLORS.won },
+                { key: 'followUpRate', label: 'Follow-up completion', color: COLORS.missed }
+              ]}
+            />
+          </Section>
 
-          <div className="card overflow-hidden">
-            <div className="px-5 py-3 border-b border-white/8 flex items-center gap-2 text-sm font-semibold text-slate-200">
-              <CalendarClock size={13} className="text-cyan-400" /> Bucket breakdown
-              <span className="ml-auto flex items-center gap-1.5 text-xs font-normal text-slate-500"><TrendingUp size={12} /> Click a row to open its leads</span>
-            </div>
-            <div className="overflow-x-auto scrollbar-thin">
-              <table className="w-full text-left">
-                <thead>
-                  <tr className="text-xs uppercase tracking-wider text-slate-500 border-b border-white/8 sticky top-0 z-10 bg-[var(--tt-bg,#0d1220)]">
-                    <th className="px-4 py-2.5 font-semibold">Period</th>
-                    <th className="px-3 py-2.5 font-semibold text-center">New</th>
-                    <th className="px-3 py-2.5 font-semibold text-center">Won</th>
-                    <th className="px-3 py-2.5 font-semibold text-center">Lost</th>
-                    <th className="px-3 py-2.5 font-semibold text-center">Missed</th>
-                    <th className="px-3 py-2.5 font-semibold text-center">Win rate</th>
-                    <th className="px-3 py-2.5 font-semibold text-center">Revenue</th>
-                    <th className="px-3 py-2.5 font-semibold text-center">Avg deal</th>
-                    <th className="px-3 py-2.5 font-semibold text-center">Detail</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {chartData.map((b, i) => {
-                    const det = details?.buckets?.find(x => x.key === b.key)
-                    const hasDetail = (det?.newLeads?.length || 0) + (det?.won?.length || 0) + (det?.missed?.length || 0) + (det?.lost?.length || 0) > 0
-                    const isActive = drawerBucket?.key === b.key
-                    const rowWinRate = b.newLeads ? Math.round((b.won / b.newLeads) * 100) : 0
-                    const rowAvgDeal = b.won ? b.revenue / b.won : 0
-                    return (
-                      <React.Fragment key={b.key}>
-                      <tr
-                        className={`border-b border-white/5 transition-colors ${hasDetail ? 'cursor-pointer hover:bg-white/[0.05]' : 'cursor-default'} ${i % 2 === 1 ? 'bg-white/[0.015]' : ''} ${isActive ? 'bg-white/[0.06]' : ''}`}
-                        onClick={() => hasDetail && setDrawerBucket(isActive ? null : b)}
-                      >
-                        <td className="px-4 py-2.5 text-sm text-slate-300 font-medium">{b.label}</td>
-                        <td className="px-3 py-2.5 text-center text-sm text-violet-400 mono">{b.newLeads || 0}</td>
-                        <td className="px-3 py-2.5 text-center text-sm text-emerald-400 mono">{b.won || 0}</td>
-                        <td className="px-3 py-2.5 text-center text-sm mono">{b.lost ? <span className="text-rose-400">{b.lost}</span> : <span className="text-slate-500">0</span>}</td>
-                        <td className="px-3 py-2.5 text-center text-sm mono">{b.missed ? <span className="text-amber-400">{b.missed}</span> : <span className="text-slate-500">0</span>}</td>
-                        <td className="px-3 py-2.5 text-center">
-                          <div className="flex items-center gap-1.5 justify-center">
-                            <div className="w-10 h-1.5 rounded-full bg-white/8 overflow-hidden">
-                              <div className="h-full rounded-full bg-emerald-400" style={{ width: `${Math.min(100, rowWinRate)}%` }} />
-                            </div>
-                            <span className="text-xs text-slate-400 mono w-7 text-right">{rowWinRate}%</span>
-                          </div>
-                        </td>
-                        <td className="px-3 py-2.5 text-center text-sm text-slate-200 mono">{money(b.revenue || 0)}</td>
-                        <td className="px-3 py-2.5 text-center text-sm text-slate-400 mono">{b.won ? money(rowAvgDeal) : '—'}</td>
-                        <td className="px-3 py-2.5 text-center">
-                          <span className={`performance-row-toggle inline-flex items-center justify-center w-6 h-6 rounded-lg border transition-all ${isActive ? 'is-open' : ''} ${hasDetail ? 'bg-white/5 border-white/10 text-slate-400' : 'bg-transparent border-transparent text-slate-700'}`}>
-                            <ChevronRight size={12} />
-                          </span>
-                        </td>
-                      </tr>
-                      {isActive && det && (
-                        <tr className="performance-inline-drill-row">
-                          <td colSpan={9} className="performance-inline-drill-cell">
-                            <div className="performance-inline-drill">
-                              <div className="performance-inline-drill-head">
-                                <div>
-                                  <strong>{b.label} lead details</strong>
-                                  <span>{b.newLeads || 0} new · {b.won || 0} won · {b.lost || 0} lost · {b.missed || 0} missed follow-ups</span>
-                                </div>
-                                <button className="btn btn-ghost !py-1.5 !px-2.5 !text-xs" onClick={(event) => { event.stopPropagation(); setDrawerBucket(null) }}><X size={12} /> Close</button>
-                              </div>
-                              <PerformanceDetailTable detail={det} boot={boot} openLead={openLead} />
-                            </div>
-                          </td>
-                        </tr>
-                      )}
-                      </React.Fragment>
-                    )
-                  })}
-                </tbody>
-                <tfoot>
-                  <tr className="border-t border-white/10 bg-white/[0.03] text-sm font-semibold">
-                    <td className="px-4 py-2.5 text-slate-300">Total</td>
-                    <td className="px-3 py-2.5 text-center text-violet-400 mono">{t.newLeads || 0}</td>
-                    <td className="px-3 py-2.5 text-center text-emerald-400 mono">{t.won || 0}</td>
-                    <td className="px-3 py-2.5 text-center text-rose-400 mono">{t.lost || 0}</td>
-                    <td className="px-3 py-2.5 text-center text-amber-400 mono">{t.missed || 0}</td>
-                    <td className="px-3 py-2.5 text-center text-slate-300 mono">{winRate}%</td>
-                    <td className="px-3 py-2.5 text-center text-slate-200 mono">{money(t.revenue || 0)}</td>
-                    <td className="px-3 py-2.5 text-center text-slate-400 mono">{t.won ? money(avgDeal) : '—'}</td>
-                    <td className="px-3 py-2.5" />
-                  </tr>
-                </tfoot>
-              </table>
-            </div>
-          </div>
+          <Section
+            title="Period breakdown"
+            subtitle="Sort by any column; click a period for the leads inside it"
+            icon={CalendarClock}
+            className="is-flush"
+          >
+            <RankTable
+              rows={buckets}
+              initialSort={{ key: 'key', dir: 'asc' }}
+              onRowClick={(row) => { setOpenBucket(openBucket?.key === row.key ? null : row); setDetailTab('all') }}
+              columns={[
+                { key: 'label', label: 'Period', tone: 'strong' },
+                { key: 'newLeads', label: 'New', align: 'right', format: num },
+                { key: 'won', label: 'Won', align: 'right', tone: 'good', format: num },
+                { key: 'lost', label: 'Lost', align: 'right', tone: row => row.lost ? 'bad' : undefined, format: num },
+                { key: 'missed', label: 'Missed FU', align: 'right', tone: row => row.missed ? 'warn' : undefined, format: num },
+                { key: 'winRate', label: 'Win rate', align: 'right', format: v => `${v}%` },
+                { key: 'followUpRate', label: 'FU done', align: 'right', tone: row => row.followUpRate >= 80 ? 'good' : row.followUpRate >= 50 ? 'warn' : 'bad', format: v => `${v}%` },
+                { key: 'revenue', label: 'Revenue', align: 'right', tone: 'strong', format: v => money(v) },
+                { key: 'avgDeal', label: 'Avg deal', align: 'right', format: v => v ? money(v) : '—' }
+              ]}
+            />
+          </Section>
 
-          <div className="flex items-center gap-2 text-xs text-slate-500">
-            <RotateCcw size={12} /> Refreshes automatically when leads change.
-          </div>
-        </div>
+          {openBucket && (
+            <Section
+              title={`${openBucket.label} — the leads`}
+              subtitle={`${num(openBucket.newLeads)} new · ${num(openBucket.won)} won · ${num(openBucket.lost)} lost · ${num(openBucket.missed)} missed follow-ups`}
+              icon={ListOrdered}
+              className="is-flush"
+              actions={
+                <>
+                  <Segmented
+                    size="sm"
+                    ariaLabel="Lead category"
+                    value={detailTab}
+                    onChange={setDetailTab}
+                    options={[
+                      { value: 'all', label: `All (${detailRows.length})` },
+                      { value: 'New', label: 'New' },
+                      { value: 'Won', label: 'Won' },
+                      { value: 'Lost', label: 'Lost' },
+                      { value: 'Missed FU', label: 'Missed' }
+                    ]}
+                  />
+                  <button type="button" className="rp-icon-btn" onClick={() => setOpenBucket(null)} aria-label="Close period detail"><X size={14} /></button>
+                </>
+              }
+            >
+              <RankTable
+                rows={shownDetailRows}
+                initialSort={{ key: 'createdAt', dir: 'desc' }}
+                onRowClick={(row) => row.leadId && openLead(row.leadId)}
+                emptyText="No lead records in this period."
+                maxHeight={420}
+                columns={[
+                  { key: 'category', label: 'Bucket', format: v => <span className="rp-pill">{v}</span> },
+                  { key: 'fullName', label: 'Lead', tone: 'strong', format: (v, row) => (<><span className="rp-lead-name">{v || '—'}</span><span className="rp-lead-remark">{row.stage || 'No stage'}</span></>) },
+                  { key: 'associateName', label: 'Owner' },
+                  { key: 'sourceName', label: 'Source', format: v => v || '—' },
+                  { key: 'centerName', label: 'Studio' },
+                  { key: 'classType', label: 'Class type', format: v => v || '—' },
+                  { key: 'note', label: 'Remark', format: v => <span className="rp-lead-remark" title={v}>{v || '—'}</span>, sortable: false },
+                  { key: 'value', label: 'Value', align: 'right', format: v => v ? money(v) : '—' },
+                  { key: 'createdAt', label: 'Created', align: 'right', format: v => fmtDate(v) }
+                ]}
+              />
+            </Section>
+          )}
+
+          <p className="rp-bar-sub">Averages this period: {money(avgDeal)} per won deal, {money(avgPerLead)} per lead received. Refreshes automatically when leads change.</p>
+        </>
       )}
-
     </div>
   )
-}
-
-function PerformanceDetailTable({ detail, boot, openLead }) {
-  const safeList = (value) => Array.isArray(value) ? value : []
-  const groups = [
-    ['New', 'violet', safeList(detail?.newLeads)],
-    ['Won', 'emerald', safeList(detail?.won)],
-    ['Lost', 'rose', safeList(detail?.lost)],
-    ['Missed FU', 'amber', safeList(detail?.missed)]
-  ]
-  const rows = groups.flatMap(([category, tone, items]) => items.filter(Boolean).map((lead, index) => ({ ...lead, category, tone, rowKey: `${category}-${lead.id || 'unknown'}-${index}` })))
-  const associates = Object.fromEntries(safeList(boot?.associates).map(associate => [associate.id, associate.name]))
-  const locations = Object.fromEntries(safeList(boot?.locations).map(location => [location.id, location.name]))
-
-  return (
-    <div className="performance-detail-table-wrap">
-      <table className="performance-detail-table">
-        <thead>
-          <tr>
-            <th>Category</th><th>Lead</th><th>Created at</th><th>Source</th><th>Status</th>
-            <th>Associate</th><th>Center</th><th>Class type</th><th>Remarks</th><th>Value</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map(row => (
-            <tr key={row.rowKey} onClick={() => row.id && openLead(row.id)}>
-              <td><span className={`performance-detail-category tone-${row.tone}`}>{row.category}</span></td>
-              <td><strong>{row.fullName || '—'}</strong><small>{row.stage || 'No stage'}</small></td>
-              <td className="mono">{fmtDate(row.createdAt)}</td>
-              <td>{row.sourceName || '—'}</td>
-              <td><span className="performance-detail-status">{row.status || '—'}</span></td>
-              <td>{associates[row.associateId] || 'Unassigned'}</td>
-              <td>{row.center || locations[row.locationId] || '—'}</td>
-              <td>{row.classType || '—'}</td>
-              <td className="performance-detail-remarks" title={row.comments || row.remarks || ''}>{row.comments || row.remarks || '—'}</td>
-              <td className="mono performance-detail-value">{row.value ? money(row.value) : '—'}</td>
-            </tr>
-          ))}
-          {!rows.length && <tr><td colSpan={10} className="performance-detail-empty">No lead records in this period.</td></tr>}
-        </tbody>
-      </table>
-    </div>
-  )
-}
-
-function tooltipStyle() {
-  return {
-    background: 'var(--tt-bg)',
-    border: '1px solid var(--tt-border)',
-    borderRadius: 12,
-    fontSize: 12,
-    color: 'var(--tt-color)',
-    boxShadow: '0 10px 30px rgba(0,0,0,.5)'
-  }
 }

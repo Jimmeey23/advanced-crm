@@ -444,7 +444,7 @@ export default function App() {
             <Topbar onAdd={() => setAddOpen(true)} />
             <main className="flex-1 overflow-y-auto scrollbar-thin">
               <MarqueeBanner />
-              <Shell />
+              <PageErrorBoundary><Shell /></PageErrorBoundary>
             </main>
           </div>
         </div>
@@ -455,6 +455,45 @@ export default function App() {
       <Toasts />
     </AppProvider>
   )
+}
+
+// A render error in one page used to blank the whole app — the shell, the
+// sidebar and every other route with it — leaving no way back except a manual
+// reload. The boundary keeps the chrome alive and shows what broke.
+class PageErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props)
+    this.state = { error: null }
+  }
+
+  static getDerivedStateFromError(error) {
+    return { error }
+  }
+
+  componentDidCatch(error, info) {
+    console.error('[page error]', error, info?.componentStack)
+  }
+
+  componentDidUpdate(prevProps) {
+    // A new page mounting is a fresh chance to render — without this the
+    // boundary would keep showing the old error after navigating away.
+    if (prevProps.children !== this.props.children && this.state.error) this.setState({ error: null })
+  }
+
+  render() {
+    if (!this.state.error) return this.props.children
+    return (
+      <div className="rp-page">
+        <div className="rp-section">
+          <div className="rp-section-head"><div className="rp-section-titles"><h3>This page hit an error</h3></div></div>
+          <div className="rp-section-body">
+            <p className="rp-empty" style={{ textAlign: 'left' }}>{this.state.error.message || String(this.state.error)}</p>
+            <button type="button" className="rp-btn" onClick={() => this.setState({ error: null })}>Try again</button>
+          </div>
+        </div>
+      </div>
+    )
+  }
 }
 
 function Shell() {

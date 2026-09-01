@@ -1,23 +1,33 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react'
+// Studio / associate report.
+//
+// The page answers four questions in order, and everything on it is either an
+// answer or a way to interrogate one:
+//   1. How did this period go, against the last one and against last year?
+//   2. What changed, in words? (server-generated insights)
+//   3. Who and what drove it? (rankings, source ROI, stage and cohort tables)
+//   4. What is stuck? (pipeline ageing, follow-up health, top open deals)
+//
+// Every number that stands for a set of leads is clickable and opens the same
+// drill panel, which lists the leads with enough detail to act on them and
+// opens any of them in the lead drawer. Control state lives in the URL hash,
+// so a report is shareable, and can be stored as a named saved view.
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
-  Users, Target, CheckCircle2, Trophy, IndianRupee, TrendingUp,
-  Building2, UserCircle2, CalendarRange, ChevronDown, Filter, Radio,
-  PieChart as PieChartIcon, Layers, ListFilter, Download, FileDown
+  Users, Target, CheckCircle2, Trophy, IndianRupee, TrendingUp, Building2,
+  UserCircle2, CalendarRange, Download, FileDown, Gauge, Timer, Layers,
+  Radio, Flame, ListOrdered, GitCompare, AlertTriangle, Sparkles, Wallet,
+  CalendarDays, PieChart as PieIcon, ArrowUpRight, ArrowDownRight
 } from 'lucide-react'
-import {
-  ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
-  BarChart, Bar, PieChart, Pie, Cell
-} from 'recharts'
 import { useApp } from '../store.jsx'
 import { useFetch } from '../hooks.js'
-import { api, buildQuery } from '../api.js'
+import { api } from '../api.js'
 import { money, fmtDate, downloadText } from '../lib.js'
 import { Spinner, Avatar } from '../ui.jsx'
-
-const DONUT_COLORS = ['#f43f5e', '#8b5cf6', '#06b6d4', '#f59e0b', '#10b981', '#6366f1', '#ec4899', '#14b8a6']
-const CHANNEL_COLORS = { call: '#06b6d4', whatsapp: '#10b981', email: '#8b5cf6', sms: '#f59e0b' }
-const CHANNEL_LABELS = { call: 'Call', whatsapp: 'WhatsApp', email: 'Email', sms: 'SMS' }
-const FUNNEL_COLORS = { new: '#8b5cf6', trial: '#06b6d4', won: '#10b981', lost: '#f43f5e' }
+import { seriesColor, status as statusColor } from '../chartPalette.js'
+import {
+  Section, StatTile, TileGrid, Delta, InsightList, Segmented, RankTable,
+  DrillPanel, SavedViews, ChartFrame, pctChange, csvRows
+} from './report/kit.jsx'
 
 const PRESETS = [
   { id: 'prev_week', label: 'Previous week' },
@@ -29,34 +39,32 @@ const PRESETS = [
   { id: 'custom', label: 'Custom period' }
 ]
 
-const SERIES = [
-  { key: 'leadsReceived', label: 'Leads received', color: '#8b5cf6' },
-  { key: 'trialsCompleted', label: 'Trials completed', color: '#06b6d4' },
-  { key: 'converted', label: 'Converted', color: '#10b981' }
+const TREND_SERIES = [
+  { key: 'leadsReceived', label: 'Leads received' },
+  { key: 'trialsCompleted', label: 'Trials completed' },
+  { key: 'converted', label: 'Converted' },
+  { key: 'revenue', label: 'Revenue' }
 ]
 
-const tooltipStyle = () => ({
-  background: 'var(--tt-bg)', border: '1px solid var(--tt-border)', borderRadius: 12,
-  fontSize: 12, color: 'var(--tt-color)', boxShadow: '0 10px 30px rgba(0,0,0,.5)'
-})
-const AXIS = { fill: 'var(--axis)', fontSize: 10.5 }
+const num = (n) => Number(n || 0).toLocaleString('en-IN')
 
-export default function ReportOverview({ title, desc }) {
-  const { openLead, role, locationIds, associateId: myAssociateId, boot } = useApp()
+export default function ReportOverview({ title, desc, page = 'studio-weekly' }) {
+  const { openLead, role, locationIds, associateId: myAssociateId, boot, theme, viewParams, toast } = useApp()
+  const mode = theme === 'light' ? 'light' : 'dark'
   const locked = role === 'agent'
-  const [scope, setScope] = useState('studio')
-  const [entityId, setEntityId] = useState(() => (locked && locationIds[0]) ? locationIds[0] : '')
-  const [preset, setPreset] = useState('prev_week')
-  const [dateFrom, setDateFrom] = useState('')
-  const [dateTo, setDateTo] = useState('')
-  const [visibleSeries, setVisibleSeries] = useState(() => new Set(SERIES.map(s => s.key)))
-  const [drill, setDrill] = useState(null) // { field, value, label }
+
+  const [scope, setScope] = useState(() => (viewParams.scope === 'associate' ? 'associate' : 'studio'))
+  const [entityId, setEntityId] = useState(() => viewParams.entityId || ((locked && locationIds[0]) ? locationIds[0] : ''))
+  const [preset, setPreset] = useState(() => viewParams.preset || 'prev_week')
+  const [dateFrom, setDateFrom] = useState(() => viewParams.from || '')
+  const [dateTo, setDateTo] = useState(() => viewParams.to || '')
+  const [compareIds, setCompareIds] = useState(() => (viewParams.compare ? viewParams.compare.split(',').filter(Boolean) : []))
+  const [compareOpen, setCompareOpen] = useState(() => !!viewParams.compare)
+  const [drill, setDrill] = useState(null)
+  const [topTab, setTopTab] = useState('wins')
   const [exporting, setExporting] = useState(false)
   const reportRef = useRef(null)
 
-  // Agents may switch between their own studio and their own associate
-  // profile — the scope toggle itself isn't locked — but the id is always
-  // forced to "them", never a picker over other studios/associates.
   useEffect(() => {
     if (!locked) return
     const forced = scope === 'studio' ? locationIds[0] : myAssociateId
@@ -73,457 +81,746 @@ export default function ReportOverview({ title, desc }) {
     return p.toString()
   }, [scope, entityId, preset, customRange, dateFrom, dateTo])
 
-  const { data, loading, reload } = useFetch(() => api.get(`/api/analytics/report?${params}`), [params])
+  // The address bar mirrors the controls, so any state a person is looking at
+  // can be sent to someone else verbatim.
+  useEffect(() => {
+    const hashState = new URLSearchParams({ scope, ...(entityId ? { entityId } : {}), ...(customRange ? { from: dateFrom, to: dateTo, preset: 'custom' } : { preset }), ...(compareIds.length ? { compare: compareIds.join(',') } : {}) })
+    window.history.replaceState(null, '', `#${page}?${hashState.toString()}`)
+  }, [page, scope, entityId, preset, customRange, dateFrom, dateTo, compareIds])
 
-  // Reset the entity selection when switching scope — an associate id is
-  // meaningless as a locationId and vice versa. Agents are locked to their
-  // own studio, so this reset never applies to them (scope switching itself
-  // is disabled below).
+  const { data: raw, loading, error } = useFetch(() => api.get(`/api/analytics/report?${params}`), [params])
+
+  // The page reads roughly twenty aggregates off one payload. A server that
+  // predates any of them (an older build still running, a proxy serving a
+  // cached response) would otherwise take the whole tab down with a TypeError
+  // on the first missing key, so the payload is normalised once here and every
+  // section below can read it without optional chaining on every line.
+  const data = useMemo(() => {
+    if (!raw) return null
+    const metrics = (m) => ({
+      label: '', leadsReceived: 0, trialsScheduled: 0, trialsCompleted: 0, converted: 0,
+      conversionRate: 0, revenue: 0, ltv: 0, followUps: 0, missed: 0, followUpRate: 0, ...(m || {})
+    })
+    return {
+      ...raw,
+      entities: raw.entities || [],
+      period: raw.period || { label: '—', start: '', end: '' },
+      comparisons: {
+        current: metrics(raw.comparisons?.current),
+        previousPeriod: metrics(raw.comparisons?.previousPeriod),
+        yoy: metrics(raw.comparisons?.yoy)
+      },
+      trend: raw.trend || [],
+      funnel: { new: 0, trial: 0, won: 0, lost: 0, ...(raw.funnel || {}) },
+      stageBreakdown: { rows: [], totals: {}, ...(raw.stageBreakdown || {}) },
+      sourceBreakdown: { rows: [], totals: {}, ...(raw.sourceBreakdown || {}) },
+      revenueMix: raw.revenueMix || [],
+      cohortConversion: raw.cohortConversion || [],
+      leaderboard: raw.leaderboard || [],
+      rankings: raw.rankings || [],
+      sourceRoi: raw.sourceRoi || [],
+      weekdayPattern: raw.weekdayPattern || [],
+      lostBySource: raw.lostBySource || [],
+      insights: raw.insights || [],
+      goals: raw.goals || { perAssociate: [], perStudio: [] },
+      velocity: {
+        wonCount: 0, avgDaysToWin: 0, medianDaysToWin: 0, avgDaysToFirstTouch: 0,
+        medianDaysToFirstTouch: 0, untouchedLeads: 0, touchedLeads: 0, avgTouchesToWin: 0,
+        ...(raw.velocity || {})
+      },
+      ageing: { buckets: [], stages: [], openCount: 0, oldest: null, ...(raw.ageing || {}) },
+      topLeads: { wins: [], openDeals: [], losses: [], ...(raw.topLeads || {}) },
+      followUpHealth: {
+        logged: 0, done: 0, missed: 0, overdue: 0, completionRate: 0,
+        avgPerLead: 0, leadsWithNoFollowUp: 0, ...(raw.followUpHealth || {})
+      }
+    }
+  }, [raw])
+
+  const isFirstScope = useRef(true)
   useEffect(() => {
     if (locked) return
+    if (isFirstScope.current) { isFirstScope.current = false; return }
     setEntityId('')
+    setCompareIds([])
   }, [scope, locked])
 
-  const toggleSeries = (key) => setVisibleSeries(s => {
-    const next = new Set(s)
-    if (next.has(key)) next.delete(key); else next.add(key)
-    return next
-  })
-
-  const openDrill = (field, value) => setDrill({ field, value })
-  const drillParams = drill ? new URLSearchParams({ scope, ...(entityId ? { entityId } : {}), ...(customRange ? { from: dateFrom, to: dateTo } : { preset }), [drill.field]: drill.value }).toString() : null
+  /* ── Drill-down ─────────────────────────────────────────── */
+  const openDrill = useCallback((filters, label) => setDrill({ filters, label }), [])
+  const drillParams = drill
+    ? new URLSearchParams({
+        scope,
+        ...(entityId ? { entityId } : {}),
+        ...(customRange ? { from: dateFrom, to: dateTo } : { preset }),
+        ...drill.filters
+      }).toString()
+    : null
   const { data: drillData, loading: drillLoading } = useFetch(
     () => drill ? api.get(`/api/analytics/report/drill?${drillParams}`) : Promise.resolve(null),
     [drillParams]
   )
+
+  /* ── Comparison mode ────────────────────────────────────── */
+  const compareQuery = compareIds.length >= 2
+    ? new URLSearchParams({ scope, entityIds: compareIds.join(','), ...(customRange ? { from: dateFrom, to: dateTo } : { preset }) }).toString()
+    : null
+  const { data: compareData } = useFetch(
+    () => compareQuery ? api.get(`/api/analytics/report/compare?${compareQuery}`) : Promise.resolve(null),
+    [compareQuery]
+  )
+
+  const applySavedView = (state) => {
+    setScope(state.scope || 'studio')
+    setEntityId(state.entityId || '')
+    setPreset(state.preset || 'prev_week')
+    setDateFrom(state.from || '')
+    setDateTo(state.to || '')
+    setCompareIds(state.compare ? state.compare.split(',') : [])
+    setCompareOpen(!!state.compare)
+  }
+  const viewState = { scope, entityId, preset: customRange ? 'custom' : preset, from: dateFrom, to: dateTo, compare: compareIds.join(',') }
+  const copyLink = async () => {
+    try {
+      await navigator.clipboard.writeText(window.location.href)
+      toast('Report link copied')
+    } catch (e) { toast('Could not copy the link', 'error') }
+  }
+
+  /* ── Exports ────────────────────────────────────────────── */
+  const exportDrillCsv = (leads, d) => {
+    downloadText(`drill-${Object.values(d.filters).join('-')}.csv`, csvRows([
+      ['Lead', 'Owner', 'Stage', 'Status', 'Source', 'Value', 'Follow-ups done', 'Created', 'Converted', 'Phone', 'Email', 'Latest remark'],
+      ...leads.map(l => [l.fullName, l.associateName, l.stage, l.status, l.source, l.revenue, l.followUpsDone, l.createdAt, l.convertedAt, l.phone, l.email, l.lastRemark])
+    ]))
+  }
+
+  const exportCsv = () => {
+    if (!data) return
+    const blocks = []
+    const c = data.comparisons
+    blocks.push(`${data.entityName} — ${data.period.label} (${data.period.start} to ${data.period.end})\n${csvRows([
+      ['Metric', 'This period', 'Previous period', 'Same period last year'],
+      ['Leads received', c.current.leadsReceived, c.previousPeriod.leadsReceived, c.yoy.leadsReceived],
+      ['Trials scheduled', c.current.trialsScheduled, c.previousPeriod.trialsScheduled, c.yoy.trialsScheduled],
+      ['Trials completed', c.current.trialsCompleted, c.previousPeriod.trialsCompleted, c.yoy.trialsCompleted],
+      ['Converted', c.current.converted, c.previousPeriod.converted, c.yoy.converted],
+      ['Conversion rate %', c.current.conversionRate, c.previousPeriod.conversionRate, c.yoy.conversionRate],
+      ['Revenue', c.current.revenue, c.previousPeriod.revenue, c.yoy.revenue],
+      ['Avg deal (LTV)', c.current.ltv, c.previousPeriod.ltv, c.yoy.ltv]
+    ])}`)
+    if (data.insights?.length) {
+      blocks.push(`Insights\n${csvRows([['Reading', 'Detail'], ...data.insights.map(i => [i.title, i.detail])])}`)
+    }
+    if (data.rankings?.length) {
+      blocks.push(`Associate rankings\n${csvRows([
+        ['Rank', 'Associate', 'Rank change', 'New leads', 'Trials', 'Won', 'Conversion %', 'Revenue', 'Revenue per lead', 'Follow-up %'],
+        ...data.rankings.map(r => [r.rank, r.name, r.rankDelta ?? '', r.newLeads, r.trials, r.won, r.conversionRate, r.revenue, r.revenuePerLead, r.followUpRate])
+      ])}`)
+    }
+    if (data.sourceRoi?.length) {
+      blocks.push(`Source return\n${csvRows([
+        ['Source', 'Leads', 'Won', 'Lost', 'Open', 'Win %', 'Revenue', 'Revenue per lead', 'Avg deal'],
+        ...data.sourceRoi.map(s => [s.source, s.leads, s.won, s.lost, s.open, s.winRate, s.revenue, s.revenuePerLead, s.avgDealValue])
+      ])}`)
+    }
+    if (data.stageBreakdown?.rows?.length) {
+      blocks.push(`Leads by stage\n${csvRows([
+        ['Stage', 'Received', 'Scheduled', 'Completed', 'Converted', 'Conv. rate %'],
+        ...data.stageBreakdown.rows.map(r => [r.key, r.leadsReceived, r.trialsScheduled, r.trialsCompleted, r.converted, r.conversionRate])
+      ])}`)
+    }
+    if (data.ageing?.stages?.length) {
+      blocks.push(`Open pipeline by stage\n${csvRows([
+        ['Stage', 'Open leads', 'Avg age (days)', 'Older than 30 days', 'Pipeline value'],
+        ...data.ageing.stages.map(r => [r.stage, r.count, r.avgAgeDays, r.stale, r.value])
+      ])}`)
+    }
+    downloadText(`${data.scope}-${data.entityName}-${data.period.start}-to-${data.period.end}.csv`, blocks.join('\n\n'))
+  }
 
   const exportPdf = async () => {
     if (!reportRef.current || exporting) return
     setExporting(true)
     try {
       const [{ default: html2canvas }, { default: jsPDF }] = await Promise.all([import('html2canvas'), import('jspdf')])
-      const canvas = await html2canvas(reportRef.current, { backgroundColor: '#0b0f1a', scale: 2, useCORS: true, windowWidth: reportRef.current.scrollWidth })
+      const surface = getComputedStyle(document.documentElement).getPropertyValue('--surface').trim() || '#ffffff'
+      const canvas = await html2canvas(reportRef.current, { backgroundColor: surface, scale: 2, useCORS: true, windowWidth: reportRef.current.scrollWidth })
       const pdf = new jsPDF({ orientation: 'portrait', unit: 'pt', format: 'a4' })
       const pageW = pdf.internal.pageSize.getWidth()
       const pageH = pdf.internal.pageSize.getHeight()
-      const imgW = pageW
-      const pxPerPage = (canvas.width * pageH) / imgW
-      let renderedPx = 0, page = 0
-      while (renderedPx < canvas.height) {
-        const sliceH = Math.min(pxPerPage, canvas.height - renderedPx)
-        const sliceCanvas = document.createElement('canvas')
-        sliceCanvas.width = canvas.width
-        sliceCanvas.height = sliceH
-        sliceCanvas.getContext('2d').drawImage(canvas, 0, renderedPx, canvas.width, sliceH, 0, 0, canvas.width, sliceH)
-        const sliceImg = sliceCanvas.toDataURL('image/jpeg', 0.92)
-        if (page > 0) pdf.addPage()
-        pdf.addImage(sliceImg, 'JPEG', 0, 0, imgW, (sliceH * imgW) / canvas.width)
-        renderedPx += sliceH
-        page++
+      const pxPerPage = (canvas.width * pageH) / pageW
+      let rendered = 0, pageIndex = 0
+      while (rendered < canvas.height) {
+        const sliceH = Math.min(pxPerPage, canvas.height - rendered)
+        const slice = document.createElement('canvas')
+        slice.width = canvas.width
+        slice.height = sliceH
+        slice.getContext('2d').drawImage(canvas, 0, rendered, canvas.width, sliceH, 0, 0, canvas.width, sliceH)
+        if (pageIndex > 0) pdf.addPage()
+        pdf.addImage(slice.toDataURL('image/jpeg', 0.92), 'JPEG', 0, 0, pageW, (sliceH * pageW) / canvas.width)
+        rendered += sliceH
+        pageIndex++
       }
-      pdf.save(`${data?.scope || 'report'}-${data?.entityName || 'all'}-${data?.period?.start || ''}-to-${data?.period?.end || ''}.pdf`)
+      pdf.save(`${data?.scope || 'report'}-${data?.entityName || 'all'}-${data?.period?.start || ''}.pdf`)
     } finally { setExporting(false) }
   }
 
-  const exportCsv = () => {
-    if (!data) return
-    const esc = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`
-    const rowsOf = (arr) => arr.map(r => r.map(esc).join(',')).join('\n')
-    const blocks = []
-    blocks.push(`${data.entityName} — ${data.period.label}\n${rowsOf([
-      ['Metric', data.comparisons.current.label, 'Previous period', 'Same period last year'],
-      ['Leads received', data.comparisons.current.leadsReceived, data.comparisons.previousPeriod.leadsReceived, data.comparisons.yoy.leadsReceived],
-      ['Trials scheduled', data.comparisons.current.trialsScheduled, data.comparisons.previousPeriod.trialsScheduled, data.comparisons.yoy.trialsScheduled],
-      ['Trials completed', data.comparisons.current.trialsCompleted, data.comparisons.previousPeriod.trialsCompleted, data.comparisons.yoy.trialsCompleted],
-      ['Converted', data.comparisons.current.converted, data.comparisons.previousPeriod.converted, data.comparisons.yoy.converted],
-      ['Conversion rate %', data.comparisons.current.conversionRate, data.comparisons.previousPeriod.conversionRate, data.comparisons.yoy.conversionRate],
-      ['LTV', data.comparisons.current.ltv, data.comparisons.previousPeriod.ltv, data.comparisons.yoy.ltv]
-    ])}`)
-    if (data.stageBreakdown.rows.length) {
-      blocks.push(`Leads by stage\n${rowsOf([
-        ['Stage', 'Received', 'Scheduled', 'Completed', 'Converted', 'Conv. rate %'],
-        ...data.stageBreakdown.rows.map(r => [r.key, r.leadsReceived, r.trialsScheduled, r.trialsCompleted, r.converted, r.conversionRate]),
-        ['Total', data.stageBreakdown.totals.leadsReceived, data.stageBreakdown.totals.trialsScheduled, data.stageBreakdown.totals.trialsCompleted, data.stageBreakdown.totals.converted, data.stageBreakdown.totals.conversionRate]
-      ])}`)
-    }
-    if (data.sourceBreakdown.rows.length) {
-      blocks.push(`Leads by source\n${rowsOf([
-        ['Source', 'Received', 'Scheduled', 'Completed', 'Converted', 'Conv. rate %'],
-        ...data.sourceBreakdown.rows.map(r => [r.key, r.leadsReceived, r.trialsScheduled, r.trialsCompleted, r.converted, r.conversionRate]),
-        ['Total', data.sourceBreakdown.totals.leadsReceived, data.sourceBreakdown.totals.trialsScheduled, data.sourceBreakdown.totals.trialsCompleted, data.sourceBreakdown.totals.converted, data.sourceBreakdown.totals.conversionRate]
-      ])}`)
-    }
-    downloadText(`${data.scope}-${data.entityName}-${data.period.start}-to-${data.period.end}.csv`, blocks.join('\n\n'))
-  }
-
-  // Associate overview detail: the aggregate report already gives the
-  // comparison metrics for the period; this adds the associate's photo and
-  // the actual lead-level activity (stage, latest remark, follow-ups done)
-  // so the tab is a working profile, not just numbers.
   const associateDetail = scope === 'associate' && entityId ? (boot?.associates || []).find(a => a.id === entityId) : null
-  const detailQuery = associateDetail && data?.period ? buildQuery({ associateId: entityId, dateFrom: data.period.start, dateTo: data.period.end, pageSize: 500 }) : null
-  const { data: detailLeadsResp } = useFetch(() => detailQuery ? api.get(`/api/leads?${detailQuery}`) : Promise.resolve(null), [detailQuery])
-  const detailLeads = detailLeadsResp?.items || []
 
-  const comp = data?.comparisons
-  const cols = comp ? [
-    { key: 'current', label: comp.current.label, accent: '#f43f5e', data: comp.current },
-    { key: 'previousPeriod', label: `Previous period (${comp.previousPeriod.label})`, accent: '#3b82f6', data: comp.previousPeriod },
-    { key: 'yoy', label: `Same period last year (${comp.yoy.label})`, accent: '#8b5cf6', data: comp.yoy }
-  ] : []
+  const c = data?.comparisons
+  const cur = c?.current, prev = c?.previousPeriod, yoy = c?.yoy
 
   return (
-    <div className="p-6 space-y-5">
-      <div className="flex flex-wrap items-center gap-3">
-        <div>
-          <h2 className="font-display text-lg font-bold text-white flex items-center gap-2">
-            {scope === 'associate' ? <UserCircle2 size={18} className="text-rose-400" /> : <Building2 size={18} className="text-rose-400" />} {title}
-          </h2>
-          <p className="text-sm text-slate-500 mt-0.5">{desc}</p>
+    <div className="rp-page">
+      {/* ── Controls ─────────────────────────────────────── */}
+      <header className="rp-header">
+        <div className="rp-header-titles">
+          <h2>{title}</h2>
+          <p>{desc}</p>
         </div>
-
-        <div className="ml-auto flex flex-wrap items-center gap-2">
-          <div className="flex rounded-xl bg-white/5 border border-white/10 p-1">
-            <button className={`px-3 py-1.5 rounded-lg text-sm font-semibold flex items-center gap-1.5 ${scope === 'studio' ? 'bg-rose-500/25 text-white' : 'text-slate-400 hover:text-white'}`} onClick={() => setScope('studio')}><Building2 size={13} /> Studio overview</button>
-            <button className={`px-3 py-1.5 rounded-lg text-sm font-semibold flex items-center gap-1.5 ${scope === 'associate' ? 'bg-rose-500/25 text-white' : 'text-slate-400 hover:text-white'}`} onClick={() => setScope('associate')}><UserCircle2 size={13} /> Associate overview</button>
-          </div>
-
-          <select className="input !w-auto !py-2 !text-sm" value={entityId} onChange={e => setEntityId(e.target.value)} disabled={locked} title={locked ? 'Agents view their own studio/profile only' : undefined}>
+        <div className="rp-header-controls">
+          <Segmented
+            ariaLabel="Report scope"
+            value={scope}
+            onChange={setScope}
+            options={[
+              { value: 'studio', label: 'Studio', icon: Building2 },
+              { value: 'associate', label: 'Associate', icon: UserCircle2 }
+            ]}
+          />
+          <select className="input !w-auto" value={entityId} onChange={e => setEntityId(e.target.value)} disabled={locked} title={locked ? 'Agents view their own studio or profile only' : undefined}>
             <option value="">{scope === 'associate' ? 'All associates' : 'All studios'}</option>
             {(data?.entities || []).map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
           </select>
-
-          <div className="flex items-center gap-1.5 rounded-xl bg-white/5 border border-white/10 px-2 py-1.5">
-            <CalendarRange size={13} className="text-slate-500 shrink-0" />
-            <select className="input !w-auto !py-0 !text-xs !border-0 !bg-transparent" value={preset} onChange={e => setPreset(e.target.value)}>
-              {PRESETS.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
-            </select>
-          </div>
-
+          <select className="input !w-auto" value={preset} onChange={e => setPreset(e.target.value)} aria-label="Period">
+            {PRESETS.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
+          </select>
           {preset === 'custom' && (
-            <div className="flex items-center gap-1.5 rounded-xl bg-white/5 border border-white/10 px-2 py-1">
-              <input type="date" className="input !w-auto !py-1 !text-xs !px-1.5" value={dateFrom} onChange={e => setDateFrom(e.target.value)} max={dateTo || undefined} />
-              <span className="text-slate-600 text-xs">–</span>
-              <input type="date" className="input !w-auto !py-1 !text-xs !px-1.5" value={dateTo} onChange={e => setDateTo(e.target.value)} min={dateFrom || undefined} />
-            </div>
+            <>
+              <input type="date" className="input !w-auto" value={dateFrom} onChange={e => setDateFrom(e.target.value)} max={dateTo || undefined} aria-label="From" />
+              <input type="date" className="input !w-auto" value={dateTo} onChange={e => setDateTo(e.target.value)} min={dateFrom || undefined} aria-label="To" />
+            </>
           )}
-
-          <button className="btn btn-ghost !py-2 !px-3 !text-sm flex items-center gap-1.5" onClick={exportCsv} disabled={!data}>
-            <Download size={13} /> CSV
+          <button type="button" className={`rp-btn ${compareOpen ? 'rp-btn-primary' : ''}`} onClick={() => setCompareOpen(o => !o)}>
+            <GitCompare size={13} /> Compare
           </button>
-          <button className="btn btn-primary !py-2 !px-3 !text-sm flex items-center gap-1.5" onClick={exportPdf} disabled={!data || exporting}>
-            {exporting ? <Spinner size={13} /> : <FileDown size={13} />} {exporting ? 'Exporting…' : 'PDF'}
+          <button type="button" className="rp-btn" onClick={exportCsv} disabled={!data}><Download size={13} /> CSV</button>
+          <button type="button" className="rp-btn rp-btn-primary" onClick={exportPdf} disabled={!data || exporting}>
+            {exporting ? <Spinner size={12} /> : <FileDown size={13} />} PDF
           </button>
         </div>
+      </header>
+
+      <div className="rp-context">
+        <CalendarRange size={13} />
+        <b>{data?.entityName || '—'}</b>
+        <span>·</span>
+        <span>{data?.period ? `${data.period.label} (${data.period.start} → ${data.period.end})` : 'Loading period…'}</span>
+        <span style={{ marginLeft: 'auto' }} />
+        <SavedViews page={page} state={viewState} onApply={applySavedView} onCopyLink={copyLink} />
       </div>
 
-      {loading && <div className="py-20 text-center text-slate-500"><Spinner size={22} /></div>}
+      {compareOpen && (
+        <Section title="Compare entities" subtitle="Pick two to four to see them side by side over this period" icon={GitCompare}>
+          <div className="rp-views" style={{ marginBottom: 12 }}>
+            {(data?.entities || []).map(e => {
+              const on = compareIds.includes(e.id)
+              return (
+                <button
+                  key={e.id}
+                  type="button"
+                  className={`rp-series-toggle ${on ? '' : 'is-off'}`}
+                  onClick={() => setCompareIds(ids => on ? ids.filter(i => i !== e.id) : (ids.length >= 4 ? ids : [...ids, e.id]))}
+                >
+                  <span className="rp-swatch" style={{ background: on ? seriesColor(compareIds.indexOf(e.id), mode) : 'transparent' }} />
+                  {e.name}
+                </button>
+              )
+            })}
+          </div>
+          {compareIds.length < 2 && <p className="rp-empty">Select at least two {scope === 'associate' ? 'associates' : 'studios'}.</p>}
+          {compareData?.columns?.length >= 2 && <CompareColumns columns={compareData.columns} mode={mode} />}
+        </Section>
+      )}
+
+      {loading && <div className="rp-loading"><Spinner size={22} /></div>}
+
+      {!loading && error && (
+        <Section title="This report could not be loaded" icon={AlertTriangle}>
+          <p className="rp-empty">{error.message || 'The report request failed.'}</p>
+        </Section>
+      )}
 
       {!loading && data && (
-        <div className="space-y-5" ref={reportRef}>
-          <div className="text-sm text-slate-500">{data.entityName} · {data.period.label} ({data.period.start} to {data.period.end})</div>
+        <div className="rp-page" style={{ padding: 0 }} ref={reportRef}>
+          {/* ── What changed, in words ───────────────────── */}
+          {!!data.insights?.length && <InsightList insights={data.insights} />}
 
           {associateDetail && (
-            <div className="card p-5 flex flex-wrap items-center gap-5">
-              <Avatar name={associateDetail.name} color={associateDetail.color} photoUrl={associateDetail.photoUrl} photoZoom={associateDetail.photoZoom} photoPosX={associateDetail.photoPosX} photoPosY={associateDetail.photoPosY} size={96} fallback="👤" />
-              <div className="flex-1 min-w-[180px]">
-                <div className="font-display font-bold text-white text-lg">{associateDetail.name}</div>
-                <div className="text-sm text-slate-500">{associateDetail.role || 'Sales Associate'}{associateDetail.email ? ` · ${associateDetail.email}` : ''}</div>
-                <div className="text-xs text-slate-500 mt-1">{detailLeads.length} lead{detailLeads.length === 1 ? '' : 's'} in this period</div>
-              </div>
-            </div>
-          )}
-
-          {associateDetail && detailLeads.length > 0 && (
-            <div className="card p-0 overflow-hidden">
-              <div className="px-4 py-3 border-b border-white/8 font-display font-semibold text-white text-base">Lead activity this period</div>
-              <div className="overflow-x-auto scrollbar-thin">
-                <table className="data-table w-full">
-                  <thead>
-                    <tr className="text-xs uppercase tracking-wider text-slate-500 border-b border-white/8">
-                      <th className="px-4 py-2.5 text-left font-semibold">Lead</th>
-                      <th className="px-4 py-2.5 text-left font-semibold">Stage</th>
-                      <th className="px-4 py-2.5 text-left font-semibold">Latest comment</th>
-                      <th className="px-4 py-2.5 text-center font-semibold">FUs completed</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {detailLeads.map(l => {
-                      const completed = (l.followUps || []).filter(f => f.done).length
-                      return (
-                        <tr key={l.id} className="border-b border-white/5 hover:bg-white/[0.03] cursor-pointer" onClick={() => openLead(l.id)}>
-                          <td className="px-4 py-2.5 text-sm text-white font-medium">{l.fullName}</td>
-                          <td className="px-4 py-2.5 text-sm text-slate-400">{l.stage}</td>
-                          <td className="px-4 py-2.5 text-sm text-slate-500 max-w-[280px] truncate" title={l.remarks || ''}>{l.remarks || '—'}</td>
-                          <td className="px-4 py-2.5 text-sm text-slate-400 text-center mono">{completed}</td>
-                        </tr>
-                      )
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
-
-          {/* 3-column comparison */}
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-            {cols.map(c => (
-              <div key={c.key} className="card p-4 border-t-2" style={{ borderTopColor: c.accent }}>
-                <div className="text-xs font-semibold uppercase tracking-wider mb-3" style={{ color: c.accent }}>{c.label}</div>
-                <div className="grid grid-cols-2 gap-2.5">
-                  <Metric icon={<Users size={12} />} label="Leads received" value={c.data.leadsReceived} />
-                  <Metric icon={<Target size={12} />} label="Trials scheduled" value={c.data.trialsScheduled} />
-                  <Metric icon={<CheckCircle2 size={12} />} label="Trials completed" value={c.data.trialsCompleted} />
-                  <Metric icon={<Trophy size={12} />} label="Converted" value={c.data.converted} />
-                  <Metric icon={<TrendingUp size={12} />} label="Conversion rate" value={`${c.data.conversionRate}%`} />
-                  <Metric icon={<IndianRupee size={12} />} label="LTV" value={money(c.data.ltv)} />
+            <Section title={associateDetail.name} subtitle={associateDetail.role || 'Sales associate'} icon={UserCircle2}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
+                <Avatar name={associateDetail.name} color={associateDetail.color} photoUrl={associateDetail.photoUrl} photoZoom={associateDetail.photoZoom} photoPosX={associateDetail.photoPosX} photoPosY={associateDetail.photoPosY} size={64} fallback="👤" />
+                <div className="rp-context" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: 2 }}>
+                  {associateDetail.email && <span>{associateDetail.email}</span>}
+                  <span><b>{num(cur.leadsReceived)}</b> leads received · <b>{num(cur.converted)}</b> won · <b>{money(cur.revenue)}</b> revenue</span>
                 </div>
               </div>
-            ))}
-          </div>
+            </Section>
+          )}
 
-          {/* trend chart with toggleable series */}
+          {/* ── Headline ─────────────────────────────────── */}
+          <Section
+            title="This period"
+            subtitle="Against the previous period; click any tile for the leads behind it"
+            icon={Gauge}
+            className="is-flush"
+            actions={<span className="rp-bar-sub">Last year: {num(yoy.leadsReceived)} leads · {yoy.conversionRate}% conv.</span>}
+          >
+            <TileGrid cols={6}>
+              <StatTile
+                icon={Users} label="Leads received" value={num(cur.leadsReceived)}
+                delta={pctChange(cur.leadsReceived, prev.leadsReceived)}
+                sub={`prev ${num(prev.leadsReceived)}`}
+                onClick={() => openDrill({ dateField: 'createdAt' }, 'Leads received this period')}
+              />
+              <StatTile
+                icon={Target} label="Trials scheduled" value={num(cur.trialsScheduled)}
+                delta={pctChange(cur.trialsScheduled, prev.trialsScheduled)}
+                sub={`prev ${num(prev.trialsScheduled)}`}
+              />
+              <StatTile
+                icon={CheckCircle2} label="Trials completed" value={num(cur.trialsCompleted)}
+                delta={pctChange(cur.trialsCompleted, prev.trialsCompleted)}
+                sub={`prev ${num(prev.trialsCompleted)}`}
+              />
+              <StatTile
+                icon={Trophy} label="Converted" value={num(cur.converted)}
+                delta={pctChange(cur.converted, prev.converted)}
+                sub={`prev ${num(prev.converted)}`}
+                onClick={() => openDrill({ status: 'won', dateField: 'convertedAt', sortBy: 'value' }, 'Leads won this period')}
+              />
+              <StatTile
+                icon={TrendingUp} label="Conversion" value={`${cur.conversionRate}%`}
+                delta={cur.conversionRate - prev.conversionRate} deltaUnit="pt"
+                sub={`prev ${prev.conversionRate}%`}
+                tone={cur.conversionRate >= prev.conversionRate ? 'good' : undefined}
+              />
+              <StatTile
+                icon={IndianRupee} label="Revenue" value={money(cur.revenue)}
+                delta={pctChange(cur.revenue, prev.revenue)}
+                sub={`avg deal ${money(cur.ltv)}`}
+              />
+            </TileGrid>
+          </Section>
+
+          {/* ── Trend ────────────────────────────────────── */}
           {data.trend.length > 0 && (
-            <div className="card p-4">
-              <div className="flex flex-wrap items-center justify-between gap-3 mb-2">
-                <h3 className="font-display font-semibold text-white text-md">Trend</h3>
-                <div className="flex items-center gap-1.5">
-                  {SERIES.map(s => (
-                    <button key={s.key} type="button"
-                      className={`px-2.5 py-1 rounded-lg text-xs font-semibold border transition-colors ${visibleSeries.has(s.key) ? 'text-white' : 'text-slate-500 border-white/10 bg-white/[0.02]'}`}
-                      style={visibleSeries.has(s.key) ? { background: `${s.color}22`, borderColor: `${s.color}55` } : undefined}
-                      onClick={() => toggleSeries(s.key)}>
-                      {s.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <div className="h-[220px]">
-                <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={data.trend} margin={{ top: 5, right: 5, left: -20, bottom: 0 }}>
-                    <CartesianGrid stroke="rgba(255,255,255,0.06)" vertical={false} />
-                    <XAxis dataKey="periodLabel" tick={AXIS} axisLine={false} tickLine={false} />
-                    <YAxis tick={AXIS} axisLine={false} tickLine={false} />
-                    <Tooltip contentStyle={tooltipStyle()} />
-                    {SERIES.filter(s => visibleSeries.has(s.key)).map(s => (
-                      <Line key={s.key} type="monotone" dataKey={s.key} name={s.label} stroke={s.color} strokeWidth={2} dot={false} />
-                    ))}
-                  </LineChart>
-                </ResponsiveContainer>
-              </div>
-            </div>
+            <Section title="Trend" subtitle="Recent periods of the same length" icon={TrendingUp}>
+              <ChartFrame
+                data={data.trend}
+                xKey="periodLabel"
+                series={TREND_SERIES}
+                defaultType="area"
+                height={250}
+                valueFormat={(v, key) => key === 'revenue' ? money(v) : num(v)}
+              />
+            </Section>
           )}
 
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            <BreakdownTable title="Leads by stage" rows={data.stageBreakdown.rows} totals={data.stageBreakdown.totals} field="stage" onDrill={openDrill} />
-            <BreakdownTable title="Leads by source" rows={data.sourceBreakdown.rows} totals={data.sourceBreakdown.totals} field="source" onDrill={openDrill} />
+          <div className="rp-grid-2">
+            {/* ── Funnel ─────────────────────────────────── */}
+            <Section title="Funnel" subtitle="Leads created in this period, by where they stand now" icon={Layers} className="is-flush">
+              <TileGrid cols={4}>
+                {['new', 'trial', 'won', 'lost'].map((k, i) => (
+                  <StatTile
+                    key={k}
+                    label={k}
+                    value={num(data.funnel[k])}
+                    sub={cur.leadsReceived ? `${Math.round((data.funnel[k] / cur.leadsReceived) * 100)}% of intake` : undefined}
+                    tone={k === 'won' ? 'good' : k === 'lost' ? 'bad' : undefined}
+                    onClick={k === 'won' || k === 'lost' ? () => openDrill({ status: k }, `${k === 'won' ? 'Won' : 'Lost'} leads from this period`) : undefined}
+                  />
+                ))}
+              </TileGrid>
+            </Section>
+
+            {/* ── Speed ──────────────────────────────────── */}
+            <Section title="Speed" subtitle="How long the funnel actually takes" icon={Timer} className="is-flush">
+              <TileGrid cols={4}>
+                <StatTile label="Median days to win" value={data.velocity.medianDaysToWin} sub={`avg ${data.velocity.avgDaysToWin}`} />
+                <StatTile label="Median first touch" value={`${data.velocity.medianDaysToFirstTouch}d`} sub={`avg ${data.velocity.avgDaysToFirstTouch}d`} tone={data.velocity.medianDaysToFirstTouch > 2 ? 'warn' : 'good'} />
+                <StatTile label="Never contacted" value={num(data.velocity.untouchedLeads)} sub={`of ${num(cur.leadsReceived)} received`} tone={data.velocity.untouchedLeads ? 'bad' : 'good'} />
+                <StatTile label="Touches per win" value={data.velocity.avgTouchesToWin} sub={`${num(data.velocity.wonCount)} wins`} />
+              </TileGrid>
+            </Section>
           </div>
 
-          {/* pipeline funnel */}
-          <div className="card p-4">
-            <div className="flex items-center gap-2 mb-3">
-              <Filter size={14} className="text-cyan-400" />
-              <h3 className="font-display font-semibold text-white text-md">Pipeline funnel</h3>
-              <span className="ml-auto text-xs text-slate-500">leads created in this period, by current outcome</span>
-            </div>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-              {['new', 'trial', 'won', 'lost'].map(k => (
-                <div key={k} className="rounded-xl bg-white/[0.03] border border-white/8 px-3 py-2.5">
-                  <div className="text-2xs uppercase tracking-wider text-slate-500">{k}</div>
-                  <div className="font-display text-lg font-bold mono" style={{ color: FUNNEL_COLORS[k] }}>{data.funnel[k]}</div>
-                </div>
-              ))}
-            </div>
+          {/* ── Rankings ─────────────────────────────────── */}
+          {scope === 'studio' && data.rankings.length > 0 && (
+            <Section
+              title="Associate rankings"
+              subtitle="Sort by any column; rank movement is against the previous period"
+              icon={ListOrdered}
+              className="is-flush"
+            >
+              <RankTable
+                rankKey
+                rows={data.rankings}
+                initialSort={{ key: 'revenue', dir: 'desc' }}
+                onRowClick={(row) => openDrill({ associateId: row.associateId }, `Leads owned by ${row.name}`)}
+                columns={[
+                  {
+                    key: 'name', label: 'Associate', sortable: true,
+                    format: (v, row) => (
+                      <>
+                        <span style={{ fontWeight: 620, color: 'var(--text)' }}>{v}</span>
+                        {row.rankDelta ? (
+                          <span className={`rp-rank-delta ${row.rankDelta > 0 ? 'is-up' : 'is-down'}`}>
+                            {row.rankDelta > 0 ? <ArrowUpRight size={10} /> : <ArrowDownRight size={10} />}{Math.abs(row.rankDelta)}
+                          </span>
+                        ) : null}
+                      </>
+                    )
+                  },
+                  { key: 'newLeads', label: 'Leads', align: 'right', format: num },
+                  { key: 'trials', label: 'Trials', align: 'right', format: num },
+                  { key: 'won', label: 'Won', align: 'right', format: num },
+                  { key: 'conversionRate', label: 'Conv.', align: 'right', format: v => `${v}%` },
+                  { key: 'revenue', label: 'Revenue', align: 'right', tone: 'strong', format: v => money(v) },
+                  { key: 'revenuePerLead', label: 'Per lead', align: 'right', format: v => money(v) },
+                  { key: 'followUpRate', label: 'Follow-up', align: 'right', tone: row => row.followUpRate >= 80 ? 'good' : row.followUpRate >= 50 ? 'warn' : 'bad', format: v => `${v}%` }
+                ]}
+              />
+            </Section>
+          )}
+
+          <div className="rp-grid-2">
+            {/* ── Source return ──────────────────────────── */}
+            <Section title="Source return" subtitle="Revenue per lead, not just volume" icon={Radio} className="is-flush">
+              <RankTable
+                rows={data.sourceRoi}
+                initialSort={{ key: 'revenue', dir: 'desc' }}
+                onRowClick={(row) => openDrill({ source: row.source }, `Leads from ${row.source}`)}
+                columns={[
+                  { key: 'source', label: 'Source' },
+                  { key: 'leads', label: 'Leads', align: 'right', format: num },
+                  { key: 'won', label: 'Won', align: 'right', format: num },
+                  { key: 'winRate', label: 'Win %', align: 'right', tone: row => row.winRate >= (cur.conversionRate || 0) ? 'good' : 'warn', format: v => `${v}%` },
+                  { key: 'revenuePerLead', label: 'Per lead', align: 'right', tone: 'strong', format: v => money(v) },
+                  { key: 'revenue', label: 'Revenue', align: 'right', format: v => money(v) }
+                ]}
+                emptyText="No leads arrived in this period."
+              />
+            </Section>
+
+            {/* ── Stage breakdown ────────────────────────── */}
+            <Section title="Leads by stage" subtitle="Intake cohort, by the stage they sit in" icon={Layers} className="is-flush">
+              <RankTable
+                rows={data.stageBreakdown.rows}
+                initialSort={{ key: 'leadsReceived', dir: 'desc' }}
+                onRowClick={(row) => openDrill({ stage: row.key }, `Leads in ${row.key}`)}
+                columns={[
+                  { key: 'key', label: 'Stage' },
+                  { key: 'leadsReceived', label: 'Received', align: 'right', format: num },
+                  { key: 'trialsScheduled', label: 'Scheduled', align: 'right', format: num },
+                  { key: 'trialsCompleted', label: 'Completed', align: 'right', format: num },
+                  { key: 'converted', label: 'Won', align: 'right', tone: 'good', format: num },
+                  { key: 'conversionRate', label: 'Conv.', align: 'right', format: v => `${v}%` }
+                ]}
+              />
+            </Section>
           </div>
 
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            {/* channel performance */}
-            <div className="card overflow-hidden">
-              <div className="px-4 py-2.5 border-b border-white/8 flex items-center gap-2 text-sm font-semibold text-slate-200">
-                <Radio size={13} className="text-cyan-400" /> Channel performance
-              </div>
-              {data.channelPerformance.length ? (
-                <div className="p-4 h-[200px]">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={data.channelPerformance} layout="vertical" margin={{ left: 8, right: 16 }}>
-                      <CartesianGrid stroke="rgba(255,255,255,0.05)" horizontal={false} />
-                      <XAxis type="number" tick={AXIS} axisLine={false} tickLine={false} allowDecimals={false} unit="%" />
-                      <YAxis type="category" dataKey="channel" width={70} tick={AXIS} axisLine={false} tickLine={false} tickFormatter={c => CHANNEL_LABELS[c] || c} />
-                      <Tooltip contentStyle={tooltipStyle()} formatter={(v, n) => [`${v}%`, n]} />
-                      <Bar dataKey="responseRate" name="Response rate" radius={[0, 6, 6, 0]} barSize={14}>
-                        {data.channelPerformance.map(d => <Cell key={d.channel} fill={CHANNEL_COLORS[d.channel] || '#94a3b8'} opacity={0.9} />)}
-                      </Bar>
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
-              ) : <p className="text-xs text-slate-500 p-4">No channel activity in this period.</p>}
-            </div>
+          <div className="rp-grid-2">
+            {/* ── Ageing ─────────────────────────────────── */}
+            <Section
+              title="Open pipeline by age"
+              subtitle={`${num(data.ageing.openCount)} open leads right now — point in time, not period-filtered`}
+              icon={AlertTriangle}
+            >
+              <MagnitudeBars
+                rows={data.ageing.buckets.map((b, i) => ({
+                  key: b.key,
+                  label: b.label,
+                  value: b.count,
+                  sub: money(b.value),
+                  color: i >= 2 ? statusColor(i === 3 ? 'critical' : 'warning', mode) : seriesColor(0, mode)
+                }))}
+                onRowClick={(row) => openDrill({ ageBucket: row.key, status: 'open', dateField: 'none', sortBy: 'value' }, `Open leads ${row.label} old`)}
+                format={num}
+              />
+              {data.ageing.oldest && (
+                <p className="rp-bar-sub" style={{ marginTop: 10 }}>
+                  Oldest open lead: <button type="button" className="rp-link-btn" onClick={() => openLead(data.ageing.oldest.id)}>{data.ageing.oldest.name}</button> — {data.ageing.oldest.ageDays} days in {data.ageing.oldest.stage || 'no stage'}.
+                </p>
+              )}
+            </Section>
 
-            {/* revenue mix */}
-            <div className="card overflow-hidden">
-              <div className="px-4 py-2.5 border-b border-white/8 flex items-center gap-2 text-sm font-semibold text-slate-200">
-                <PieChartIcon size={13} className="text-fuchsia-400" /> Revenue mix by class type
-              </div>
-              {data.revenueMix.length ? (
-                <div className="p-4 h-[200px]">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <PieChart>
-                      <Pie data={data.revenueMix} dataKey="revenue" nameKey="type" innerRadius={45} outerRadius={72} paddingAngle={2} strokeWidth={0}>
-                        {data.revenueMix.map((_, i) => <Cell key={i} fill={DONUT_COLORS[i % DONUT_COLORS.length]} />)}
-                      </Pie>
-                      <Tooltip contentStyle={tooltipStyle()} formatter={(v) => money(v)} />
-                    </PieChart>
-                  </ResponsiveContainer>
-                </div>
-              ) : <p className="text-xs text-slate-500 p-4">No revenue in this period.</p>}
-            </div>
+            {/* ── Follow-up health ───────────────────────── */}
+            <Section title="Follow-up discipline" subtitle="Scheduled inside this period" icon={CheckCircle2} className="is-flush">
+              <TileGrid cols={2}>
+                <StatTile label="Logged" value={num(data.followUpHealth.logged)} sub={`${num(data.followUpHealth.done)} completed`} />
+                <StatTile
+                  label="Completion" value={`${data.followUpHealth.completionRate}%`}
+                  tone={data.followUpHealth.completionRate >= 80 ? 'good' : data.followUpHealth.completionRate >= 50 ? 'warn' : 'bad'}
+                  sub={`${num(data.followUpHealth.missed)} missed`}
+                />
+                <StatTile label="Past due" value={num(data.followUpHealth.overdue)} tone={data.followUpHealth.overdue ? 'bad' : 'good'} sub="on open leads" />
+                <StatTile label="Never followed up" value={num(data.followUpHealth.leadsWithNoFollowUp)} sub={`avg ${data.followUpHealth.avgPerLead} per lead`} tone={data.followUpHealth.leadsWithNoFollowUp ? 'warn' : 'good'} />
+              </TileGrid>
+            </Section>
           </div>
 
-          {/* cohort conversion */}
-          <div className="card overflow-hidden">
-            <div className="px-4 py-2.5 border-b border-white/8 flex items-center gap-2 text-sm font-semibold text-slate-200">
-              <Layers size={13} className="text-violet-400" /> Cohort conversion
-              <span className="ml-auto text-xs font-normal text-slate-500">% of each cohort's new leads won by 1/2/4 periods later</span>
-            </div>
-            <div className="overflow-x-auto scrollbar-thin">
-              <table className="w-full text-left">
+          {/* ── Named leads ──────────────────────────────── */}
+          <Section
+            title="The leads behind the numbers"
+            subtitle="Click any row to open the lead"
+            icon={Flame}
+            className="is-flush"
+            actions={
+              <Segmented
+                size="sm"
+                ariaLabel="Lead list"
+                value={topTab}
+                onChange={setTopTab}
+                options={[
+                  { value: 'wins', label: `Biggest wins (${data.topLeads.wins.length})` },
+                  { value: 'openDeals', label: `Open pipeline (${data.topLeads.openDeals.length})` },
+                  { value: 'losses', label: `Lost (${data.topLeads.losses.length})` }
+                ]}
+              />
+            }
+          >
+            <RankTable
+              rows={data.topLeads[topTab] || []}
+              initialSort={{ key: 'value', dir: 'desc' }}
+              onRowClick={(row) => openLead(row.id)}
+              emptyText="Nothing in this bucket for the period."
+              columns={[
+                { key: 'fullName', label: 'Lead', tone: 'strong' },
+                { key: 'stage', label: 'Stage', format: v => <span className="rp-pill">{v || '—'}</span>, sortable: false },
+                { key: 'source', label: 'Source' },
+                { key: 'value', label: 'Value', align: 'right', tone: 'strong', format: v => v ? money(v) : '—' },
+                ...(topTab === 'wins'
+                  ? [{ key: 'daysToWin', label: 'Days to win', align: 'right', format: v => `${v}d` }]
+                  : topTab === 'openDeals'
+                    ? [{ key: 'ageDays', label: 'Age', align: 'right', tone: row => row.ageDays > 60 ? 'bad' : row.ageDays > 30 ? 'warn' : undefined, format: v => `${v}d` }]
+                    : [{ key: 'createdAt', label: 'Created', align: 'right', format: v => fmtDate(v) }])
+              ]}
+            />
+          </Section>
+
+          <div className="rp-grid-2">
+            {/* ── Weekday pattern ────────────────────────── */}
+            <Section title="Intake by weekday" subtitle="Arrivals and wins by the day the lead came in" icon={CalendarDays}>
+              <ChartFrame
+                data={data.weekdayPattern}
+                xKey="label"
+                defaultType="bar"
+                height={200}
+                series={[{ key: 'leads', label: 'Leads' }, { key: 'won', label: 'Won' }]}
+                valueFormat={num}
+                onPointClick={(label) => {
+                  const index = data.weekdayPattern.findIndex(r => r.label === label)
+                  if (index >= 0) openDrill({ weekday: String(index) }, `Leads that arrived on a ${label}`)
+                }}
+              />
+            </Section>
+
+            {/* ── Revenue mix ────────────────────────────── */}
+            <Section title="Revenue by class type" subtitle="Won revenue in this period" icon={PieIcon}>
+              <MagnitudeBars
+                rows={data.revenueMix.slice(0, 8).map((r, i) => ({
+                  key: r.type, label: r.type, value: r.revenue,
+                  sub: `${num(r.count)} leads · ${r.wonRate}% won`,
+                  color: seriesColor(i, mode)
+                }))}
+                onRowClick={(row) => openDrill({ classType: row.key }, `Leads on ${row.label}`)}
+                format={money}
+                emptyText="No won revenue in this period."
+              />
+            </Section>
+          </div>
+
+          <div className="rp-grid-2">
+            {/* ── Cohorts ────────────────────────────────── */}
+            <Section title="Cohort conversion" subtitle="Share of each cohort won by 1, 2 and 4 periods later" icon={Sparkles} className="is-flush">
+              <RankTable
+                rows={data.cohortConversion.map(r => ({ ...r, id: r.cohortLabel }))}
+                initialSort={{ key: 'cohortLabel', dir: 'asc' }}
+                columns={[
+                  { key: 'cohortLabel', label: 'Cohort', tone: 'strong' },
+                  { key: 'size', label: 'Size', align: 'right', format: num },
+                  { key: 'convertedByP1', label: 'By P+1', align: 'right', format: v => `${v}%` },
+                  { key: 'convertedByP2', label: 'By P+2', align: 'right', format: v => `${v}%` },
+                  { key: 'convertedByP4', label: 'By P+4', align: 'right', tone: 'good', format: v => `${v}%` }
+                ]}
+              />
+            </Section>
+
+            {/* ── Targets ────────────────────────────────── */}
+            <Section title="Revenue targets" subtitle="Pro-rated to this period" icon={Wallet} className="is-flush">
+              <RankTable
+                rows={(data.goals?.perAssociate || []).filter(a => a.target > 0 || a.actual > 0).map(a => ({ ...a, id: a.associateId }))}
+                initialSort={{ key: 'attainmentPct', dir: 'desc' }}
+                onRowClick={(row) => openDrill({ associateId: row.associateId, status: 'won', dateField: 'convertedAt', sortBy: 'value' }, `Wins by ${row.name}`)}
+                emptyText="No revenue targets are set for these associates."
+                columns={[
+                  { key: 'name', label: 'Associate', tone: 'strong' },
+                  { key: 'target', label: 'Target', align: 'right', format: v => money(v) },
+                  { key: 'actual', label: 'Actual', align: 'right', format: v => money(v) },
+                  {
+                    key: 'attainmentPct', label: 'Attainment', align: 'right',
+                    tone: row => row.attainmentPct >= 100 ? 'good' : row.attainmentPct >= 70 ? 'warn' : 'bad',
+                    format: v => `${v}%`
+                  }
+                ]}
+              />
+            </Section>
+          </div>
+
+          {/* ── Lost analysis ────────────────────────────── */}
+          {!!data.lostBySource?.length && (
+            <Section title="Where leads are lost" subtitle="Lost leads in this period, by source" icon={AlertTriangle}>
+              <MagnitudeBars
+                rows={data.lostBySource.slice(0, 8).map(r => ({
+                  key: r.source, label: r.source, value: r.count,
+                  sub: `${money(r.lostValue)} of estimated value`,
+                  color: statusColor('critical', mode)
+                }))}
+                onRowClick={(row) => openDrill({ source: row.key, status: 'lost' }, `Lost leads from ${row.label}`)}
+                format={num}
+              />
+            </Section>
+          )}
+
+          {/* ── Three-column comparison, kept as the audit trail ── */}
+          <Section title="Period comparison" subtitle="Every headline metric across the three windows" icon={GitCompare} className="is-flush">
+            <div className="rp-table-wrap">
+              <table className="rp-table">
                 <thead>
-                  <tr className="text-xs uppercase tracking-wider text-slate-500 border-b border-white/8">
-                    <th className="px-4 py-2 font-semibold">Cohort</th>
-                    <th className="px-3 py-2 font-semibold text-center">Size</th>
-                    <th className="px-3 py-2 font-semibold text-center">By P+1</th>
-                    <th className="px-3 py-2 font-semibold text-center">By P+2</th>
-                    <th className="px-3 py-2 font-semibold text-center">By P+4</th>
+                  <tr>
+                    <th>Metric</th>
+                    <th className="is-right">{cur.label}</th>
+                    <th className="is-right">Previous period</th>
+                    <th className="is-right">Same period last year</th>
+                    <th className="is-right">vs prev</th>
+                    <th className="is-right">vs last year</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {data.cohortConversion.map(c => (
-                    <tr key={c.cohortLabel} className="border-b border-white/5 last:border-0">
-                      <td className="px-4 py-2 text-sm font-semibold text-white">{c.cohortLabel}</td>
-                      <td className="px-3 py-2 text-xs text-slate-400 text-center mono">{c.size}</td>
-                      <td className="px-3 py-2 text-xs text-slate-100 text-center mono">{c.convertedByP1}%</td>
-                      <td className="px-3 py-2 text-xs text-slate-100 text-center mono">{c.convertedByP2}%</td>
-                      <td className="px-3 py-2 text-xs text-slate-100 text-center mono">{c.convertedByP4}%</td>
+                  {[
+                    ['Leads received', 'leadsReceived', num],
+                    ['Trials scheduled', 'trialsScheduled', num],
+                    ['Trials completed', 'trialsCompleted', num],
+                    ['Converted', 'converted', num],
+                    ['Conversion rate', 'conversionRate', v => `${v}%`],
+                    ['Revenue', 'revenue', money],
+                    ['Avg deal value', 'ltv', money],
+                    ['Follow-up completion', 'followUpRate', v => `${v}%`]
+                  ].map(([label, key, format]) => (
+                    <tr key={key}>
+                      <td data-tone="strong">{label}</td>
+                      <td className="is-right rp-num">{format(cur[key])}</td>
+                      <td className="is-right rp-num rp-dim">{format(prev[key])}</td>
+                      <td className="is-right rp-num rp-dim">{format(yoy[key])}</td>
+                      <td className="is-right"><Delta value={key.includes('Rate') ? cur[key] - prev[key] : pctChange(cur[key], prev[key])} unit={key.includes('Rate') ? 'pt' : '%'} suffix="" /></td>
+                      <td className="is-right"><Delta value={key.includes('Rate') ? cur[key] - yoy[key] : pctChange(cur[key], yoy[key])} unit={key.includes('Rate') ? 'pt' : '%'} suffix="" /></td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
-          </div>
-
-          {/* leaderboard — only meaningful for a studio scope */}
-          {scope === 'studio' && data.leaderboard.length > 0 && (
-            <div className="card overflow-hidden">
-              <div className="px-4 py-2.5 border-b border-white/8 flex items-center gap-2 text-sm font-semibold text-slate-200">
-                <ListFilter size={13} className="text-fuchsia-400" /> Associate leaderboard
-                <span className="ml-auto text-xs font-normal text-slate-500">{data.leaderboard.length} associates</span>
-              </div>
-              <div className="overflow-x-auto scrollbar-thin">
-                <table className="w-full text-left">
-                  <thead>
-                    <tr className="text-xs uppercase tracking-wider text-slate-500 border-b border-white/8">
-                      <th className="px-4 py-2 font-semibold">Associate</th>
-                      <th className="px-3 py-2 font-semibold text-center">New leads</th>
-                      <th className="px-3 py-2 font-semibold text-center">Trials</th>
-                      <th className="px-3 py-2 font-semibold text-center">Won</th>
-                      <th className="px-3 py-2 font-semibold text-center">Revenue</th>
-                      <th className="px-3 py-2 font-semibold text-center">Follow-up</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {data.leaderboard.slice().sort((a, b) => b.revenue - a.revenue).map(a => (
-                      <tr key={a.associateId} className="border-b border-white/5 last:border-0 hover:bg-white/[0.03] transition-colors">
-                        <td className="px-4 py-2 text-sm font-semibold text-white">{a.name}</td>
-                        <td className="px-3 py-2 text-xs text-slate-300 text-center mono">{a.newLeads}</td>
-                        <td className="px-3 py-2 text-xs text-slate-300 text-center mono">{a.trials}</td>
-                        <td className="px-3 py-2 text-xs text-slate-300 text-center mono">{a.won}</td>
-                        <td className="px-3 py-2 text-xs text-emerald-400 text-center mono">{money(a.revenue)}</td>
-                        <td className="px-3 py-2 text-xs text-amber-400 text-center mono">{a.followUpRate}%</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
-
-          {drill && (
-            <div className="card overflow-hidden">
-              <div className="px-4 py-2.5 border-b border-white/8 flex items-center justify-between">
-                <span className="text-sm font-semibold text-slate-200">Leads — {drill.field}: {drill.value}</span>
-                <button className="btn btn-ghost !py-1 !text-xs" onClick={() => setDrill(null)}><ChevronDown size={12} /> Close</button>
-              </div>
-              <div className="max-h-[280px] overflow-y-auto scrollbar-thin">
-                {drillLoading && <div className="py-6 text-center text-slate-500"><Spinner size={16} /></div>}
-                {!drillLoading && drillData?.leads?.map(l => (
-                  <button key={l.id} className="w-full text-left flex items-center gap-3 px-4 py-2 text-sm border-b border-white/5 last:border-0 hover:bg-white/[0.04] transition-colors" onClick={() => openLead(l.id)}>
-                    <span className="flex-1 truncate text-slate-200">{l.fullName}</span>
-                    <span className="chip !px-1.5 !py-0.5 text-2xs bg-white/5 border border-white/10 text-slate-400 shrink-0">{l.stage}</span>
-                    <span className="text-slate-500 shrink-0 w-16 text-right">{fmtDate(l.createdAt)}</span>
-                  </button>
-                ))}
-                {!drillLoading && !drillData?.leads?.length && <p className="text-xs text-slate-500 px-4 py-3">No leads found.</p>}
-              </div>
-            </div>
-          )}
+          </Section>
         </div>
+      )}
+
+      {drill && (
+        <DrillPanel
+          drill={drill}
+          data={drillData}
+          loading={drillLoading}
+          onClose={() => setDrill(null)}
+          onOpenLead={openLead}
+          onExport={exportDrillCsv}
+        />
       )}
     </div>
   )
 }
 
-function Metric({ icon, label, value }) {
+/* ── Horizontal magnitude list ───────────────────────────────
+   A bar chart drawn in HTML rather than SVG: the rows are also the click
+   targets for the drill-down, and they stay readable at any panel width,
+   which a recharts vertical bar chart at 300px does not. */
+function MagnitudeBars({ rows, format = String, onRowClick, emptyText = 'Nothing to show.' }) {
+  const max = Math.max(1, ...rows.map(r => r.value || 0))
+  if (!rows.length) return <p className="rp-empty">{emptyText}</p>
   return (
-    <div className="rounded-xl bg-white/[0.03] border border-white/8 px-2.5 py-2">
-      <div className="flex items-center gap-1 text-2xs uppercase tracking-wider text-slate-500">{icon}{label}</div>
-      <div className="font-display text-md font-bold text-white mono mt-0.5">{value}</div>
+    <div className="rp-bars">
+      {rows.map(r => {
+        const Row = onRowClick ? 'button' : 'div'
+        return (
+          <Row
+            key={r.key}
+            type={onRowClick ? 'button' : undefined}
+            className={`rp-bar-row ${onRowClick ? 'is-clickable' : ''}`}
+            onClick={onRowClick ? () => onRowClick(r) : undefined}
+          >
+            <span className="rp-bar-label" title={r.label}>{r.label}</span>
+            <span className="rp-bar-track">
+              <span className="rp-bar-fill" style={{ width: `${Math.max(2, ((r.value || 0) / max) * 100)}%`, background: r.color }} />
+            </span>
+            <span className="rp-bar-value">
+              {format(r.value)}
+              {r.sub && <span className="rp-bar-sub" style={{ display: 'block' }}>{r.sub}</span>}
+            </span>
+          </Row>
+        )
+      })}
     </div>
   )
 }
 
-function BreakdownTable({ title, rows, totals, field, onDrill }) {
+/* ── Side-by-side comparison ─────────────────────────────── */
+function CompareColumns({ columns, mode }) {
+  const rows = [
+    ['Leads received', c => c.current.leadsReceived, v => Number(v).toLocaleString('en-IN'), 'high'],
+    ['Converted', c => c.current.converted, v => Number(v).toLocaleString('en-IN'), 'high'],
+    ['Conversion rate', c => c.current.conversionRate, v => `${v}%`, 'high'],
+    ['Revenue', c => c.current.revenue, v => money(v), 'high'],
+    ['Avg deal', c => c.current.ltv, v => money(v), 'high'],
+    ['Follow-up completion', c => c.current.followUpRate, v => `${v}%`, 'high'],
+    ['Median days to win', c => c.velocity.medianDaysToWin, v => `${v}d`, 'low'],
+    ['Never contacted', c => c.velocity.untouchedLeads, v => Number(v).toLocaleString('en-IN'), 'low']
+  ]
   return (
-    <div className="card overflow-hidden">
-      <div className="px-4 py-2.5 border-b border-white/8 text-sm font-semibold text-slate-200">{title}</div>
-      <div className="overflow-x-auto scrollbar-thin">
-        <table className="w-full text-left">
-          <thead>
-            <tr className="text-xs uppercase tracking-wider text-slate-500 border-b border-white/8">
-              <th className="px-4 py-2 font-semibold">{field === 'stage' ? 'Stage' : 'Source'}</th>
-              <th className="px-2 py-2 font-semibold text-center">Received</th>
-              <th className="px-2 py-2 font-semibold text-center">Scheduled</th>
-              <th className="px-2 py-2 font-semibold text-center">Completed</th>
-              <th className="px-2 py-2 font-semibold text-center">Converted</th>
-              <th className="px-2 py-2 font-semibold text-center">Conv. rate</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows?.map(r => (
-              <tr key={r.key} className="border-b border-white/5 last:border-0 hover:bg-white/[0.03] transition-colors cursor-pointer" onClick={() => onDrill(field, r.key)}>
-                <td className="px-4 py-2 text-sm font-semibold text-white truncate max-w-[180px]" title={r.key}>{r.key}</td>
-                <td className="px-2 py-2 text-xs text-slate-300 text-center mono">{r.leadsReceived}</td>
-                <td className="px-2 py-2 text-xs text-cyan-400 text-center mono">{r.trialsScheduled}</td>
-                <td className="px-2 py-2 text-xs text-cyan-300 text-center mono">{r.trialsCompleted}</td>
-                <td className="px-2 py-2 text-xs text-emerald-400 text-center mono">{r.converted}</td>
-                <td className="px-2 py-2 text-xs text-slate-300 text-center mono">{r.conversionRate}%</td>
-              </tr>
-            ))}
-            {!rows?.length && <tr><td colSpan={6} className="px-4 py-4 text-xs text-slate-500 text-center">No data.</td></tr>}
-          </tbody>
-          {!!rows?.length && (
-            <tfoot>
-              <tr className="border-t border-white/10 bg-white/[0.02] font-semibold">
-                <td className="px-4 py-2 text-sm text-white">Total</td>
-                <td className="px-2 py-2 text-xs text-white text-center mono">{totals.leadsReceived}</td>
-                <td className="px-2 py-2 text-xs text-cyan-400 text-center mono">{totals.trialsScheduled}</td>
-                <td className="px-2 py-2 text-xs text-cyan-300 text-center mono">{totals.trialsCompleted}</td>
-                <td className="px-2 py-2 text-xs text-emerald-400 text-center mono">{totals.converted}</td>
-                <td className="px-2 py-2 text-xs text-white text-center mono">{totals.conversionRate}%</td>
-              </tr>
-            </tfoot>
+    <div className="rp-compare">
+      {columns.map((col, i) => (
+        <div key={col.id} className="rp-compare-col">
+          <header>
+            <span className="rp-swatch" style={{ background: seriesColor(i, mode) }} />
+            <strong>{col.name}</strong>
+          </header>
+          {rows.map(([label, get, format, better]) => {
+            const value = get(col)
+            const all = columns.map(get)
+            const best = better === 'high' ? Math.max(...all) : Math.min(...all)
+            const isBest = columns.length > 1 && value === best && all.some(v => v !== best)
+            return (
+              <div key={label} className="rp-compare-metric">
+                <span>{label}</span>
+                <b className={isBest ? 'rp-compare-best' : ''}>{format(value)}</b>
+              </div>
+            )
+          })}
+          {!!col.topSources.length && (
+            <p className="rp-bar-sub" style={{ marginTop: 10 }}>
+              Top source: <b style={{ color: 'var(--text-dim)' }}>{col.topSources[0].source}</b> — {money(col.topSources[0].revenue)} from {col.topSources[0].leads} leads.
+            </p>
           )}
-        </table>
-      </div>
+        </div>
+      ))}
     </div>
   )
 }

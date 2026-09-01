@@ -19,7 +19,10 @@ const SAME_NAME = [
   'fullName', 'phone', 'email', 'stage', 'status', 'classType', 'channel',
   'center', 'memberId', 'hostId', 'period', 'valueEstimate', 'purchasesMade',
   'visits', 'trialStatus', 'conversionStatus', 'retentionStatus',
-  'locationId', 'associateId'
+  'locationId', 'associateId',
+  // Readable so the merge can compare it, but listed in INBOUND_ONLY below so
+  // it is never written back to the sheet.
+  'momenceLeadId'
 ]
 
 // field -> how to read the app's current value for it
@@ -38,8 +41,29 @@ const READERS = {
 }
 for (const field of SAME_NAME) READERS[field] = (lead) => lead[field]
 
+// Fields the sheet may set on a lead but that must never be written back.
+// `momenceLeadId` is Momence's own identifier for the row: the app has no
+// business proposing a value for that column, but it does have to be able to
+// READ its current value — without a reader, leadView reports the field as
+// empty, the merge reads that emptiness as "the app cleared it", and the id is
+// pushed back out as a blank instead of landing on the lead. That is why every
+// lead in the database had an empty momenceLeadId, and therefore why app-side
+// edits never reached the Momence portal: the push is keyed on that id.
+export const INBOUND_ONLY = new Set(['momenceLeadId'])
+
 export function isRoundTrippable(field) {
-  return field in READERS
+  return field in READERS && !INBOUND_ONLY.has(field)
+}
+
+// Inbound-only fields the sheet actually carries, for the caller that has to
+// apply them to the lead directly (the merge cannot: with no writable side,
+// every comparison for them resolves to "write back to the sheet").
+export function inboundOnlyFields(fields) {
+  return fields.filter(field => INBOUND_ONLY.has(field))
+}
+
+export function readLeadField(lead, field, db) {
+  return field in READERS ? READERS[field](lead, db) : undefined
 }
 
 // A view of the lead in the SHEET's vocabulary, for handing to mergeRow.
