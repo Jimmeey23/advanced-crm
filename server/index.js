@@ -720,22 +720,35 @@ app.patch('/api/associates/:id', async (req, res) => {
 function applyFilters(list, q) {
   const now = Date.now()
   let out = list
-  if (q.locationId) {
-    const ids = String(q.locationId).split(',').filter(Boolean)
-    out = out.filter(l => ids.includes(l.locationId))
+  // Every categorical filter accepts a comma-separated list, so the UI can
+  // offer multi-select without a second query shape: one value behaves
+  // exactly as it did when these were single-select dropdowns.
+  const many = (value) => {
+    const list = String(value ?? '').split(',').map(v => v.trim()).filter(Boolean)
+    return list.length ? list : null
   }
-  if (q.associateId) out = out.filter(l => l.associateId === q.associateId)
-  if (q.stage) out = out.filter(l => l.stage === q.stage)
-  if (q.status) out = out.filter(l => enrichLead(l, db).status === q.status)
-  if (q.statusGroup) out = out.filter(l => enrichLead(l, db).statusGroup === q.statusGroup)
-  if (q.sourceName) out = out.filter(l => l.sourceName === q.sourceName)
-  if (q.channel) out = out.filter(l => l.channel === q.channel)
-  if (q.classType) out = out.filter(l => l.classType === q.classType)
+  const matchAny = (list, value) => list.includes(String(value ?? ''))
+
+  const locationIds = many(q.locationId)
+  if (locationIds) out = out.filter(l => matchAny(locationIds, l.locationId))
+  const associateIds = many(q.associateId)
+  // 'none' is the sentinel the "Unassigned" quick view uses.
+  if (associateIds) out = out.filter(l => (associateIds.includes('none') && !l.associateId) || matchAny(associateIds, l.associateId))
+  const stages = many(q.stage)
+  if (stages) out = out.filter(l => matchAny(stages, l.stage))
+  const statuses = many(q.status)
+  if (statuses) out = out.filter(l => matchAny(statuses, enrichLead(l, db).status))
+  const statusGroups = many(q.statusGroup)
+  if (statusGroups) out = out.filter(l => matchAny(statusGroups, enrichLead(l, db).statusGroup))
+  const sourceNames = many(q.sourceName)
+  if (sourceNames) out = out.filter(l => matchAny(sourceNames, l.sourceName))
+  const channels = many(q.channel)
+  if (channels) out = out.filter(l => matchAny(channels, l.channel))
+  const classTypes = many(q.classType)
+  if (classTypes) out = out.filter(l => matchAny(classTypes, l.classType))
   if (q.flagged === '1' || q.flagged === 'true') out = out.filter(l => (l.manualFlags || []).some(f => f.id === 'focus'))
-  if (q.risk) out = out.filter(l => {
-    const e = enrichLead(l, db)
-    return e.ai.risk === q.risk
-  })
+  const risks = many(q.risk)
+  if (risks) out = out.filter(l => matchAny(risks, enrichLead(l, db).ai.risk))
   if (q.minScore !== undefined || q.maxScore !== undefined) {
     out = out.filter(l => {
       const s = enrichLead(l, db).ai.score

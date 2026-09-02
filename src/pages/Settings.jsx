@@ -2025,6 +2025,8 @@ function OutcomeChip({ outcome }) {
     invalid_body: 'bg-rose-500/15 text-rose-300',
     rate_limited: 'bg-rose-500/15 text-rose-300',
     synced: 'bg-emerald-500/15 text-emerald-300',
+    warn: 'bg-amber-500/15 text-amber-300',
+    conflict: 'bg-amber-500/15 text-amber-300',
     error: 'bg-rose-500/15 text-rose-300'
   }
   return <span className={`chip !px-1.5 !py-0.5 text-xs ${styles[outcome] || 'bg-white/10 text-slate-300'}`}>{outcome}</span>

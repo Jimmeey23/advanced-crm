@@ -148,6 +148,16 @@ const FILTER_LABELS = {
   flagged: 'Flagged'
 }
 
+// Categorical filters hold a comma-separated list of selected values, so a
+// multi-select and the old single-select share one state shape (and one query
+// string — the server splits on commas).
+const csvValues = (value) => String(value ?? '').split(',').map(v => v.trim()).filter(Boolean)
+const csvToggle = (value, option) => {
+  const list = csvValues(value)
+  const next = list.includes(option) ? list.filter(v => v !== option) : [...list, option]
+  return next.join(',')
+}
+
 export default function Leads({ initialSearch = '', initialAssociateId = '' }) {
   const { boot, lookup, openLead, refreshData, toast, navigate, dataVersion, role, locationIds, associateId: myAssociateId } = useApp()
   const [search, setSearch] = useState(initialSearch)
@@ -375,6 +385,11 @@ export default function Leads({ initialSearch = '', initialAssociateId = '' }) {
   const setF = (k) => (e) => {
     if (k === 'associateId' && onlyMine) setOnlyMine(false)
     setFilters(f => ({ ...f, [k]: e.target.value })); setPage(0)
+  }
+  // MultiFilter hands back the joined value directly rather than an event.
+  const setMulti = (k) => (value) => {
+    if (k === 'associateId' && onlyMine) setOnlyMine(false)
+    setFilters(f => ({ ...f, [k]: value })); setPage(0)
   }
   // A quick view replaces the filter set rather than layering onto it, and
   // clicking the active one returns to the default month view.
@@ -818,9 +833,9 @@ export default function Leads({ initialSearch = '', initialAssociateId = '' }) {
               key={a.id}
               type="button"
               title={`Only ${a.name}'s leads`}
-              aria-pressed={filters.associateId === a.id}
-              className={`quickview-person ${filters.associateId === a.id ? 'is-active' : ''}`}
-              onClick={() => { if (onlyMine) setOnlyMine(false); setFilters(f => ({ ...f, associateId: f.associateId === a.id ? '' : a.id })); setPage(0) }}
+              aria-pressed={csvValues(filters.associateId).includes(a.id)}
+              className={`quickview-person ${csvValues(filters.associateId).includes(a.id) ? 'is-active' : ''}`}
+              onClick={() => { if (onlyMine) setOnlyMine(false); setFilters(f => ({ ...f, associateId: csvToggle(f.associateId, a.id) })); setPage(0) }}
             >
               <Avatar name={a.name} color={a.color} photoUrl={a.photoUrl} photoZoom={a.photoZoom} photoPosX={a.photoPosX} photoPosY={a.photoPosY} size={22} fallback="👤" />
             </button>
@@ -841,11 +856,15 @@ export default function Leads({ initialSearch = '', initialAssociateId = '' }) {
         {hasFilters && (
           <div className="leads-toolbar-chips" style={{ animation: 'fadeIn .15s ease' }}>
             {Object.entries(filters).filter(([k, v]) => v && k !== 'dateFrom' && k !== 'dateTo').map(([k, v]) => {
-              let label = v
-              if (k === 'locationId') label = lookup.locById[v]?.name || v
-              if (k === 'associateId') label = lookup.asnById[v]?.name || v
-              if (k === 'stage') label = v
-              if (k === 'status') label = v.toUpperCase()
+              const values = csvValues(v)
+              const one = (value) => {
+                if (k === 'locationId') return lookup.locById[value]?.name || value
+                if (k === 'associateId') return value === 'none' ? 'Unassigned' : (lookup.asnById[value]?.name || value)
+                if (k === 'status') return value.toUpperCase()
+                return value
+              }
+              // Many selected values would blow the toolbar out; show the count.
+              const label = values.length > 2 ? `${values.length} selected` : (values.map(one).join(', ') || v)
               return (
                 <button key={k} className="active-filter-chip" onClick={() => { setFilters(f => ({ ...f, [k]: '' })); setPage(0) }}>
                   <span className="active-filter-key">{FILTER_LABELS[k] || k}</span>
@@ -876,7 +895,7 @@ export default function Leads({ initialSearch = '', initialAssociateId = '' }) {
             <button type="button" className="btn btn-ghost !py-2 !px-3" onClick={saveSegment}>Save</button>
             {selectedSegmentId && <button type="button" className="btn btn-ghost !py-2 !px-3" onClick={() => deleteSegment(selectedSegmentId)} title="Delete selected segment"><Trash2 size={13} /></button>}
           </div>
-          <OwnerFilter associates={(boot?.associates || []).filter(a => a.active !== false && (!filters.locationId || (a.locationIds || [a.locationId]).includes(filters.locationId)))} selected={filters.associateId} onSelect={id => { if (onlyMine) setOnlyMine(false); setFilters(f => ({ ...f, associateId: f.associateId === id ? '' : id })); setPage(0) }} />
+          <OwnerFilter associates={(boot?.associates || []).filter(a => a.active !== false && (!csvValues(filters.locationId).length || csvValues(filters.locationId).some(id => (a.locationIds || [a.locationId]).includes(id))))} selected={filters.associateId} onSelect={id => { if (onlyMine) setOnlyMine(false); setFilters(f => ({ ...f, associateId: csvToggle(f.associateId, id) })); setPage(0) }} />
           <select className="input !w-auto !py-1.5" value={groupBy} onChange={e => { setGroupBy(e.target.value); setCollapsed({}) }}>
             {GROUP_OPTIONS.map(g => <option key={g.id} value={g.id}>{g.id ? `Group by ${g.label}` : 'No grouping'}</option>)}
           </select>
@@ -962,42 +981,42 @@ export default function Leads({ initialSearch = '', initialAssociateId = '' }) {
       {/* filter panel */}
       {panelOpen && (
         <div className="card p-4 grid grid-cols-2 md:grid-cols-4 xl:grid-cols-6 gap-3" style={{ animation: 'fadeIn .15s ease' }}>
-          <Filter label="Location" value={filters.locationId} onChange={setF('locationId')} disabled={role === 'agent'}>
-            <option value="">All locations</option>
-            {(boot?.locations || []).map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
-          </Filter>
-          <Filter label="Stage" value={filters.stage} onChange={setF('stage')}>
-            <option value="">All stages</option>
-            {(boot?.stages || []).map(s => <option key={s}>{s}</option>)}
-          </Filter>
-          <Filter label="Outcome" value={filters.status} onChange={setF('status')}>
-            <option value="">All outcomes</option>
-            <option value="open">Open</option><option value="won">Won</option><option value="lost">Lost</option>
-          </Filter>
-          <Filter label="Status" value={filters.statusGroup} onChange={setF('statusGroup')}>
-            <option value="">All statuses</option>
-            {(boot?.statusGroups || []).map(s => <option key={s}>{s}</option>)}
-          </Filter>
-          <Filter label="Associate" value={filters.associateId} onChange={setF('associateId')}>
-            <option value="">All associates</option>
-            {(boot?.associates || []).filter(a => a.active !== false).map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
-          </Filter>
-          <Filter label="Source" value={filters.sourceName} onChange={setF('sourceName')}>
-            <option value="">All sources</option>
-            {(boot?.sources || []).map(s => <option key={s}>{s}</option>)}
-          </Filter>
-          <Filter label="Channel" value={filters.channel} onChange={setF('channel')}>
-            <option value="">All channels</option>
-            {(boot?.channels || []).map(c => <option key={c}>{c}</option>)}
-          </Filter>
-          <Filter label="Class type" value={filters.classType} onChange={setF('classType')}>
-            <option value="">All classes</option>
-            {(boot?.classTypes || []).map(c => <option key={c}>{c}</option>)}
-          </Filter>
-          <Filter label="AI risk" value={filters.risk} onChange={setF('risk')}>
-            <option value="">All</option>
-            <option value="hot">Hot</option><option value="warm">Warm</option><option value="cold">Cold</option>
-          </Filter>
+          <MultiFilter
+            label="Location" allLabel="All locations" value={filters.locationId} disabled={role === 'agent'}
+            options={(boot?.locations || []).map(l => ({ value: l.id, label: l.name }))}
+            onChange={setMulti('locationId')} />
+          <MultiFilter
+            label="Stage" allLabel="All stages" value={filters.stage}
+            options={(boot?.stages || []).map(stage => ({ value: stage, label: stage }))}
+            onChange={setMulti('stage')} />
+          <MultiFilter
+            label="Outcome" allLabel="All outcomes" value={filters.status}
+            options={[{ value: 'open', label: 'Open' }, { value: 'won', label: 'Won' }, { value: 'lost', label: 'Lost' }]}
+            onChange={setMulti('status')} />
+          <MultiFilter
+            label="Status" allLabel="All statuses" value={filters.statusGroup}
+            options={(boot?.statusGroups || []).map(group => ({ value: group, label: group }))}
+            onChange={setMulti('statusGroup')} />
+          <MultiFilter
+            label="Associate" allLabel="All associates" value={filters.associateId}
+            options={[{ value: 'none', label: 'Unassigned' }, ...(boot?.associates || []).filter(a => a.active !== false).map(a => ({ value: a.id, label: a.name }))]}
+            onChange={setMulti('associateId')} />
+          <MultiFilter
+            label="Source" allLabel="All sources" value={filters.sourceName}
+            options={(boot?.sources || []).map(source => { const name = typeof source === 'string' ? source : source.name; return { value: name, label: name } })}
+            onChange={setMulti('sourceName')} />
+          <MultiFilter
+            label="Channel" allLabel="All channels" value={filters.channel}
+            options={(boot?.channels || []).map(channel => ({ value: channel, label: channel }))}
+            onChange={setMulti('channel')} />
+          <MultiFilter
+            label="Class type" allLabel="All classes" value={filters.classType}
+            options={(boot?.classTypes || []).map(classType => ({ value: classType, label: classType }))}
+            onChange={setMulti('classType')} />
+          <MultiFilter
+            label="AI risk" allLabel="All" value={filters.risk}
+            options={[{ value: 'hot', label: 'Hot' }, { value: 'warm', label: 'Warm' }, { value: 'cold', label: 'Cold' }]}
+            onChange={setMulti('risk')} />
           <Filter label="Flags" value={filters.flagged} onChange={setF('flagged')}>
             <option value="">All leads</option>
             <option value="1">Flagged only</option>
@@ -2619,6 +2638,59 @@ function TimelineView({ items, lookup, openLead }) {
           </div>
         </div>
       ))}
+    </div>
+  )
+}
+
+// Checkbox dropdown over a comma-separated value. Keeps the visual weight of
+// the plain <select> it replaced so the filter grid still reads as one row of
+// controls, but lets an associate ask for two studios or three stages at once.
+function MultiFilter({ label, allLabel, value, options, onChange, disabled }) {
+  const selected = csvValues(value)
+  const [open, setOpen] = useState(false)
+  const ref = useRef(null)
+  useEffect(() => {
+    if (!open) return
+    const onDown = (e) => { if (!ref.current?.contains(e.target)) setOpen(false) }
+    const onKey = (e) => { if (e.key === 'Escape') setOpen(false) }
+    document.addEventListener('mousedown', onDown)
+    document.addEventListener('keydown', onKey)
+    return () => { document.removeEventListener('mousedown', onDown); document.removeEventListener('keydown', onKey) }
+  }, [open])
+  const labelFor = (val) => options.find(o => o.value === val)?.label || val
+  const summary = !selected.length ? allLabel
+    : selected.length === 1 ? labelFor(selected[0])
+    : `${selected.length} selected`
+  return (
+    <div className="multi-filter" ref={ref}>
+      <label className="text-xs uppercase tracking-wider text-slate-500 font-semibold mb-1 block">{label}</label>
+      <button
+        type="button" className={`input !py-1.5 multi-filter-trigger ${selected.length ? 'is-active' : ''}`}
+        disabled={disabled} aria-expanded={open} aria-haspopup="listbox"
+        onClick={() => setOpen(o => !o)}
+      >
+        <span className="multi-filter-summary">{summary}</span>
+        <ChevronDown size={13} className="shrink-0 opacity-60" />
+      </button>
+      {open && (
+        <div className="multi-filter-menu" role="listbox" aria-multiselectable="true">
+          <button type="button" className="multi-filter-option is-all" onClick={() => { onChange(''); setOpen(false) }}>{allLabel}</button>
+          {options.map(option => {
+            const checked = selected.includes(option.value)
+            return (
+              <button
+                key={option.value} type="button" role="option" aria-selected={checked}
+                className={`multi-filter-option ${checked ? 'is-checked' : ''}`}
+                onClick={() => onChange(csvToggle(value, option.value))}
+              >
+                <span className="multi-filter-box">{checked && <Check size={11} />}</span>
+                <span className="multi-filter-option-label">{option.label}</span>
+              </button>
+            )
+          })}
+          {!options.length && <div className="multi-filter-empty">Nothing to filter by yet</div>}
+        </div>
+      )}
     </div>
   )
 }

@@ -869,6 +869,10 @@ export async function reconcile({ force = false } = {}) {
   const occupantOf = new Map()
   for (const [leadId, entry] of snapshot) if (entry.rowNumber) occupantOf.set(entry.rowNumber, leadId)
 
+  // Row drift touches thousands of leads at once, and one log line per lead
+  // evicts the whole rest of the log (including the 'synced' summary), which
+  // reads as a failed sync. Aggregate into one line with a few examples.
+  const unmatched = []
   for (const [leadId, entry] of [...snapshot]) {
     if (seen.has(leadId)) continue
     if (looksTruncated) continue
@@ -877,11 +881,14 @@ export async function reconcile({ force = false } = {}) {
 
     const shiftedUp = row && priorRows.get(occupantOf.get(row)) > row
     if (row && row <= lastRow && !shiftedUp) {
-      ctx.logSync('warn', `lead ${leadId} no longer matches sheet row ${row} — left in place, not deleted`)
+      unmatched.push(`${leadId}@${row}`)
       continue
     }
     forgetRow(leadId)
     if (ctx.deleteLead(leadId)) counts.deleted++
+  }
+  if (unmatched.length) {
+    ctx.logSync('warn', `${unmatched.length} lead(s) no longer match their recorded sheet row — left in place, not deleted (e.g. ${unmatched.slice(0, 5).join(', ')})`)
   }
 
   unknownOwnerSink = null
