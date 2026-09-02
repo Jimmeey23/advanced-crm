@@ -70,6 +70,12 @@
   --shadow-2: 0 4px 12px -4px rgba(0,0,0,.5);
   --shadow-overlay: 0 24px 60px -12px rgba(0,0,0,.6);
   --focus-ring: var(--accent);
+  /* Status ink. Chips and badges resolve through these instead of
+     hard-coding rose/emerald/amber, so they invert with the theme. */
+  --ok:   #34d399;
+  --warn: #fbbf24;
+  --bad:  #fb7185;
+  --info: #7dd3fc;
 }
 
 [data-theme="light"] {
@@ -92,6 +98,11 @@
   --text-dim:     #464b55;
   --text-mute:    #6b7280;
   --overlay:      rgba(20, 23, 28, .40);
+  /* Darkened so the same 12% alpha wash clears 4.5:1 on white. */
+  --ok:   #047857;
+  --warn: #b45309;
+  --bad:  #be123c;
+  --info: #0369a1;
   --shadow-1: 0 1px 2px rgba(20,23,28,.06), 0 1px 1px rgba(20,23,28,.04);
   --shadow-2: 0 2px 4px rgba(20,23,28,.06), 0 6px 16px -6px rgba(20,23,28,.14);
   --shadow-overlay: 0 8px 16px -8px rgba(20,23,28,.14), 0 28px 60px -20px rgba(20,23,28,.26);
@@ -331,90 +342,8 @@ table, .mono, .tabular, input[type="number"],
   .logo-badge.is-animating .logo-barre { animation: none; }
   .logo-badge.is-animating .logo-barre { stroke-dashoffset: 0; }}
 
-/* Final lead-directory polish: compact, high-contrast and intentionally flat. */
-.leads-workspace {
-  padding-top: 10px;
-  gap: 8px;
-}
-.leads-toolbar {
-  border-radius: 10px;
-  padding: 5px 7px;
-  box-shadow: 0 1px 2px rgba(0,0,0,.04);
-}
-.leads-table-shell {
-  border-radius: 12px !important;
-  border: 1px solid var(--tbl-border) !important;
-  box-shadow: 0 10px 30px rgba(0,0,0,.08) !important;
-}
-.leads-data-table.is-compact { --lead-row-height: 36px; font-size: 12px; }
-.leads-data-table.is-comfortable { --lead-row-height: 40px; font-size: 12.5px; }
-.leads-data-table tbody tr,
-.leads-data-table tbody td {
-  height: min(var(--lead-row-height, 40px), 40px);
-  max-height: 40px;
-}
-.leads-data-table thead tr,
-.leads-data-table thead th {
-  height: 32px !important;
-  min-height: 32px;
-  padding-top: 0 !important;
-  padding-bottom: 0 !important;
-  background: var(--tbl-head-bg);
-}
-.leads-data-table thead th {
-  font-size: 9.5px;
-  letter-spacing: .07em;
-  border-bottom: 1px solid color-mix(in srgb, var(--tbl-border) 80%, transparent);
-}
-.leads-data-table tbody td {
-  overflow: hidden;
-  font-weight: 520;
-}
-.leads-data-table tbody tr:nth-child(even) {
-  background: color-mix(in srgb, var(--tbl-zebra) 72%, transparent);
-}
-.leads-data-table tbody tr:hover {
-  box-shadow: inset 2px 0 0 var(--accent);
-}
-html[data-theme="light"] .leads-data-table tbody,
-html[data-theme="light"] .leads-data-table tbody td,
-html[data-theme="light"] .leads-data-table tbody .text-slate-300,
-html[data-theme="light"] .leads-data-table tbody .text-slate-400,
-html[data-theme="light"] .leads-data-table tbody .text-slate-500,
-html[data-theme="light"] .leads-data-table tbody .table-inline-select,
-html[data-theme="light"] .leads-data-table tbody .table-cell-fit {
-  color: #050505 !important;
-}
-.stage-badge-wrap {
-  height: 24px;
-  max-width: 178px;
-  padding: 0 19px 0 7px;
-  border-radius: 8px;
-  border-width: 1px;
-  box-shadow: inset 3px 0 0 var(--stage-solid), 0 1px 2px rgba(0,0,0,.06);
-}
-.stage-badge-wrap:hover {
-  transform: none;
-  box-shadow: inset 3px 0 0 var(--stage-solid), 0 3px 8px color-mix(in srgb, var(--stage-solid) 14%, transparent);
-}
-.stage-badge-icon {
-  width: 14px;
-  height: 14px;
-  margin-right: 4px;
-}
-.stage-badge-select {
-  font-size: 10.5px;
-  font-weight: 750;
-}
-html[data-theme="light"] .stage-badge-wrap {
-  background: #fff;
-  border-color: color-mix(in srgb, var(--stage-solid) 42%, #d7dee8);
-  box-shadow: inset 3px 0 0 var(--stage-solid), 0 1px 2px rgba(15,23,42,.06);
-}
-html[data-theme="light"] .stage-badge-wrap:hover {
-  background: color-mix(in srgb, var(--stage-solid) 5%, #fff);
-  box-shadow: inset 3px 0 0 var(--stage-solid), 0 3px 8px rgba(15,23,42,.08);
-}
+
+
 .ai-alert-compact {
   position: relative;
   inset: auto;
@@ -1028,10 +957,7 @@ html[data-theme="light"] {
   box-shadow: inset 0 -1px 0 var(--tbl-border);
 }
 .data-table thead tr { position: relative; }
-.data-table thead tr::after {
-  content: ''; position: absolute; left: 0; right: 0; bottom: -1px; height: 1px; z-index: 1;
-  background: linear-gradient(90deg, transparent, var(--accent-border), transparent);
-}
+
 .table-sticky-surface {
   background: var(--tbl-surface) !important;
   backdrop-filter: blur(14px);
@@ -1070,32 +996,9 @@ html[data-theme="light"] .table-sticky-edge {
 .data-table tbody tr:nth-child(even) { background: var(--tbl-zebra); }
 .data-table tbody tr:hover { background: var(--tbl-hover); box-shadow: inset 3px 0 0 var(--accent); }
 .data-table tbody tr:last-child td { border-bottom: 0; }
-.lead-table-scroll {
-  border-radius: 16px;
-  border: 1px solid var(--tbl-border);
-  box-shadow: 0 1px 0 rgba(255,255,255,.02) inset, 0 14px 34px rgba(0,0,0,.28);
-}
-html[data-theme="light"] .lead-table-scroll {
-  box-shadow: 0 1px 2px rgba(15,23,42,.04), 0 14px 30px rgba(15,23,42,.06);
-}
+
 .data-table td, .data-table th { border-color: var(--tbl-border); }
-.stage-select { min-width: 170px; text-overflow: ellipsis; font-weight: 700; letter-spacing: 0.01em; box-shadow: 0 1px 2px rgba(0,0,0,.15), inset 0 0 0 1px rgba(255,255,255,.04); transition: filter .15s ease, box-shadow .15s ease; }
-.stage-select,
-.stage-select option { text-align: left; }
-.stage-select:hover { filter: brightness(1.12); }
-.source-chip {
-  display: inline-flex; align-items: center; padding: 3px 9px; border-radius: 999px;
-  font-size: 11px; font-weight: 600; letter-spacing: .01em;
-  background: rgba(56,189,248,.1); color: #7dd3fc; border: 1px solid rgba(56,189,248,.28);
-}
-html[data-theme="light"] .source-chip { background: rgba(2,132,199,.1); color: #0369a1; border-color: rgba(2,132,199,.28); }
-:root { --fu-rose: #fb7185; --fu-emerald: #34d399; --fu-slate: #64748b; }
-html[data-theme="light"] { --fu-rose: #be123c; --fu-emerald: #047857; --fu-slate: #475569; }
-/* Stage badge colors are set per-row via inline style (JS-computed hue),
-   tuned for a dark background — against light mode's white surface the same
-   pastel alpha reads as washed-out and low-contrast, so darken/saturate it
-   rather than trying to keep two separate color tables in sync. */
-html[data-theme="light"] .stage-select { filter: brightness(0.72) saturate(1.35) contrast(1.1); }
+
 .lead-row-flag {
   width: 22px; height: 22px; display: inline-flex; align-items: center; justify-content: center;
   border-radius: 8px; border: 1px solid rgba(255,255,255,.1); color: #64748b; background: rgba(255,255,255,.035);
@@ -4346,12 +4249,7 @@ html[data-theme="light"] .leads-data-table thead .table-sticky-surface {
   border-bottom-color: rgba(0,0,0,.28);
   box-shadow: inset 0 -1px 0 rgba(0,0,0,.2);
 }
-.leads-data-table thead tr::after,
-html[data-theme="light"] .leads-data-table thead tr::after {
-  height: 2px;
-  background: linear-gradient(90deg, transparent, var(--accent) 18%, var(--accent) 82%, transparent);
-  animation: none;
-}
+
 
 /* Lead detail workspace: one polished surface with strong information hierarchy. */
 .lead-detail-panel {
@@ -4704,61 +4602,7 @@ html[data-theme="light"] .momence-bar-row strong { color: #1e293b; }
   .momence-sync-state { display: none; }
   .momence-profile-grid { grid-template-columns: 1fr; }}
 
-/* Exact-stage select colors — soft tinted tag, consistent with .stage-badge above. */
-.stage-select.stage-badge {
-  color: color-mix(in srgb, var(--stage-solid) 78%, white) !important;
-  background: color-mix(in srgb, var(--stage-solid) 12%, rgba(255,255,255,.03)) !important;
-  border-color: color-mix(in srgb, var(--stage-solid) 40%, transparent) !important;
-  border-left-color: var(--stage-solid) !important;
-  box-shadow: inset 0 1px 0 rgba(255,255,255,.04) !important;
-  filter: none !important;
-  border-radius: 7px !important;
-  width: auto;
-  min-width: 130px;
-  height: 28px;
-  text-align: left;
-  text-align-last: left;
-  padding-left: 8px !important;
-  padding-right: 18px !important;
-  font-size: 11px;
-  font-weight: 650;
-}
-.stage-select.stage-badge:hover,
-.stage-select.stage-badge:focus {
-  color: color-mix(in srgb, var(--stage-solid) 88%, white) !important;
-  background: color-mix(in srgb, var(--stage-solid) 18%, rgba(255,255,255,.04)) !important;
-  border-color: color-mix(in srgb, var(--stage-solid) 60%, transparent) !important;
-  filter: none !important;
-}
-.stage-select.stage-badge:focus {
-  box-shadow: inset 0 1px 0 rgba(255,255,255,.06), 0 0 0 3px color-mix(in srgb, var(--stage-solid) 20%, transparent) !important;
-}
-.stage-select-icon { color: var(--stage-solid); opacity: .9; }
-.stage-select option {
-  color: #e2e8f0;
-  background: #111827;
-  font-weight: 650;
-}
-html[data-theme="light"] .stage-select.stage-badge {
-  color: color-mix(in srgb, var(--stage-solid) 65%, #0f172a) !important;
-  background: color-mix(in srgb, var(--stage-solid) 8%, #fff) !important;
-  border-color: color-mix(in srgb, var(--stage-solid) 30%, transparent) !important;
-  border-left-color: var(--stage-solid) !important;
-  box-shadow: none !important;
-  filter: none !important;
-}
-html[data-theme="light"] .stage-select.stage-badge:hover,
-html[data-theme="light"] .stage-select.stage-badge:focus {
-  color: color-mix(in srgb, var(--stage-solid) 75%, #0f172a) !important;
-  background: color-mix(in srgb, var(--stage-solid) 14%, #fff) !important;
-  border-color: color-mix(in srgb, var(--stage-solid) 50%, transparent) !important;
-  filter: none !important;
-}
-html[data-theme="light"] .stage-select.stage-badge:focus {
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--stage-solid) 16%, transparent) !important;
-}
-html[data-theme="light"] .stage-select-icon { color: var(--stage-solid); }
-html[data-theme="light"] .stage-select option { color: #0f172a; background: #fff; }
+
 
 html[data-theme="light"] .stage-badge:not(select) {
   display: inline-flex;
@@ -5932,23 +5776,7 @@ html[data-theme="light"] .lead-detail-consolidated .momence-section-header {
   background: transparent;
 }
 
-/* Lead table refinement: searchable headers, readable identity fields and blue/gray states. */
-html:not([data-theme="light"]) .leads-data-table .stage-select.stage-badge {
-  color: color-mix(in srgb, var(--stage-solid) 62%, #fff) !important;
-  border: 1px solid color-mix(in srgb, var(--stage-solid) 40%, transparent) !important;
-  background: color-mix(in srgb, var(--stage-solid) 16%, #0c101c) !important;
-  box-shadow: inset 0 1px 0 rgb(255 255 255 / .04) !important;
-  font-weight: 650;
-  border-radius: 999px !important;
-}
-html:not([data-theme="light"]) .leads-data-table .stage-select.stage-badge:hover,
-html:not([data-theme="light"]) .leads-data-table .stage-select.stage-badge:focus {
-  color: color-mix(in srgb, var(--stage-solid) 74%, #fff) !important;
-  border-color: color-mix(in srgb, var(--stage-solid) 56%, transparent) !important;
-  background: color-mix(in srgb, var(--stage-solid) 24%, #0c101c) !important;
-  box-shadow: inset 0 1px 0 rgb(255 255 255 / .04), 0 0 0 3px color-mix(in srgb, var(--stage-solid) 18%, transparent) !important;
-}
-html:not([data-theme="light"]) .leads-data-table .stage-select-icon { color: var(--stage-solid) !important; opacity: .9; }
+
 .leads-data-table td .table-inline-select,
 .leads-data-table td .associate-cell-trigger {
   width: 100% !important;
@@ -7220,17 +7048,7 @@ html[data-theme="light"] .active-filter-clear { color: var(--ops-indigo, #4f46e5
 html[data-theme="light"] .active-filter-clear:hover { background: var(--ops-indigo-soft, #eef2ff); border-color: #c7d2fe; }
 
 /* ---------- toolbar ---------- */
-.leads-toolbar {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 8px;
-  border: 1px solid var(--tbl-border);
-  border-radius: 12px;
-  background: color-mix(in srgb, var(--tbl-surface) 96%, var(--tbl-head-bg));
-  box-shadow: 0 1px 2px rgba(0,0,0,.04), 0 8px 24px rgba(0,0,0,.08);
-}
+/* Toolbar base lives in the TOOLBAR v2 block near the end of this file. */
 .leads-toolbar-group {
   display: flex;
   align-items: center;
@@ -7253,8 +7071,6 @@ html[data-theme="light"] .active-filter-clear:hover { background: var(--ops-indi
 }
 .leads-toolbar-primary { flex: 1 1 auto; }
 .leads-toolbar-view { margin-left: auto; }
-.leads-toolbar .btn { min-height: 34px; border-radius: 9px; font-size: 12px; font-weight: 600; }
-.leads-toolbar .input { min-height: 34px; }
 
 .leads-search {
   position: relative;
@@ -7547,104 +7363,7 @@ html[data-theme="light"] .leads-view-switcher button.is-active { color: #fff; }
 html[data-theme="light"] .leads-data-table.has-sticky-cols .sticky-col::after { background: linear-gradient(90deg, rgba(15,23,42,.05), transparent); }
 
 /* ---------- stage badges ---------- */
-.stage-badge-wrap {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-  max-width: 172px;
-  height: 26px;
-  padding: 0 18px 0 5px;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--stage-solid) 10%, rgba(255,255,255,.04));
-  border: 1px solid color-mix(in srgb, var(--stage-solid) 28%, rgba(255,255,255,.08));
-  box-shadow: inset 0 1px 0 rgba(255,255,255,.05), 0 1px 2px rgba(0,0,0,.06);
-  transition: transform .12s ease, box-shadow .12s ease, border-color .12s ease, background .12s ease;
-  isolation: isolate;
-}
-.stage-badge-wrap:hover {
-  transform: translateY(-1px);
-  background: color-mix(in srgb, var(--stage-solid) 14%, rgba(255,255,255,.06));
-  border-color: color-mix(in srgb, var(--stage-solid) 45%, rgba(255,255,255,.12));
-  box-shadow: inset 0 1px 0 rgba(255,255,255,.08), 0 4px 10px color-mix(in srgb, var(--stage-solid) 16%, transparent);
-}
-.stage-badge-wrap.is-compact {
-  width: 26px;
-  height: 26px;
-  max-width: 26px;
-  padding: 0;
-  border-radius: 50%;
-  border: 0;
-  justify-content: center;
-  background: color-mix(in srgb, var(--stage-solid) 16%, rgba(255,255,255,.05));
-}
-.stage-badge-wrap.is-compact:hover {
-  background: color-mix(in srgb, var(--stage-solid) 24%, rgba(255,255,255,.08));
-  transform: translateY(-1px) scale(1.05);
-}
-.stage-badge-wrap.is-compact .stage-badge-select { display: none; }
-.stage-badge-wrap.is-compact .stage-badge-icon { margin-right: 0; width: 14px; height: 14px; color: var(--stage-solid); filter: drop-shadow(0 1px 1px rgba(0,0,0,.2)); }
-.stage-badge-icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 15px;
-  height: 15px;
-  border-radius: 4px;
-  margin-right: 5px;
-  color: var(--stage-solid);
-  flex: 0 0 auto;
-}
-.stage-badge-select {
-  appearance: none;
-  background: transparent;
-  border: 0;
-  color: color-mix(in srgb, var(--stage-solid) 85%, white);
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: .01em;
-  width: 100%;
-  cursor: pointer;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  overflow: hidden;
-  line-height: 1;
-  padding: 0;
-  margin-left: -1px;
-}
-.stage-badge-select option { background: #0f172a; color: #e2e8f0; }
-.stage-badge-wrap::after {
-  content: '';
-  position: absolute;
-  right: 6px;
-  top: 50%;
-  transform: translateY(-35%);
-  width: 0;
-  height: 0;
-  border-left: 3.5px solid transparent;
-  border-right: 3.5px solid transparent;
-  border-top: 3.5px solid color-mix(in srgb, var(--stage-solid) 70%, white);
-  opacity: .85;
-  pointer-events: none;
-}
-.stage-badge-wrap.is-compact::after { display: none; }
-html[data-theme="light"] .stage-badge-wrap {
-  background: color-mix(in srgb, var(--stage-solid) 16%, #fff);
-  border: 1.5px solid color-mix(in srgb, var(--stage-solid) 50%, #cbd5e1);
-  box-shadow: 0 1px 2px rgba(15,23,42,.06), inset 0 0 0 1px rgba(255,255,255,.6);
-}
-html[data-theme="light"] .stage-badge-wrap:hover {
-  background: color-mix(in srgb, var(--stage-solid) 22%, #fff);
-  border-color: color-mix(in srgb, var(--stage-solid) 70%, #94a3b8);
-  box-shadow: 0 4px 10px color-mix(in srgb, var(--stage-solid) 14%, rgba(15,23,42,.08)), inset 0 0 0 1px rgba(255,255,255,.6);
-}
-html[data-theme="light"] .stage-badge-select { color: color-mix(in srgb, var(--stage-solid) 85%, #0f172a); }
-html[data-theme="light"] .stage-badge-select option { background: #fff; color: #0f172a; }
-html[data-theme="light"] .stage-badge-icon { color: var(--stage-solid); filter: drop-shadow(0 1px 1px rgba(0,0,0,.08)); }
-html[data-theme="light"] .stage-badge-wrap.is-compact {
-  background: color-mix(in srgb, var(--stage-solid) 18%, #fff);
-  border: 1.5px solid color-mix(in srgb, var(--stage-solid) 55%, #cbd5e1);
-}
-html[data-theme="light"] .stage-badge-wrap.is-compact .stage-badge-icon { filter: drop-shadow(0 1px 2px rgba(0,0,0,.12)); }
+
 
 /* ---------- lead name ---------- */
 .lead-name {
@@ -7804,40 +7523,8 @@ html[data-theme="light"] .lead-date-value { background: rgba(15,23,42,.04); bord
   .stage-badge-wrap,
   .lead-date-value { animation: none; transition: none; }}
 
-/* Effective lead-directory overrides. Keep this last because the legacy file
-   contains several earlier table theme layers. */
-.leads-workspace { padding-top: 10px; gap: 8px; }
-.leads-toolbar { border-radius: 10px; padding: 5px 7px; box-shadow: 0 1px 2px rgba(0,0,0,.04); }
-.leads-table-shell { border-radius: 12px !important; border: 1px solid var(--tbl-border) !important; box-shadow: 0 10px 30px rgba(0,0,0,.08) !important; }
-.leads-data-table thead tr,
-.leads-data-table thead th { height: 32px !important; min-height: 32px; padding-top: 0 !important; padding-bottom: 0 !important; background: var(--tbl-head-bg); }
-.leads-data-table thead th { font-size: 9.5px; letter-spacing: .07em; border-bottom: 1px solid color-mix(in srgb, var(--tbl-border) 80%, transparent); }
-.leads-data-table tbody td { overflow: hidden; font-weight: 520; }
-.leads-data-table tbody tr:nth-child(even) { background: color-mix(in srgb, var(--tbl-zebra) 72%, transparent); }
-.leads-data-table tbody tr:hover { box-shadow: inset 2px 0 0 var(--accent); }
-html[data-theme="light"] .leads-data-table tbody,
-html[data-theme="light"] .leads-data-table tbody td,
-html[data-theme="light"] .leads-data-table tbody .text-slate-300,
-html[data-theme="light"] .leads-data-table tbody .text-slate-400,
-html[data-theme="light"] .leads-data-table tbody .text-slate-500,
-html[data-theme="light"] .leads-data-table tbody .table-inline-select,
-html[data-theme="light"] .leads-data-table tbody .table-cell-fit { color: #050505 !important; }
-.stage-badge-wrap {
-  height: 24px;
-  width: max-content;
-  max-width: 178px;
-  padding: 0 14px 0 7px;
-  border-radius: 6px;
-  border-width: 1px;
-  justify-content: flex-start;
-  margin-right: auto;
-  box-shadow: inset 3px 0 0 var(--stage-solid), 0 1px 2px rgba(0,0,0,.06);
-}
-.stage-badge-wrap:hover { transform: none; box-shadow: inset 3px 0 0 var(--stage-solid), 0 3px 8px color-mix(in srgb, var(--stage-solid) 14%, transparent); }
-.stage-badge-icon { width: 14px; height: 14px; margin-right: 2px; }
-.stage-badge-select { font-size: 10.5px; font-weight: 750; }
-html[data-theme="light"] .stage-badge-wrap { background: #fff; border-color: color-mix(in srgb, var(--stage-solid) 42%, #d7dee8); box-shadow: inset 3px 0 0 var(--stage-solid), 0 1px 2px rgba(15,23,42,.06); }
-html[data-theme="light"] .stage-badge-wrap:hover { background: color-mix(in srgb, var(--stage-solid) 5%, #fff); box-shadow: inset 3px 0 0 var(--stage-solid), 0 3px 8px rgba(15,23,42,.08); }
+
+
 .ai-alert-compact { position: relative; inset: auto; z-index: 75; display: inline-flex; flex-direction: row; align-items: center; }
 .ai-alert-trigger { height: 32px; padding: 0 10px; border-radius: 9px; background: color-mix(in srgb, #fbbf24 9%, var(--tbl-surface)); box-shadow: none; font-size: 11px; font-weight: 700; }
 .ai-alert-trigger:hover { transform: none; box-shadow: 0 3px 10px rgba(251,191,36,.12); }
@@ -7877,52 +7564,7 @@ html[data-theme="light"] .leads-data-table tbody td * { color: #050505; }
   text-overflow: clip;
 }
 .th-sort-trigger { flex: 0 0 auto; }
-.stage-badge-wrap,
-html[data-theme="light"] .stage-badge-wrap {
-  height: 26px;
-  max-width: 180px;
-  padding: 0 20px 0 8px;
-  overflow: hidden;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--stage-solid) 11%, var(--tbl-surface));
-  border: 1px solid color-mix(in srgb, var(--stage-solid) 42%, var(--tbl-border));
-  box-shadow: 0 1px 2px rgba(15,23,42,.06);
-}
-.stage-badge-wrap:hover,
-html[data-theme="light"] .stage-badge-wrap:hover {
-  background: color-mix(in srgb, var(--stage-solid) 16%, var(--tbl-surface));
-  border-color: color-mix(in srgb, var(--stage-solid) 64%, var(--tbl-border));
-  box-shadow: 0 2px 6px color-mix(in srgb, var(--stage-solid) 12%, transparent);
-}
-.stage-badge-icon {
-  width: 14px;
-  height: 14px;
-  margin-right: 6px;
-  color: var(--stage-solid) !important;
-}
-.stage-badge-select.stage-badge,
-.leads-data-table td .stage-badge-select.stage-badge,
-html[data-theme="light"] .stage-badge-select.stage-badge,
-html[data-theme="light"] .leads-data-table td .stage-badge-select.stage-badge {
-  flex: 1 1 auto !important;
-  width: auto !important;
-  min-width: 0;
-  height: 24px !important;
-  margin: 0 !important;
-  padding: 0 !important;
-  appearance: none;
-  background: transparent !important;
-  border: 0 !important;
-  border-radius: 0 !important;
-  box-shadow: none !important;
-  color: color-mix(in srgb, var(--stage-solid) 82%, var(--text)) !important;
-  font-size: 11px;
-  line-height: 24px;
-}
-.stage-badge-wrap::after {
-  right: 8px;
-  border-top-color: var(--stage-solid);
-}
+
 
 /* Lead table interaction and visual system, effective last in the cascade. */
 .leads-data-table { font-size: calc(12.5px * var(--table-font-scale, 1)); }
@@ -8569,22 +8211,7 @@ html[data-theme="light"] .group-stat + .group-stat::before { background: rgba(15
    states: chips sit as quiet inline text-pills, not a second visual
    layer competing with the buttons around them.
    ============================================================ */
-.leads-toolbar {
-  border-radius: 12px;
-  padding: 6px 8px;
-  background: var(--tbl-surface);
-  border-color: var(--tbl-border);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, .04);
-}
-.leads-toolbar-chips { border-left-color: rgba(148, 163, 184, .18); }
-.active-filter-chip {
-  height: 25px;
-  background: rgba(148, 163, 184, .08);
-  border-color: transparent;
-}
-.active-filter-chip:hover { background: rgba(148, 163, 184, .16); border-color: transparent; transform: none; }
-html[data-theme="light"] .active-filter-chip { background: rgba(15, 23, 42, .045); border-color: transparent; box-shadow: none; }
-html[data-theme="light"] .active-filter-chip:hover { background: rgba(15, 23, 42, .08); border-color: transparent; box-shadow: none; }
+
 .leads-toolbar .btn-ghost { border-color: transparent; background: transparent; }
 .leads-toolbar .btn-ghost:hover { background: rgba(148, 163, 184, .1); }
 html[data-theme="light"] .leads-toolbar .btn-ghost:hover { background: rgba(15, 23, 42, .05); }
@@ -8948,28 +8575,7 @@ html:not([data-theme="light"]) .lead-date-value {
    full-bleed rule under each line. Only the stage keeps a box —
    it is the one field whose colour means something.
    ============================================================ */
-.leads-data-table .stage-badge-wrap {
-  height: 22px;
-  width: auto;
-  min-width: 0;
-  max-width: 168px;
-  padding: 0 8px;
-  border-radius: 999px;
-  box-shadow: none;
-  border: 1px solid color-mix(in srgb, var(--stage-solid) 34%, transparent);
-  background: color-mix(in srgb, var(--stage-solid) 10%, var(--surface));
-}
-html[data-theme="light"] .leads-data-table .stage-badge-wrap {
-  background: color-mix(in srgb, var(--stage-solid) 9%, #fff);
-  border-color: color-mix(in srgb, var(--stage-solid) 32%, transparent);
-  box-shadow: none;
-}
-.leads-data-table .stage-badge-wrap:hover {
-  box-shadow: none;
-  border-color: color-mix(in srgb, var(--stage-solid) 60%, transparent);
-}
-.leads-data-table .stage-badge-icon { width: 12px; height: 12px; margin-right: 3px; }
-.leads-data-table .stage-badge-select { font-size: var(--text-xs); font-weight: 650; }
+
 
 /* Affordances appear where the cursor is, not on all 25 rows at once. */
 .leads-data-table tbody .table-inline-select > svg,
@@ -9057,27 +8663,7 @@ html[data-theme="light"] .leads-data-table .stage-badge-wrap {
 
 /* The stage capsule's earlier sizing lives under a [data-theme] scope, so
    these have to match that specificity to size it to its own label. */
-html .leads-data-table .stage-badge-wrap,
-html[data-theme="light"] .leads-data-table .stage-badge-wrap {
-  height: 22px;
-  width: max-content;
-  min-width: 0;
-  /* A <select> sizes to its widest option, which for a 39-stage list is
-     wider than the column; cap it and let the label ellipsis instead. */
-  max-width: 156px;
-  padding: 0 8px;
-  overflow: hidden;
-  border-radius: 999px;
-  box-shadow: none;
-}
-html .leads-data-table .stage-badge-wrap::after { display: none; }
-html .leads-data-table .stage-badge-select.stage-badge {
-  width: auto !important;
-  max-width: 140px !important;
-  flex: 0 1 auto !important;
-  padding-right: 2px !important;
-  text-overflow: ellipsis;
-}
+
 
 
 /* A disabled control still has to say what it is. 0.5 opacity on an already
@@ -10828,3 +10414,313 @@ html[data-theme="light"] .multi-filter-menu { background: #fff; border-color: va
 html[data-theme="light"] .multi-filter-option { color: var(--ops-copy); }
 html[data-theme="light"] .multi-filter-option:hover { background: #f8fafc; }
 html[data-theme="light"] .multi-filter-box { border-color: rgba(15,23,42,.25); }
+
+/* grouping menu: rank badge instead of a checkbox */
+.multi-filter-box { font-size: 9px; font-weight: 700; line-height: 1; }
+/* nested group header rows read as a hierarchy: each level lighter than its parent */
+.lead-group-row.lead-group-depth-1 > td { background: rgba(255,255,255,.02); }
+.lead-group-row.lead-group-depth-2 > td { background: rgba(255,255,255,.012); }
+.lead-group-row.lead-group-depth-3 > td { background: rgba(255,255,255,.008); }
+.lead-group-row.lead-group-depth-1 .lead-group-title { font-size: .95em; }
+.lead-group-row.lead-group-depth-2 .lead-group-title,
+.lead-group-row.lead-group-depth-3 .lead-group-title { font-size: .9em; }
+
+/* ============================================================
+   LEADS SURFACE — final consolidated layer
+   Replaces five overlapping toolbar/table cosmetic layers that
+   used to fight over radius, padding and elevation. Everything
+   here is token-driven and there is one rule per concern.
+   Density rhythm: control 32 / chip 24 / header 32 / row 38.
+   ============================================================ */
+:root {
+  --lead-ctl-h: 32px;
+  --lead-chip-h: 24px;
+  --lead-head-h: 32px;
+  --lead-row-h: 38px;
+  /* Column hairline reads at ~45% of the row rule so vertical
+     separation guides the eye without gridding the whole table. */
+  --tbl-rule: color-mix(in srgb, var(--border) 45%, transparent);
+}
+
+/* ---------- toolbar: one instrument, flush against the table ---------- */
+.leads-workspace { padding-top: 10px; gap: 8px; }
+.leads-toolbar {
+  border-radius: var(--radius-lg);
+  box-shadow: none;
+}
+.leads-toolbar .btn,
+.leads-toolbar .input,
+.leads-toolbar .owner-filter-trigger,
+.leads-toolbar .multi-filter-trigger {
+  min-height: var(--lead-ctl-h);
+  border-radius: var(--radius-md);
+  font-size: var(--text-xs);
+  font-weight: 620;
+}
+.leads-toolbar-group { gap: 3px; }
+.active-filter-chip,
+.leads-toolbar .chip {
+  height: var(--lead-chip-h);
+  border-radius: var(--radius-sm);
+}
+
+/* ---------- table shell: the only elevated element on the page ---------- */
+.lead-table-scroll,
+.leads-table-shell {
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-1);
+}
+
+/* ---------- header: a quiet shelf ---------- */
+.leads-data-table thead tr,
+.leads-data-table thead th {
+  height: var(--lead-head-h);
+  padding: 0 12px;
+  background: var(--surface-2);
+}
+.leads-data-table thead th {
+  font-size: var(--text-2xs);
+  font-weight: 700;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: var(--text-mute);
+  /* Ground is opaque, so the blur was pure paint cost. */
+  backdrop-filter: none;
+  border-bottom: 1px solid var(--border);
+  box-shadow: none;
+}
+.leads-data-table thead .table-sticky-surface { background: var(--surface-2) !important; }
+
+/* ---------- body: vertical hairlines instead of zebra ---------- */
+.leads-data-table tbody tr,
+.leads-data-table tbody td {
+  height: var(--lead-row-h);
+  max-height: var(--lead-row-h);
+}
+.leads-data-table.is-compact     { --lead-row-h: 34px; font-size: var(--text-xs); }
+.leads-data-table.is-comfortable { --lead-row-h: 42px; font-size: var(--text-sm); }
+.leads-data-table tbody td {
+  padding: 0 12px;
+  border-bottom: 1px solid var(--tbl-rule);
+}
+.leads-data-table tbody td:not(:last-child) {
+  box-shadow: inset -1px 0 0 var(--tbl-rule);
+}
+/* Zebra + column rules together is busy. At this density the rules win. */
+.leads-data-table tbody tr:nth-child(even) { background: transparent; }
+.leads-data-table tbody tr:nth-child(even) .table-sticky-surface { background: var(--surface) !important; }
+.leads-data-table tbody tr:hover { background: var(--tbl-hover); box-shadow: inset 2px 0 0 var(--accent); }
+
+/* ---------- sticky column: crisp line, not a smudge ---------- */
+.table-sticky-edge,
+html[data-theme="light"] .leads-workspace .table-sticky-edge,
+html[data-theme="light"] .table-sticky-edge {
+  box-shadow: inset -1px 0 0 var(--border), 4px 0 8px -2px rgba(0,0,0,.10);
+}
+
+/* ---------- chips: token-driven, so they invert with the theme ---------- */
+.chip-neutral, .chip-accent, .chip-success, .chip-warn, .chip-danger {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: var(--lead-chip-h);
+  padding: 0 8px;
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  font-size: var(--text-2xs);
+  font-weight: 650;
+  white-space: nowrap;
+}
+.chip-neutral { color: var(--text-dim);  background: var(--surface-2); border-color: var(--border); }
+.chip-accent  { color: var(--accent-ink, var(--accent)); background: var(--accent-soft); border-color: var(--accent-border); }
+.chip-success { color: var(--ok);   background: color-mix(in srgb, var(--ok) 12%, transparent);   border-color: color-mix(in srgb, var(--ok) 26%, transparent); }
+.chip-warn    { color: var(--warn); background: color-mix(in srgb, var(--warn) 12%, transparent); border-color: color-mix(in srgb, var(--warn) 26%, transparent); }
+.chip-danger  { color: var(--bad);  background: color-mix(in srgb, var(--bad) 12%, transparent);  border-color: color-mix(in srgb, var(--bad) 26%, transparent); }
+.chip-xs { height: 18px; padding: 0 6px; font-size: var(--text-2xs); }
+
+/* Light theme carried its own zebra + border stack at higher specificity
+   from the earlier "ops" layer; match it rather than reach for !important. */
+html[data-theme="light"] .leads-workspace .leads-data-table tbody tr:nth-child(even) { background: transparent; }
+html[data-theme="light"] .leads-workspace .leads-data-table tbody tr:nth-child(even) .table-sticky-surface { background: var(--surface) !important; }
+html[data-theme="light"] .leads-workspace .leads-data-table th,
+html[data-theme="light"] .leads-workspace .leads-data-table td { border-bottom: 1px solid var(--tbl-rule); }
+html[data-theme="light"] .leads-workspace .leads-data-table tbody td:not(:last-child) { box-shadow: inset -1px 0 0 var(--tbl-rule); }
+html[data-theme="light"] .leads-workspace .leads-data-table thead th,
+html[data-theme="light"] .leads-workspace .leads-data-table thead .table-sticky-surface {
+  color: var(--text-mute) !important;
+  background: var(--surface-2) !important;
+  border-bottom: 1px solid var(--border);
+  box-shadow: none;
+}
+
+/* ============================================================
+   STAGE BADGES — final consolidated layer
+   Replaces six overlapping .stage-badge-wrap layers that each
+   set a different height, radius, width mode and elevation, so
+   no two badges in a column agreed on size.
+
+   Rules of the system:
+   - Fixed width. `width: max-content` was the alignment bug —
+     every capsule sized to its own label, so the column read as
+     ragged confetti. One width, label ellipsis past it.
+   - Uniform tint depth. Hue is the only variable; L/C are fixed
+     in the palette (see stageTone in lib.js), so no stage shouts.
+   - Flat. Inside a table row the capsule is a tag, not a button;
+     it earns a border and a tint, not a shadow.
+   ============================================================ */
+:root {
+  --stage-w: 132px;
+  --stage-h: 22px;
+  --stage-dot: 6px;
+  /* One tint recipe, used by every stage surface in the app. */
+  --stage-tint: color-mix(in srgb, var(--stage-solid) 12%, var(--surface));
+  --stage-tint-hi: color-mix(in srgb, var(--stage-solid) 20%, var(--surface));
+  --stage-line: color-mix(in srgb, var(--stage-solid) 34%, transparent);
+  --stage-line-hi: color-mix(in srgb, var(--stage-solid) 58%, transparent);
+  --stage-text: color-mix(in srgb, var(--stage-solid) 78%, var(--text));
+}
+html[data-theme="light"] {
+  /* On white, the 72%-lightness ramp is too pale for text — step
+     down to the `badge` tone for ink and keep the wash for ground. */
+  --stage-tint: color-mix(in srgb, var(--stage-solid) 11%, #fff);
+  --stage-tint-hi: color-mix(in srgb, var(--stage-solid) 18%, #fff);
+  --stage-text: var(--stage-badge-bg, var(--stage-solid));
+}
+
+/* ---------- table capsule: dot + label, one size ---------- */
+html .leads-data-table .stage-badge-wrap,
+html[data-theme="light"] .leads-data-table .stage-badge-wrap,
+html .stage-badge-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  box-sizing: border-box;
+  width: var(--stage-w);
+  max-width: 100%;
+  height: var(--stage-h);
+  padding: 0 8px;
+  overflow: hidden;
+  border: 1px solid var(--stage-line);
+  border-radius: 999px;
+  background: var(--stage-tint);
+  box-shadow: none;
+  transform: none;
+  transition: background var(--dur-hover) var(--ease-out), border-color var(--dur-hover) var(--ease-out);
+}
+html .leads-data-table .stage-badge-wrap:hover,
+html[data-theme="light"] .leads-data-table .stage-badge-wrap:hover,
+html .stage-badge-wrap:hover {
+  background: var(--stage-tint-hi);
+  border-color: var(--stage-line-hi);
+  transform: none;
+  box-shadow: none;
+}
+
+/* The icon becomes a dot. A 12px glyph per row was nine competing
+   pictograms; the colour already carries the stage. */
+html .stage-badge-wrap .stage-badge-icon {
+  flex: 0 0 auto;
+  width: var(--stage-dot);
+  height: var(--stage-dot);
+  margin: 0;
+  border-radius: 50%;
+  overflow: hidden;
+  background: var(--stage-solid);
+  color: transparent;
+}
+html .stage-badge-wrap .stage-badge-icon > svg { display: none; }
+
+html .stage-badge-wrap .stage-badge-select,
+html .leads-data-table .stage-badge-wrap .stage-badge-select.stage-badge,
+html[data-theme="light"] .leads-data-table .stage-badge-wrap .stage-badge-select.stage-badge {
+  flex: 1 1 auto !important;
+  width: auto !important;
+  min-width: 0 !important;
+  max-width: none !important;
+  height: 100% !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  appearance: none;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  color: var(--stage-text) !important;
+  font-size: var(--text-2xs);
+  font-weight: 680;
+  letter-spacing: .005em;
+  line-height: 1;
+  text-align: left;
+  text-align-last: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  overflow: hidden;
+  cursor: pointer;
+}
+html .stage-badge-wrap .stage-badge-select option { color: var(--text); background: var(--surface-2); font-weight: 600; }
+/* No caret: 25 rows of carets is noise, and the whole capsule is the hit area. */
+html .stage-badge-wrap::after { display: none !important; }
+
+/* Compact density collapses to the dot alone — same 22px box, so the
+   column keeps its rhythm when the label goes away. */
+html .stage-badge-wrap.is-compact {
+  width: var(--stage-h);
+  justify-content: center;
+  padding: 0;
+  gap: 0;
+}
+html .stage-badge-wrap.is-compact .stage-badge-select { display: none; }
+html .stage-badge-wrap.is-compact .stage-badge-icon { width: 8px; height: 8px; }
+
+/* ---------- standalone pill (drawer, pipeline, kanban cards) ---------- */
+html .stage-badge:not(select) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 6px;
+  box-sizing: border-box;
+  width: var(--stage-w);
+  max-width: 100%;
+  height: var(--stage-h);
+  padding: 0 8px 0 7px;
+  overflow: hidden;
+  border: 1px solid var(--stage-line) !important;
+  border-radius: 999px !important;
+  background: var(--stage-tint) !important;
+  box-shadow: none;
+  color: var(--stage-text) !important;
+  font-size: var(--text-2xs);
+  font-weight: 680;
+  letter-spacing: .005em;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+html .stage-badge:not(select)::before {
+  content: '';
+  position: static;
+  flex: 0 0 auto;
+  width: var(--stage-dot);
+  height: var(--stage-dot);
+  border-radius: 50%;
+  transform: none;
+  background: var(--stage-solid);
+  box-shadow: none;
+}
+/* Group headers and kanban titles need to wrap, so they opt out of the
+   fixed width but keep the same tint, ink and dot. */
+html .pipeline-stage-badge {
+  width: auto;
+  height: auto;
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: var(--text-xs);
+  font-weight: 660;
+  line-height: 1.35;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  overflow: hidden;
+  max-width: 100%;
+}

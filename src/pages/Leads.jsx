@@ -716,15 +716,12 @@ export default function Leads({ initialSearch = '', initialAssociateId = '' }) {
   const missedLeads = items.filter(l => l.fu?.missedCount > 0)
   const outreachLeads = items.filter(l => l.status === 'open' && l.fu?.lastOutreachDays > cadenceDays)
 
+  // groupBy holds an ordered, comma-separated list of fields — one grouping
+  // level each, outermost first.
   const grouped = useMemo(() => {
-    if (!groupBy) return null
-    const map = new Map()
-    for (const l of items) {
-      const k = groupKey(l, groupBy, lookup)
-      if (!map.has(k)) map.set(k, [])
-      map.get(k).push(l)
-    }
-    return [...map.entries()].map(([key, list]) => ({ key, list }))
+    const fields = csvValues(groupBy).filter(field => GROUP_LABEL[field])
+    if (!fields.length) return null
+    return flattenGroupNodes(buildGroupNodes(items, fields, lookup))
   }, [items, groupBy, lookup])
 
   const toggleGroup = (key) => setCollapsed(c => ({ ...c, [key]: !c[key] }))
@@ -751,7 +748,7 @@ export default function Leads({ initialSearch = '', initialAssociateId = '' }) {
       {/* bulk selection toolbar */}
       {selected.size > 0 && (
         <div className="card p-3 flex flex-wrap items-center gap-3 border-rose-400/25" style={{ animation: 'fadeIn .15s ease' }}>
-          <span className="chip bg-rose-500/15 border border-rose-400/30 text-rose-300 !px-2.5 !py-1 text-sm font-semibold">
+          <span className="chip-danger" style={{ height: 28, padding: '0 10px', fontSize: 'var(--text-sm)' }}>
             {selectAllMatching ? `All ${selected.size} matching leads selected` : `${selected.size} selected`}
           </span>
           {!selectAllMatching && selected.size === items.length && (data?.total || 0) > items.length && (
@@ -896,9 +893,7 @@ export default function Leads({ initialSearch = '', initialAssociateId = '' }) {
             {selectedSegmentId && <button type="button" className="btn btn-ghost !py-2 !px-3" onClick={() => deleteSegment(selectedSegmentId)} title="Delete selected segment"><Trash2 size={13} /></button>}
           </div>
           <OwnerFilter associates={(boot?.associates || []).filter(a => a.active !== false && (!csvValues(filters.locationId).length || csvValues(filters.locationId).some(id => (a.locationIds || [a.locationId]).includes(id))))} selected={filters.associateId} onSelect={id => { if (onlyMine) setOnlyMine(false); setFilters(f => ({ ...f, associateId: csvToggle(f.associateId, id) })); setPage(0) }} />
-          <select className="input !w-auto !py-1.5" value={groupBy} onChange={e => { setGroupBy(e.target.value); setCollapsed({}) }}>
-            {GROUP_OPTIONS.map(g => <option key={g.id} value={g.id}>{g.id ? `Group by ${g.label}` : 'No grouping'}</option>)}
-          </select>
+          <GroupByMenu value={groupBy} onChange={next => { setGroupBy(next); setCollapsed({}) }} />
           {grouped && (
             <div className="flex items-center gap-1">
               <Tip content="Expand all groups"><button className="btn btn-ghost !py-2 !px-3" onClick={() => setCollapsed({})}><ChevronRight size={14} className="rotate-90" /></button></Tip>
@@ -1045,7 +1040,7 @@ export default function Leads({ initialSearch = '', initialAssociateId = '' }) {
 
       {view === 'summary' && <SummaryView items={items} boot={boot} lookup={lookup} />}
       {view === 'timeline' && <TimelineView items={items} lookup={lookup} openLead={openLead} />}
-      {view === 'kanban' && <KanbanView items={items} boot={boot} lookup={lookup} openLead={openLead} changeStage={changeStage} changeLeadField={changeLeadField} groupBy={groupBy} />}
+      {view === 'kanban' && <KanbanView items={items} boot={boot} lookup={lookup} openLead={openLead} changeStage={changeStage} changeLeadField={changeLeadField} groupBy={csvValues(groupBy)[0] || ''} />}
 
       {view !== 'summary' && view !== 'timeline' && view !== 'kanban' && (
         <div className={`leads-table-shell card overflow-hidden ${tableStyle.zebra ? 'has-zebra' : 'no-zebra'} ${tableStyle.gridLines ? 'has-grid-lines' : 'no-grid-lines'}`} style={{ '--table-font-scale': tableStyle.fontScale / 100 }} ref={tableJumpRef}>
@@ -1252,6 +1247,45 @@ function groupKey(l, by, lookup) {
   }
 }
 
+const GROUP_LABEL = Object.fromEntries(GROUP_OPTIONS.filter(g => g.id).map(g => [g.id, g.label]))
+
+// Multi-level grouping: each chosen field splits the level above it, so
+// "Location then Stage" gives a stage breakdown inside every location. The
+// tree is flattened depth-first because the table renders one <tbody> per
+// node and only leaf nodes carry rows — a node is hidden when any ancestor
+// in `ancestors` is collapsed.
+function buildGroupNodes(items, fields, lookup, depth = 0, parentKey = '', parentPath = []) {
+  const field = fields[depth]
+  const map = new Map()
+  for (const l of items) {
+    const label = groupKey(l, field, lookup)
+    if (!map.has(label)) map.set(label, [])
+    map.get(label).push(l)
+  }
+  return [...map.entries()].map(([label, list]) => {
+    const key = `${parentKey}${parentKey ? ' \u203a ' : ''}${field}:${label}`
+    const path = [...parentPath, label]
+    return {
+      key,
+      label,
+      path,
+      field,
+      depth,
+      list,
+      children: depth + 1 < fields.length ? buildGroupNodes(list, fields, lookup, depth + 1, key, path) : null
+    }
+  })
+}
+
+function flattenGroupNodes(nodes, ancestors = []) {
+  const out = []
+  for (const node of nodes) {
+    out.push({ ...node, ancestors, isLeaf: !node.children })
+    if (node.children) out.push(...flattenGroupNodes(node.children, [...ancestors, node.key]))
+  }
+  return out
+}
+
 function ColumnsToggleIcon({ pinned }) {
   return <span className={`inline-flex w-4 h-4 rounded border items-center justify-center text-2xs ${pinned ? 'bg-rose-500/20 border-rose-400/30 text-rose-300' : 'bg-white/5 border-white/10 text-slate-400'}`}>▥</span>
 }
@@ -1439,8 +1473,10 @@ function TableView({ items, boot, lookup, openLead, openQuickAction, changeStage
   // sticky header and horizontal scroll instead of rendering as its own
   // detached table.
   if (grouped) {
-    const groupSections = grouped.map(g => ({ key: g.key, list: focusLeadIds.length ? g.list.filter(l => focusLeadIds.includes(l.id)) : g.list }))
-    const orderedItems = groupSections.flatMap(g => g.list)
+    const groupSections = grouped.map(g => ({ ...g, list: focusLeadIds.length ? g.list.filter(l => focusLeadIds.includes(l.id)) : g.list }))
+    // Only leaves hold rows; parent nodes are header-only, so flattening the
+    // leaves keeps every lead exactly once and in display order.
+    const orderedItems = groupSections.filter(g => g.isLeaf).flatMap(g => g.list)
     return <TableGrid items={orderedItems} groups={groupSections} collapsed={collapsed} toggleGroup={toggleGroup} boot={boot} lookup={lookup} openLead={openLead} openQuickAction={openQuickAction} changeStage={changeStage} changeAssociate={changeAssociate} changeLeadField={changeLeadField} toggleManualFlag={toggleManualFlag} onMessage={onMessage} onTemplateMessage={onTemplateMessage} selected={selected} toggleSelect={toggleSelect} toggleSelectAll={toggleSelectAll} columns={columns} density={density} rowHeight={rowHeight} tableZoom={tableZoom} colWidths={colWidths} setColWidths={setColWidths} manualFlagOverrides={manualFlagOverrides} headerPinned={headerPinned} fixedCols={fixedCols} focusLeadIds={focusLeadIds} clearFocus={clearFocus} sortBy={sortBy} sortDir={sortDir} setSortBy={setSortBy} setSortDir={setSortDir} columnCountsQuery={columnCountsQuery} />
   }
   return <TableGrid items={focusedItems} boot={boot} lookup={lookup} openLead={openLead} openQuickAction={openQuickAction} changeStage={changeStage} changeAssociate={changeAssociate} changeLeadField={changeLeadField} toggleManualFlag={toggleManualFlag} onMessage={onMessage} onTemplateMessage={onTemplateMessage} selected={selected} toggleSelect={toggleSelect} toggleSelectAll={toggleSelectAll} columns={columns} density={density} rowHeight={rowHeight} tableZoom={tableZoom} colWidths={colWidths} setColWidths={setColWidths} manualFlagOverrides={manualFlagOverrides} headerPinned={headerPinned} fixedCols={fixedCols} focusLeadIds={focusLeadIds} clearFocus={clearFocus} sortBy={sortBy} sortDir={sortDir} setSortBy={setSortBy} setSortDir={setSortDir} columnCountsQuery={columnCountsQuery} />
@@ -1613,7 +1649,9 @@ function TableGrid({ items, groups = null, collapsed = {}, toggleGroup, boot, lo
   const rowIndexById = new Map(displayedItems.map((l, i) => [l.id, i]))
   const displayedIds = new Set(displayedItems.map(l => l.id))
   const sections = groups
-    ? groups.map(g => ({ key: g.key, group: g, open: !collapsed[g.key], rows: g.list.filter(l => displayedIds.has(l.id)) }))
+    ? groups
+      .filter(g => (g.ancestors || []).every(key => !collapsed[key]))
+      .map(g => ({ key: g.key, group: g, open: !collapsed[g.key], rows: g.isLeaf === false ? [] : g.list.filter(l => displayedIds.has(l.id)) }))
     : [{ key: '__all', group: null, open: true, rows: displayedItems }]
   const startResize = (id, fallback) => (e) => {
     e.preventDefault()
@@ -1635,7 +1673,7 @@ function TableGrid({ items, groups = null, collapsed = {}, toggleGroup, boot, lo
     <div className="lead-table-scroll scrollbar-thin" tabIndex={0} onKeyDown={onGridKeyDown} style={{ zoom: tableZoom / 100 }}>
       {focusLeadIds.length > 0 && (
         <div className="px-4 pt-4 pb-3 flex items-center gap-2">
-          <span className="chip bg-rose-500/15 border border-rose-400/25 text-rose-300">{focusLeadIds.length} highlighted lead{focusLeadIds.length === 1 ? '' : 's'}</span>
+          <span className="chip-danger">{focusLeadIds.length} highlighted lead{focusLeadIds.length === 1 ? '' : 's'}</span>
           <button className="btn btn-ghost !py-1.5 !text-sm" onClick={clearFocus}>Show all leads</button>
         </div>
       )}
@@ -1673,15 +1711,15 @@ function TableGrid({ items, groups = null, collapsed = {}, toggleGroup, boot, lo
         {sections.map(section => (
         <tbody key={section.key} className={groups ? `lead-group-body ${section.open ? 'is-open' : 'is-collapsed'}` : undefined}>
           {section.group && (
-            <tr className={`lead-group-row ${section.open ? 'is-open' : ''}`} onClick={() => toggleGroup?.(section.key)}>
+            <tr className={`lead-group-row lead-group-depth-${Math.min(section.group.depth || 0, 3)} ${section.open ? 'is-open' : ''}`} onClick={() => toggleGroup?.(section.key)}>
               <td colSpan={totalColCount}>
-                <span className="lead-group-row-inner">
+                <span className="lead-group-row-inner" style={{ paddingLeft: `${(section.group.depth || 0) * 22}px` }}>
                   <span className="lead-group-chevron">
                     <ChevronRight size={14} className={`transition-transform ${section.open ? 'rotate-90' : ''}`} />
                   </span>
                   <span className="lead-group-title-wrap">
-                    <span className="lead-group-kicker">Grouped segment</span>
-                    <span className="lead-group-title">{section.key}</span>
+                    <span className="lead-group-kicker">{GROUP_LABEL[section.group.field] || 'Grouped segment'}</span>
+                    <span className="lead-group-title">{section.group.label}</span>
                   </span>
                   <GroupSummary list={section.rows} />
                 </span>
@@ -1722,7 +1760,7 @@ function TableGrid({ items, groups = null, collapsed = {}, toggleGroup, boot, lo
                       {properName(l.fullName)}
                       {l.stripePayment && <Tip content={l.stripePayment.status === 'paid' ? `Payment captured${l.stripePayment.paidAt ? ` · ${new Date(l.stripePayment.paidAt).toLocaleDateString('en-IN')}` : ''}` : `Payment link · ${l.stripePayment.status}`}><button type="button" className={`lead-payment-indicator ${l.stripePayment.status === 'paid' ? 'is-paid' : 'is-pending'}`} onClick={event => { event.stopPropagation(); openQuickAction(l, 'stripe') }} aria-label={`Stripe payment ${l.stripePayment.status}`}><IndianRupee size={11} /></button></Tip>}
                       {[...rowManualFlags, ...(l.flags || [])].map(f => (
-                        <span key={f.id} title={f.name} className="chip !px-1.5 !py-0 text-2xs" style={{ background: `${f.color}22`, color: f.color, border: `1px solid ${f.color}44` }}>{f.label}</span>
+                        <span key={f.id} title={f.name} className="chip-neutral chip-xs" style={{ background: `${f.color}22`, color: f.color, border: `1px solid ${f.color}44` }}>{f.label}</span>
                       ))}
                     </div>
                     {density === 'compact' && <div className="lead-compact-meta"><span>{l.sourceName || 'No source'}</span><span>{owner?.name || 'Unassigned'}</span></div>}
@@ -2306,8 +2344,8 @@ function FuTip({ lead, followUpItem, isMissed }) {
           <meta.icon size={12} />
         </span>
         <span className="text-sm font-bold text-white">{meta.label}</span>
-        {isMissed && <span className="chip !px-1.5 !py-0.5 text-2xs bg-rose-500/20 text-rose-300">missed</span>}
-        {comments && !isMissed && <span className="chip !px-1.5 !py-0.5 text-2xs bg-emerald-500/15 text-emerald-300">done</span>}
+        {isMissed && <span className="chip-danger chip-xs">missed</span>}
+        {comments && !isMissed && <span className="chip-success chip-xs">done</span>}
         {date && <span className="ml-auto text-xs text-slate-500 mono">{fmtDate(date)}</span>}
       </div>
       <div className="text-xs text-slate-400 leading-relaxed">{comments || `No ${meta.label} follow-up logged yet.`}</div>
@@ -2328,7 +2366,7 @@ function CardsView({ items, lookup, openLead, grouped, collapsed, toggleGroup, b
               <div className="flex-1 min-w-0">
                 <div className="text-base font-semibold text-white truncate flex items-center gap-1.5">
                   {l.fullName}
-                  {(l.flags || []).map(f => <span key={f.id} title={f.name} className="chip !px-1.5 !py-0 text-2xs" style={{ background: `${f.color}22`, color: f.color, border: `1px solid ${f.color}44` }}>{f.label}</span>)}
+                  {(l.flags || []).map(f => <span key={f.id} title={f.name} className="chip-neutral chip-xs" style={{ background: `${f.color}22`, color: f.color, border: `1px solid ${f.color}44` }}>{f.label}</span>)}
                 </div>
                 <div className="text-xs text-slate-500 truncate">{lookup.locById[l.locationId]?.name?.split(',')[0] || '—'}</div>
               </div>
@@ -2337,7 +2375,7 @@ function CardsView({ items, lookup, openLead, grouped, collapsed, toggleGroup, b
             <div className="flex flex-wrap items-center gap-1.5 mb-2.5">
               <span className={`chip !py-0.5 !px-2 text-xs ${riskClass(l.ai.risk)}`}>{l.ai.risk}</span>
               <span className={`chip stage-badge !py-0.5 !px-2 !w-auto !h-auto text-xs`} style={stageBadgeStyle(l.stage)}>{l.stage}</span>
-              <span className="chip bg-white/5 border border-white/10 text-slate-400 !py-0.5 !px-2 text-xs">{l.sourceName}</span>
+              <span className="chip-neutral">{l.sourceName}</span>
             </div>
             <div className="text-xs text-slate-400 truncate mb-2.5">{l.ai?.nextAction?.text}</div>
             <div className="flex items-center gap-2 border-t border-white/6 pt-2">
@@ -2368,16 +2406,17 @@ function CardsView({ items, lookup, openLead, grouped, collapsed, toggleGroup, b
   if (grouped) {
     return (
       <div className="divide-y divide-white/5">
-        {grouped.map(g => {
+        {grouped.filter(g => (g.ancestors || []).every(key => !collapsed[key])).map(g => {
           const isOpen = !collapsed[g.key]
           return (
-            <div key={g.key}>
+            <div key={g.key} style={{ paddingLeft: `${(g.depth || 0) * 16}px` }}>
               <button className="w-full flex flex-wrap items-center gap-3 px-4 py-3 bg-white/[0.025] hover:bg-white/[0.045] border-b border-white/8 text-left transition-colors" onClick={() => toggleGroup(g.key)}>
                 <ChevronRight size={14} className={`text-slate-500 transition-transform shrink-0 ${isOpen ? 'rotate-90' : ''}`} />
-                <span className="font-display text-base font-semibold text-white shrink-0">{g.key}</span>
+                <span className="text-2xs uppercase tracking-wider text-slate-500 shrink-0">{GROUP_LABEL[g.field]}</span>
+                <span className="font-display text-base font-semibold text-white shrink-0">{g.label}</span>
                 <GroupSummary list={g.list} />
               </button>
-              {isOpen && inner(g.list)}
+              {isOpen && g.isLeaf && inner(g.list)}
             </div>
           )
         })}
@@ -2560,7 +2599,7 @@ function KanbanView({ items, boot, lookup, openLead, changeStage, changeLeadFiel
           onDrop={e => { e.preventDefault(); const leadId = e.dataTransfer.getData('text/lead-id'); setDragOver(''); moveLead(leadId, col.value) }}>
           <div className="px-3 py-2.5 flex items-center gap-2">
             <span className={`pipeline-stage-badge ${field === 'stage' ? stageClass(col.label) : ''}`} style={field === 'stage' ? stageBadgeStyle(col.label) : undefined} title={col.label}>{col.label}</span>
-            <span className="ml-auto chip bg-white/6 border border-white/10 text-slate-400 mono !py-0.5 !px-2 text-xs">{col.leads.length}</span>
+            <span className="ml-auto chip-neutral mono">{col.leads.length}</span>
           </div>
           <div className="flex-1 px-2 pb-2 space-y-2 max-h-[560px] overflow-y-auto scrollbar-thin">
             {col.leads.map(l => {
@@ -2572,7 +2611,7 @@ function KanbanView({ items, boot, lookup, openLead, changeStage, changeLeadFiel
                     <div className="flex-1 min-w-0">
                       <div className="text-sm font-semibold text-white truncate flex items-center gap-1">
                         {l.fullName}
-                        {(l.flags || []).map(f => <span key={f.id} title={f.name} className="chip !px-1 !py-0 text-2xs" style={{ background: `${f.color}22`, color: f.color, border: `1px solid ${f.color}44` }}>{f.label}</span>)}
+                        {(l.flags || []).map(f => <span key={f.id} title={f.name} className="chip-neutral chip-xs" style={{ background: `${f.color}22`, color: f.color, border: `1px solid ${f.color}44` }}>{f.label}</span>)}
                       </div>
                       <div className="text-xs text-slate-500 truncate">{owner?.name || 'Unassigned'}</div>
                     </div>
@@ -2617,8 +2656,8 @@ function TimelineView({ items, lookup, openLead }) {
         <div key={month} className="card p-4">
           <div className="flex items-center gap-3 mb-3">
             <span className="font-display font-semibold text-white text-base">{new Date(month + '-01').toLocaleString('en-US', { month: 'long', year: 'numeric' })}</span>
-            <span className="chip bg-white/5 border border-white/10 text-slate-400 !px-2 !py-0.5">{list.length} leads</span>
-            <span className="chip bg-emerald-500/10 text-emerald-300 border border-emerald-400/20 !px-2 !py-0.5">{list.filter(l => l.status === 'won').length} won</span>
+            <span className="chip-neutral">{list.length} leads</span>
+            <span className="chip-success">{list.filter(l => l.status === 'won').length} won</span>
           </div>
           <div className="space-y-1">
             {list.map(l => {
@@ -2689,6 +2728,54 @@ function MultiFilter({ label, allLabel, value, options, onChange, disabled }) {
             )
           })}
           {!options.length && <div className="multi-filter-empty">Nothing to filter by yet</div>}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// Grouping is ordered, not just a set: the click order is the nesting order,
+// so the menu numbers each pick rather than showing a plain checkbox.
+function GroupByMenu({ value, onChange }) {
+  const selected = csvValues(value).filter(field => GROUP_LABEL[field])
+  const [open, setOpen] = useState(false)
+  const ref = useRef(null)
+  useEffect(() => {
+    if (!open) return
+    const onDown = (e) => { if (!ref.current?.contains(e.target)) setOpen(false) }
+    const onKey = (e) => { if (e.key === 'Escape') setOpen(false) }
+    document.addEventListener('mousedown', onDown)
+    document.addEventListener('keydown', onKey)
+    return () => { document.removeEventListener('mousedown', onDown); document.removeEventListener('keydown', onKey) }
+  }, [open])
+  const summary = !selected.length ? 'No grouping'
+    : selected.length === 1 ? `Group by ${GROUP_LABEL[selected[0]]}`
+    : `Grouped by ${selected.map(field => GROUP_LABEL[field]).join(' \u203a ')}`
+  return (
+    <div className="multi-filter" ref={ref}>
+      <button
+        type="button" className={`input !w-auto !py-1.5 multi-filter-trigger ${selected.length ? 'is-active' : ''}`}
+        aria-expanded={open} aria-haspopup="listbox" onClick={() => setOpen(o => !o)}
+      >
+        <span className="multi-filter-summary">{summary}</span>
+        <ChevronDown size={13} className="shrink-0 opacity-60" />
+      </button>
+      {open && (
+        <div className="multi-filter-menu" role="listbox" aria-multiselectable="true">
+          <button type="button" className="multi-filter-option is-all" onClick={() => { onChange(''); setOpen(false) }}>No grouping</button>
+          {GROUP_OPTIONS.filter(option => option.id).map(option => {
+            const rank = selected.indexOf(option.id)
+            return (
+              <button
+                key={option.id} type="button" role="option" aria-selected={rank >= 0}
+                className={`multi-filter-option ${rank >= 0 ? 'is-checked' : ''}`}
+                onClick={() => onChange(csvToggle(value, option.id))}
+              >
+                <span className="multi-filter-box">{rank >= 0 ? rank + 1 : ''}</span>
+                <span className="multi-filter-option-label">{option.label}</span>
+              </button>
+            )
+          })}
         </div>
       )}
     </div>

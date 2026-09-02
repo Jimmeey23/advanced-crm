@@ -75,24 +75,59 @@ export const initials = (name) =>
 
 const normalizedStage = (stage) => String(stage || 'Unspecified').trim().toLocaleLowerCase('en-IN').replace(/\s+/g, ' ')
 
+/* ------------------------------------------------------------
+   STAGE PALETTE
+   One ramp, ten hues, all at the same OKLCH lightness and chroma.
+   Uniform L/C is the point: with per-hue Tailwind values (a 500
+   blue next to a 500 amber) the amber badge reads twice as loud
+   as the blue one and the column looks scattered. Fixed L/C
+   means hue carries the meaning and nothing else varies.
+   `solid` is the badge ink/tint source on dark, `badge` the
+   darker step light mode needs to clear 4.5:1 on white.
+   ------------------------------------------------------------ */
+const STAGE_HUES = {
+  blue:    248,
+  indigo:  272,
+  violet:  292,
+  magenta: 328,
+  rose:    18,
+  orange:  48,
+  amber:   72,
+  green:   145,
+  teal:    178,
+  cyan:    212
+}
+
+const stageTone = (hue) => ({
+  solid: `oklch(0.72 0.135 ${hue})`,
+  badge: `oklch(0.52 0.145 ${hue})`,
+  hover: `oklch(0.45 0.14 ${hue})`
+})
+
+const STAGE_TONES = Object.fromEntries(
+  Object.entries(STAGE_HUES).map(([name, hue]) => [name, stageTone(hue)])
+)
+
+/* Hash fallback draws only from hues no semantic rule claims, so an
+   unmapped stage can never borrow won-green or lost-rose. */
 const STAGE_BADGE_PALETTE = [
-  { solid: '#3b82f6', badge: '#2563eb', hover: '#1d4ed8' }, // cobalt
-  { solid: '#8b5cf6', badge: '#7c3aed', hover: '#6d28d9' }, // violet
-  { solid: '#ec4899', badge: '#be185d', hover: '#9d174d' }, // magenta
-  { solid: '#14b8a6', badge: '#0f766e', hover: '#115e59' }, // teal
-  { solid: '#f97316', badge: '#c2410c', hover: '#9a3412' }, // orange
-  { solid: '#06b6d4', badge: '#0e7490', hover: '#155e75' }  // cyan
+  STAGE_TONES.indigo,
+  STAGE_TONES.violet,
+  STAGE_TONES.magenta,
+  STAGE_TONES.cyan,
+  STAGE_TONES.teal,
+  STAGE_TONES.amber
 ]
 
 const semanticStageColor = (key) => {
-  if (/won|enrolled|membership purchased|converted/.test(key)) return { solid: '#10b981', badge: '#047857', hover: '#065f46' }
-  if (/lost|not interested|disqual|declined/.test(key)) return { solid: '#f43f5e', badge: '#be123c', hover: '#9f1239' }
-  if (/trial completed|positive trial/.test(key)) return { solid: '#14b8a6', badge: '#0f766e', hover: '#115e59' }
-  if (/trial scheduled|trial booked|trial rescheduled/.test(key)) return { solid: '#06b6d4', badge: '#0e7490', hover: '#155e75' }
-  if (/unresponsive|no response|not answering|did not answer/.test(key)) return { solid: '#f97316', badge: '#c2410c', hover: '#9a3412' }
-  if (/follow.?up|will get back|later date/.test(key)) return { solid: '#a855f7', badge: '#7e22ce', hover: '#6b21a8' }
-  if (/proposal|pricing|package|payment|exclusive deal/.test(key)) return { solid: '#ec4899', badge: '#be185d', hover: '#9d174d' }
-  if (/new enquiry|initial contact|introductory/.test(key)) return { solid: '#3b82f6', badge: '#2563eb', hover: '#1d4ed8' }
+  if (/won|enrolled|membership purchased|converted/.test(key)) return STAGE_TONES.green
+  if (/lost|not interested|disqual|declined/.test(key)) return STAGE_TONES.rose
+  if (/trial completed|positive trial/.test(key)) return STAGE_TONES.teal
+  if (/trial scheduled|trial booked|trial rescheduled/.test(key)) return STAGE_TONES.cyan
+  if (/unresponsive|no response|not answering|did not answer/.test(key)) return STAGE_TONES.orange
+  if (/follow.?up|will get back|later date/.test(key)) return STAGE_TONES.violet
+  if (/proposal|pricing|package|payment|exclusive deal/.test(key)) return STAGE_TONES.magenta
+  if (/new enquiry|initial contact|introductory/.test(key)) return STAGE_TONES.blue
   return null
 }
 
