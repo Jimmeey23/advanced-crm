@@ -303,17 +303,67 @@ export function suggestFollowups(lead) {
   return out.slice(0, 3)
 }
 
-export function enrichLead(lead, db) {
+// ---------------------------------------------------------------------------
+// Cheap projection
+//
+// enrichLead builds summary prose, an insights list, per-channel message
+// drafts and a fresh ISO timestamp for every lead. Filtering and sorting only
+// ever look at four fields, so calling the full version there meant generating
+// paragraphs of English for 24,031 leads to compare one number — 1.38s per
+// filter pass, and ~40s for a sort (two full enrichments per comparison).
+//
+// projectLead computes exactly those four fields. enrichLead is built on top
+// of it so the two can't drift: whatever `status`/`statusGroup`/`score`/`risk`
+// a filter sees is the same value the row itself reports.
+// ---------------------------------------------------------------------------
+export function projectLead(lead, db) {
   const score = scoreLead(lead, db)
+  const risk = lead.status === 'open' ? (score >= 70 ? 'hot' : score >= 45 ? 'warm' : 'cold') : lead.status
+
+  const rawStatusGroup = statusGroupOf(lead.stage)
+  const evidence = lead.momenceEvidence || {}
+  const statusGroup = evidence.membershipSold
+    ? 'Membership Sold'
+    : evidence.trialCompleted
+      ? 'Trial Completed'
+      : rawStatusGroup === 'Won' || rawStatusGroup === 'Trial Completed'
+        ? 'Pre-Trial'
+        : rawStatusGroup
+  const status = evidence.membershipSold ? 'won' : (lead.status === 'won' ? 'open' : lead.status)
+
+  return { score, risk, status, statusGroup, evidence }
+}
+
+// Everything the alert builder reads, and nothing else. /api/alerts walks
+// every open lead (16,214 of them here) on a 60s poll from every open tab; on
+// the full enrichment that was ~940ms of blocked event loop per call, almost
+// all of it spent generating prose and per-channel message drafts that an
+// alert never shows.
+export function projectAlertFacts(lead, db) {
+  const base = projectLead(lead, db)
+  const missed = missedFollowUps(lead)
+  return {
+    ...base,
+    ai: { score: base.score, risk: base.risk },
+    fu: {
+      missedCount: missed.length,
+      missedDates: missed.map(m => m.date),
+      lastOutreachDays: lastOutreachDays(lead),
+      outreach: channelOutreach(lead),
+      cadence: cadenceState(lead, db?.settings?.cadence?.steps)
+    },
+    flags: evaluateRules(lead, db, base.score)
+  }
+}
+
+export function enrichLead(lead, db) {
+  // Built on the projections above so a filter, an alert and the row itself
+  // can never disagree about a lead's score, status or flags.
+  const facts = projectAlertFacts(lead, db)
+  const { score, risk, status: verifiedOutcome, statusGroup: verifiedStatusGroup, evidence, fu, flags } = facts
   const senti = sentimentOf(lead)
   const action = nextBestAction(lead)
   const insights = insightsFor(lead, score)
-  const risk = lead.status === 'open' ? (score >= 70 ? 'hot' : score >= 45 ? 'warm' : 'cold') : lead.status
-  const missed = missedFollowUps(lead)
-  const outreach = channelOutreach(lead)
-  const lastOutreach = lastOutreachDays(lead)
-  const cadence = cadenceState(lead, db?.settings?.cadence?.steps)
-  const flags = evaluateRules(lead, db, score)
 
   let summary
   if (lead.status === 'won') {
@@ -325,17 +375,6 @@ export function enrichLead(lead, db) {
       `Sentiment reads ${senti}. ${insights[0] ? insights[0] : 'A steady follow-up cadence is recommended.'}`
   }
 
-  const rawStatusGroup = statusGroupOf(lead.stage)
-  const evidence = lead.momenceEvidence || {}
-  const verifiedStatusGroup = evidence.membershipSold
-    ? 'Membership Sold'
-    : evidence.trialCompleted
-      ? 'Trial Completed'
-      : rawStatusGroup === 'Won' || rawStatusGroup === 'Trial Completed'
-        ? 'Pre-Trial'
-        : rawStatusGroup
-  const verifiedOutcome = evidence.membershipSold ? 'won' : (lead.status === 'won' ? 'open' : lead.status)
-
   return {
     ...lead,
     status: verifiedOutcome,
@@ -343,13 +382,7 @@ export function enrichLead(lead, db) {
     trialDate: evidence.trialDate || null,
     firstPurchaseDate: evidence.firstPurchaseDate || null,
     gpt: lead.aiGpt || null,
-    fu: {
-      missedCount: missed.length,
-      missedDates: missed.map(m => m.date),
-      lastOutreachDays: lastOutreach,
-      outreach,
-      cadence
-    },
+    fu,
     flags,
     ai: {
       score,

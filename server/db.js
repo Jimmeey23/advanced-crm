@@ -3,7 +3,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { seed } from './seed.js'
 import * as supabase from './supabaseStore.js'
-import { findDuplicateAmong } from './duplicateMatch.js'
+import { normalizeEmail, normalizePhone } from './duplicateMatch.js'
 import { DEFAULT_LEAD_SOURCES, DEFAULT_MARKETING_CHANNELS, DEFAULT_CLASS_TYPES, DEFAULT_FOLLOW_UP_CHANNELS, defaultChannelForSource, uniqueClean } from '../src/leadConfig.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -30,11 +30,24 @@ let remoteChangeCb = null
 // Entries expire on a timer rather than on first sight: Realtime can deliver
 // an echo more than once, and a never-pruned set would grow without bound.
 const selfWrittenLeadIds = new Map()
-const SELF_WRITE_TTL_MS = 60 * 1000
+// A bulk upsert of the whole table takes minutes to drain back through
+// Realtime, so the window has to outlive the burst, not the request. Entries
+// are deleted on first sight anyway, so a longer TTL costs nothing.
+const SELF_WRITE_TTL_MS = 10 * 60 * 1000
 
 function markSelfWritten(ids) {
   const expiry = Date.now() + SELF_WRITE_TTL_MS
   for (const id of ids) selfWrittenLeadIds.set(id, expiry)
+}
+
+// Marking happens before the upsert so an echo can be recognised mid-burst,
+// which means a FAILED upsert leaves ids marked for a write that never reached
+// the database. If another writer then changed one of those rows we would drop
+// their echo and sit on stale data for the rest of the TTL. So on failure the
+// marks come straight back off: re-applying the echo of our own write is
+// harmless, ignoring somebody else's is not.
+function unmarkSelfWritten(ids) {
+  for (const id of ids) selfWrittenLeadIds.delete(id)
 }
 
 // Returns true if `id` is an echo of something we wrote. Prunes lazily -- this
@@ -74,16 +87,98 @@ export function onRemoteChange(cb) {
   remoteChangeCb = cb
 }
 
+// ---------------------------------------------------------------------------
+// Lookup indexes for the Realtime path
+//
+// applyRemoteLeadChange used to do a linear `state.leads.findIndex` per event,
+// and for an id it didn't recognise a second linear scan inside
+// findDuplicateAmong. At 24k leads a bulk burst of 24k echoes is ~576M
+// comparisons. These indexes make both lookups O(1).
+//
+// Correctness comes from invalidating aggressively rather than from tracking
+// every mutation site: the id index self-heals (a stale hit is verified
+// against the array and repaired on miss), and the duplicate index is thrown
+// away whenever anything local is written (every local edit goes through
+// markDirty/markDeleted) or whenever the array length changes underneath it.
+// A pure remote burst touches neither, which is exactly when the index pays.
+// ---------------------------------------------------------------------------
+let idIndex = null
+let dupIndex = null
+let dupIndexLen = -1
+
+function invalidateIndexes() {
+  idIndex = null
+  dupIndex = null
+  dupIndexLen = -1
+}
+
+// Verified on every hit, so a stale entry costs one comparison and a repair
+// rather than a wrong answer.
+function leadIndexOf(id) {
+  const leads = state?.leads || []
+  if (!idIndex) {
+    idIndex = new Map()
+    for (let i = 0; i < leads.length; i += 1) if (!idIndex.has(leads[i].id)) idIndex.set(leads[i].id, i)
+  }
+  const hit = idIndex.get(id)
+  if (hit !== undefined && leads[hit] && leads[hit].id === id) return hit
+  const found = leads.findIndex(l => l.id === id)
+  if (found === -1) idIndex.delete(id)
+  else idIndex.set(id, found)
+  return found
+}
+
+// isDuplicatePair matches on four keys — normalized email, normalized phone,
+// and the raw lowercased forms of each as a fallback. Indexing all four and
+// taking the LOWEST matching array position reproduces `leads.find(...)`
+// exactly, so the merge picks the same existing row it always did.
+function buildDupIndex(leads) {
+  const maps = { email: new Map(), phone: new Map(), rawEmail: new Map(), rawPhone: new Map() }
+  const put = (map, key, i) => { if (key && !map.has(key)) map.set(key, i) }
+  for (let i = 0; i < leads.length; i += 1) {
+    const l = leads[i]
+    put(maps.email, normalizeEmail(l.email), i)
+    put(maps.phone, normalizePhone(l.phone), i)
+    put(maps.rawEmail, String(l.email || '').trim().toLowerCase(), i)
+    put(maps.rawPhone, String(l.phone || '').trim().toLowerCase(), i)
+  }
+  return maps
+}
+
+function findDuplicateIndexed(candidate) {
+  const leads = state?.leads || []
+  if (!dupIndex || dupIndexLen !== leads.length) {
+    dupIndex = buildDupIndex(leads)
+    dupIndexLen = leads.length
+  }
+  const email = normalizeEmail(candidate.email)
+  const phone = normalizePhone(candidate.phone)
+  const rawEmail = String(candidate.email || '').trim().toLowerCase()
+  const rawPhone = String(candidate.phone || '').trim().toLowerCase()
+  // Same precondition findDuplicateAmong applies before scanning: a candidate
+  // with no contact information of any kind matches nothing.
+  if (!email && !phone && !rawEmail && !rawPhone) return null
+  const hits = [
+    email ? dupIndex.email.get(email) : undefined,
+    phone ? dupIndex.phone.get(phone) : undefined,
+    rawEmail ? dupIndex.rawEmail.get(rawEmail) : undefined,
+    rawPhone ? dupIndex.rawPhone.get(rawPhone) : undefined
+  ].filter(i => i !== undefined)
+  if (!hits.length) return null
+  return leads[Math.min(...hits)] || null
+}
+
 export function markDirty(id) {
-  if (id) dirty.add(id)
+  if (id) { dirty.add(id); invalidateIndexes() }
 }
 
 export function markDeleted(id) {
-  if (id) { dirty.delete(id); deleted.add(id) }
+  if (id) { dirty.delete(id); deleted.add(id); invalidateIndexes() }
 }
 
 export function markAllDirty() {
   for (const l of (state?.leads || [])) dirty.add(l.id)
+  invalidateIndexes()
 }
 
 export function getDirty() {
@@ -94,9 +189,82 @@ export function getDeleted() {
   return [...deleted]
 }
 
+// The local mirror is ~64MB of JSON. Two things about how it gets written
+// matter at that size:
+//
+//   - No indentation. `JSON.stringify(state, null, 2)` produced 89MB where
+//     compact produces 63.8MB -- 25MB of whitespace per write, on a file no
+//     human reads (it is a machine mirror of Supabase, not a config file).
+//   - Not synchronously. writeFileSync of 89MB blocked the event loop for
+//     ~286ms on top of ~245ms of stringify, and this runs on a 150ms
+//     debounce, so a burst of writes could stall every request behind it.
+//
+// Writes go to a temp file and are renamed into place, so a crash mid-write
+// leaves the previous good mirror rather than a truncated one. Concurrent
+// calls are collapsed: a write already in flight sets a "do it again after"
+// flag instead of racing a second stringify of the same state.
+let writeInFlight = null
+let writeQueued = false
+
 function writeFile() {
+  if (writeInFlight) { writeQueued = true; return writeInFlight }
+  writeInFlight = (async () => {
+    try {
+      await fs.promises.mkdir(DATA_DIR, { recursive: true })
+      const tmp = `${DB_FILE}.${process.pid}.tmp`
+      await fs.promises.writeFile(tmp, JSON.stringify(state))
+      await fs.promises.rename(tmp, DB_FILE)
+    } catch (e) {
+      console.error('[db] local mirror write failed', e.message)
+    } finally {
+      writeInFlight = null
+      if (writeQueued) { writeQueued = false; writeFile() }
+    }
+  })()
+  return writeInFlight
+}
+
+// Boot-time paths (seed, taxonomy migration) need the file on disk before the
+// process can be considered started, and they run once, so they keep the
+// blocking write rather than leaving an async one dangling.
+function writeFileSync() {
   fs.mkdirSync(DATA_DIR, { recursive: true })
-  fs.writeFileSync(DB_FILE, JSON.stringify(state, null, 2))
+  fs.writeFileSync(DB_FILE, JSON.stringify(state))
+}
+
+// The local mirror is written on a debounce, and now asynchronously, so a
+// process that exits between the last edit and the next flush would leave the
+// most recent writes only in memory. Ctrl-C during a busy minute is the normal
+// case for that, not an exotic one.
+//
+// The flush is deliberately synchronous: an async write cannot be relied on to
+// finish inside a signal handler. It costs ~250ms once, at shutdown.
+//
+// Supabase is a separate matter -- an in-flight upsert cannot be awaited here,
+// so anything still queued for it stays queued in `dirty` and goes up on the
+// next start. The mirror on disk is what makes that recoverable.
+export function flushToDiskSync() {
+  if (!state) return
+  clearTimeout(saveTimer)
+  clearTimeout(remoteWriteTimer)
+  try { writeFileSync() } catch (e) { console.error('[db] shutdown flush failed', e.message) }
+}
+
+let shutdownHooked = false
+export function installShutdownFlush() {
+  if (shutdownHooked) return
+  shutdownHooked = true
+  for (const signal of ['SIGINT', 'SIGTERM']) {
+    process.once(signal, () => {
+      flushToDiskSync()
+      // Re-raise rather than process.exit(): anything else listening for this
+      // signal (the HTTP server's own close, a test harness) still gets it,
+      // and the exit code stays the one the signal implies.
+      process.removeAllListeners(signal)
+      process.kill(process.pid, signal)
+    })
+  }
+  process.on('exit', flushToDiskSync)
 }
 
 export function load() {
@@ -104,20 +272,23 @@ export function load() {
   try {
     if (fs.existsSync(DB_FILE)) {
       state = JSON.parse(fs.readFileSync(DB_FILE, 'utf8'))
+      invalidateIndexes()
     } else {
       state = seed()
-      writeFile()
+      invalidateIndexes()
+      writeFileSync()
     }
   } catch (err) {
     console.error('[db] failed to load, reseeding', err)
     state = seed()
-    writeFile()
+    invalidateIndexes()
+    writeFileSync()
   }
   // An existing db.json predates a settings key added later — fill it in
   // rather than requiring a manual migration or crashing on the missing key.
   const taxonomyVersion = state.settings?.taxonomyVersion || 0
   ensureSettingsShape(state)
-  if (taxonomyVersion !== state.settings.taxonomyVersion) writeFile()
+  if (taxonomyVersion !== state.settings.taxonomyVersion) writeFileSync()
   if (!state.ownerChangeRequests) state.ownerChangeRequests = []
   return state
 }
@@ -127,7 +298,7 @@ export function save() {
   if (!state) return
   clearTimeout(saveTimer)
   saveTimer = setTimeout(() => {
-    try { writeFile() } catch (e) { console.error('[db] local save failed', e.message) }
+    writeFile()
     syncSupabase()
   }, 150)
 }
@@ -139,7 +310,16 @@ function syncSupabase() {
   syncTimer = setTimeout(async () => {
     try {
       const written = [...getDirty(), ...getDeleted()]
-      await supabase.persistState(state, getDirty(), getDeleted())
+      // See saveNow(): mark before the upsert so the echo of an early batch
+      // is recognised while later batches are still in flight.
+      markSelfWritten(written)
+      lastLocalWriteAt = Date.now()
+      try {
+        await supabase.persistState(state, getDirty(), getDeleted())
+      } catch (e) {
+        unmarkSelfWritten(written)
+        throw e
+      }
       markSelfWritten(written)
       dirty.clear()
       deleted.clear()
@@ -158,10 +338,24 @@ export async function saveNow() {
   if (!state) return
   clearTimeout(saveTimer)
   clearTimeout(syncTimer)
-  writeFile()
+  await writeFile()
   if (!supabase.isEnabled()) { dirty.clear(); deleted.clear(); return }
+  // Marked BEFORE the upsert, not after. persistState sends the rows in
+  // batches, so Realtime starts echoing batch 1 back while later batches are
+  // still uploading -- with the marking after the await, those early echoes
+  // arrived unrecognised and were applied as if a stranger had written them.
   const written = [...getDirty(), ...getDeleted()]
-  await supabase.persistState(state, getDirty(), getDeleted())
+  markSelfWritten(written)
+  lastLocalWriteAt = Date.now()
+  try {
+    await supabase.persistState(state, getDirty(), getDeleted())
+  } catch (e) {
+    // The caller surfaces this failure to the user; leaving the ids marked
+    // would also make us deaf to anyone else's edit of those rows.
+    unmarkSelfWritten(written)
+    throw e
+  }
+  // Re-stamp: the TTL has to outlive the write, not start before it.
   markSelfWritten(written)
   dirty.clear()
   deleted.clear()
@@ -172,8 +366,9 @@ export async function saveMetaNow() {
   if (!state) return
   clearTimeout(saveTimer)
   clearTimeout(syncTimer)
-  writeFile()
+  await writeFile()
   if (!supabase.isEnabled()) return
+  lastLocalWriteAt = Date.now()
   await supabase.persistMetaState(state)
   lastLocalWriteAt = Date.now()
 }
@@ -188,7 +383,7 @@ let remoteWriteTimer = null
 function scheduleRemoteWrite() {
   clearTimeout(remoteWriteTimer)
   remoteWriteTimer = setTimeout(() => {
-    try { writeFile() } catch (e) { console.error('[db] remote write failed', e.message) }
+    writeFile()
   }, 500)
 }
 
@@ -199,7 +394,7 @@ function scheduleRemoteWrite() {
 let remoteLeadChangeCount = 0
 function applyRemoteLeadChange({ eventType, id, data }) {
   if (!state || !id) return
-  const idx = state.leads.findIndex(l => l.id === id)
+  const idx = leadIndexOf(id)
   if (idx !== -1) {
     // Known local row: this event can be an echo of our own recent write
     // reflected back through Realtime — skip it to avoid clobbering newer
@@ -209,8 +404,14 @@ function applyRemoteLeadChange({ eventType, id, data }) {
     // the dedup merge check just because we happened to write something
     // else in the last 2s.
     if (isSelfWrite(id) || Date.now() - lastLocalWriteAt < 2000) return
-    if (eventType === 'DELETE') state.leads.splice(idx, 1)
-    else if (data) state.leads[idx] = data
+    if (eventType === 'DELETE') { state.leads.splice(idx, 1); invalidateIndexes() }
+    else if (data) {
+      // Replacing in place keeps every array position valid, so the id index
+      // survives; only the contact-keyed index can go stale here.
+      state.leads[idx] = data
+      dupIndex = null
+      dupIndexLen = -1
+    }
   } else if (eventType !== 'DELETE' && data) {
     // An id we don't recognize locally usually means this row was created
     // by another server instance sharing this Supabase project. If it's
@@ -218,13 +419,20 @@ function applyRemoteLeadChange({ eventType, id, data }) {
     // raced the same email/phone past its own — necessarily local-only —
     // dedup check before either write reached us), merge into the
     // existing row instead of blindly appending a second one.
-    const existing = findDuplicateAmong(state.leads, data)
+    const existing = findDuplicateIndexed(data)
     if (existing) {
-      const existingIdx = state.leads.indexOf(existing)
+      const existingIdx = leadIndexOf(existing.id)
       state.leads[existingIdx] = { ...existing, ...data, id: existing.id }
+      dupIndex = null
+      dupIndexLen = -1
       console.log(`[db] merged remote duplicate lead ${data.id} into existing ${existing.id}`)
     } else {
       state.leads.push(data)
+      // Cheaper than a rebuild: the new row is the last position, and it is
+      // the only thing either index did not already know about.
+      if (idIndex) idIndex.set(data.id, state.leads.length - 1)
+      dupIndex = null
+      dupIndexLen = -1
     }
   }
   scheduleRemoteWrite()
@@ -287,6 +495,10 @@ export async function init() {
     if (remote && remote.leads) {
       const { legacyInbox, ...rest } = remote
       state = ensureSettingsShape(rest)
+      // Wholesale state swap: any index built against the previous array is
+      // meaningless now, and the duplicate index cannot detect that on its own
+      // (a coincidentally equal lead count would look valid).
+      invalidateIndexes()
       if (legacyInbox) {
         // Pre-migration layout: the inbox came back inside the meta blob, so
         // it is already here and safe to write.
@@ -310,6 +522,7 @@ export async function init() {
 
 export function reset() {
   state = seed()
+  invalidateIndexes()
   save()
   markAllDirty()
   return state
@@ -321,4 +534,14 @@ export function uid(prefix = 'id') {
 
 export function nowIso() {
   return new Date().toISOString()
+}
+
+// Test-only seam. The Realtime lookup indexes are the one piece of this module
+// with a correctness claim that is worth asserting directly ("the index finds
+// exactly the row the linear scan found"), and they are internal by design.
+export const __testing = {
+  setState: next => { state = next; invalidateIndexes() },
+  leadIndexOf,
+  findDuplicateIndexed,
+  invalidateIndexes
 }

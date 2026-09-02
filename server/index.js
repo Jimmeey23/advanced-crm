@@ -4,8 +4,12 @@ import crypto from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 import express from 'express'
 import multer from 'multer'
-import { init, load, save, saveNow, saveMetaNow, uid, nowIso, reset, markDirty, markDeleted, onRemoteChange } from './db.js'
-import { enrichAll, enrichLead } from './ai.js'
+import { init, load, save, saveNow, saveMetaNow, uid, nowIso, reset, markDirty, markDeleted, onRemoteChange, installShutdownFlush } from './db.js'
+import { enrichAll, enrichLead, projectLead, projectAlertFacts } from './ai.js'
+// Shared with the client so the server tallies a column the same way the table
+// renders it — src/lib.js is dependency-free and already the single definition
+// of "what value does this column hold for this lead".
+import { baseColumnValue } from '../src/lib.js'
 import { assignLead } from './roundRobin.js'
 import * as momence from './momence.js'
 import { createMomenceDashboardClient } from './momenceDashboardAuth.js'
@@ -444,7 +448,7 @@ function buildAlerts(scope = {}, req = null) {
   }
   for (const lead of leads) {
     if (lead.status !== 'open') continue
-    const e = enrichLead(lead, db)
+    const e = projectAlertFacts(lead, db)
     const fu = computeFollowUpState(lead)
 
     if (notif.followUpAlerts !== false) {
@@ -737,9 +741,12 @@ function applyFilters(list, q) {
   const stages = many(q.stage)
   if (stages) out = out.filter(l => matchAny(stages, l.stage))
   const statuses = many(q.status)
-  if (statuses) out = out.filter(l => matchAny(statuses, enrichLead(l, db).status))
+  // projectLead, not enrichLead: these four filters only read derived scalars,
+  // and the full enrichment generates summary prose and message drafts per
+  // lead — 1.38s per filter across the table, for a string comparison.
+  if (statuses) out = out.filter(l => matchAny(statuses, projectLead(l, db).status))
   const statusGroups = many(q.statusGroup)
-  if (statusGroups) out = out.filter(l => matchAny(statusGroups, enrichLead(l, db).statusGroup))
+  if (statusGroups) out = out.filter(l => matchAny(statusGroups, projectLead(l, db).statusGroup))
   const sourceNames = many(q.sourceName)
   if (sourceNames) out = out.filter(l => matchAny(sourceNames, l.sourceName))
   const channels = many(q.channel)
@@ -748,10 +755,10 @@ function applyFilters(list, q) {
   if (classTypes) out = out.filter(l => matchAny(classTypes, l.classType))
   if (q.flagged === '1' || q.flagged === 'true') out = out.filter(l => (l.manualFlags || []).some(f => f.id === 'focus'))
   const risks = many(q.risk)
-  if (risks) out = out.filter(l => matchAny(risks, enrichLead(l, db).ai.risk))
+  if (risks) out = out.filter(l => matchAny(risks, projectLead(l, db).risk))
   if (q.minScore !== undefined || q.maxScore !== undefined) {
     out = out.filter(l => {
-      const s = enrichLead(l, db).ai.score
+      const s = projectLead(l, db).score
       if (q.minScore !== undefined && s < Number(q.minScore)) return false
       if (q.maxScore !== undefined && s > Number(q.maxScore)) return false
       return true
@@ -787,9 +794,13 @@ app.get('/api/leads', (req, res) => {
   const sortBy = req.query.sortBy || 'createdAt'
   const dir = req.query.sortDir === 'asc' ? 1 : -1
   if (sortBy === 'ai.score' || sortBy === 'score') {
+    // Decorate-sort-undecorate. Scoring inside the comparator meant two
+    // enrichments per comparison — ~699,000 calls, about 40 seconds of blocked
+    // event loop, for one click on the score column. One pass is 24k calls.
+    const scoreById = new Map(list.map(l => [l.id, projectLead(l, db).score]))
     list.sort((a, b) => {
-      const va = enrichLead(a, db).ai.score
-      const vb = enrichLead(b, db).ai.score
+      const va = scoreById.get(a.id)
+      const vb = scoreById.get(b.id)
       return va < vb ? -dir : va > vb ? dir : 0
     })
   } else {
@@ -810,6 +821,48 @@ app.get('/api/leads', (req, res) => {
     total,
     page,
     pageSize
+  })
+})
+
+// Value distribution for one column, under the current filters. The column
+// header's breakdown popover used to get this by fetching
+// `/api/leads?...&pageSize=5000` and tallying client-side — 5,000 fully
+// enriched leads, measured at 251ms of server CPU and a 21.1MB response, to
+// produce a list of at most a few dozen counts. Tallying here sends ~2KB.
+//
+// Values come from the same baseColumnValue the table renders with, over a
+// cheap projection of the fields it can read (score, risk, statusGroup,
+// follow-up counts, Momence dates) rather than the full enrichment.
+app.get('/api/leads/column-counts', (req, res) => {
+  const field = String(req.query.field || '')
+  if (!field) return res.status(400).json({ error: 'field is required' })
+
+  const asnById = Object.fromEntries(db.associates.map(a => [a.id, a]))
+  const locById = Object.fromEntries(db.locations.map(l => [l.id, l]))
+  const lookup = { asnById, locById }
+
+  const list = applyFilters([...db.leads], req.query)
+  const tally = new Map()
+  for (const lead of list) {
+    const facts = projectAlertFacts(lead, db)
+    const row = {
+      ...lead,
+      status: facts.status,
+      statusGroup: facts.statusGroup,
+      trialDate: facts.evidence.trialDate || null,
+      firstPurchaseDate: facts.evidence.firstPurchaseDate || null,
+      ai: facts.ai,
+      fu: facts.fu
+    }
+    const raw = baseColumnValue(field, row, lookup)
+    const value = (raw === null || raw === undefined || raw === '') ? 'Blank' : String(raw)
+    tally.set(value, (tally.get(value) || 0) + 1)
+  }
+
+  res.json({
+    field,
+    total: list.length,
+    counts: [...tally.entries()].sort((a, b) => b[1] - a[1])
   })
 })
 
@@ -2023,7 +2076,7 @@ app.get('/api/analytics/overview', (req, res) => {
 
   const unassigned = open.filter(l => !l.associateId).length
 
-  const hot = open.filter(l => enrichLead(l, db).ai.risk === 'hot').length
+  const hot = open.filter(l => projectLead(l, db).risk === 'hot').length
 
   res.json({
     totalLeads: leads.length,
@@ -2518,9 +2571,13 @@ app.get('/api/stripe/payment-links/:paymentId', async (req, res) => {
 })
 
 let momenceEvidenceSyncPromise = null
-async function syncMomenceLifecycleEvidence() {
-  if (momenceEvidenceSyncPromise) return momenceEvidenceSyncPromise
-  momenceEvidenceSyncPromise = momence.syncLifecycleEvidence(db, db.leads)
+// `fresh` is set only by the manual endpoint. The scheduled runs (15s after
+// boot, then every 6h) accept a report up to an hour old and reuse trial dates
+// already established, because that data cannot have changed; a person asking
+// for a sync gets everything re-fetched.
+async function syncMomenceLifecycleEvidence({ fresh = false } = {}) {
+  if (momenceEvidenceSyncPromise && !fresh) return momenceEvidenceSyncPromise
+  momenceEvidenceSyncPromise = momence.syncLifecycleEvidence(db, db.leads, { fresh })
     .then(result => {
       for (const leadId of result.updatedLeadIds) markDirty(leadId)
       save()
@@ -2532,7 +2589,7 @@ async function syncMomenceLifecycleEvidence() {
 }
 
 app.post('/api/momence/sync-lifecycle-evidence', async (req, res) => {
-  try { res.json({ ok: true, summary: await syncMomenceLifecycleEvidence() }) }
+  try { res.json({ ok: true, summary: await syncMomenceLifecycleEvidence({ fresh: req.body?.fresh !== false }) }) }
   catch (e) { res.status(502).json({ ok: false, error: e.message }) }
 })
 
@@ -5025,6 +5082,9 @@ function mergeDuplicateStages(db) {
 async function start() {
   await init()
   db = load()
+  // Writes to the local mirror are debounced and asynchronous, so a shutdown
+  // has to flush them or the last few edits exist only in memory.
+  installShutdownFlush()
   if (!Array.isArray(db.webhookIntegrations)) db.webhookIntegrations = []
   if (!Array.isArray(db.webhookLogs)) db.webhookLogs = []
   mergeDuplicateStages(db)

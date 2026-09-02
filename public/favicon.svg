@@ -1,0 +1,32 @@
+<!-- The browser-tab mark, kept in step with src/components/Logo.jsx: a filled
+     crimson tile carrying "57" under the barre. Same 48x48 grid, same rx, same
+     gradient stops as the component's dark variant, which is the app's default
+     theme — a near-black tile (the light variant) would disappear against a
+     dark tab strip.
+
+     Two deliberate departures from the component, both because a tab icon is
+     read at 16-32px rather than 36: the tile fills the canvas instead of
+     sitting on a 1px inset, and the numerals are scaled 1.14x with a slightly
+     heavier barre. Any change to the logo's colours or shapes belongs here
+     too; they are one mark. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" width="48" height="48" role="img" aria-label="Physique 57">
+  <defs>
+    <linearGradient id="tile" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#fb7185"/>
+      <stop offset="52%" stop-color="#e11d48"/>
+      <stop offset="100%" stop-color="#9f1239"/>
+    </linearGradient>
+  </defs>
+  <rect width="48" height="48" rx="13" fill="url(#tile)"/>
+  <!-- The barre: one confident stroke the numerals hang from. -->
+  <path d="M9 20.5c5-6.5 25-6.5 30 0" fill="none" stroke="#ffffff" stroke-opacity=".92" stroke-width="3.1" stroke-linecap="round"/>
+  <!-- Drawn as paths, not text: a favicon cannot rely on a webfont being
+       loaded, and Bricolage Grotesque is a Google font the tab never fetches.
+       These are the two numerals at the component's 19px/800/-0.5 setting. -->
+  <!-- Scaled up from the component's in-app size: a tab icon is read at
+       16-32px, where the numerals have to carry the mark on their own. -->
+  <g fill="#fff" transform="translate(24 31.5) scale(1.14) translate(-24 -31.5)">
+    <path d="M17.05 38.3c-1.34 0-2.5-.28-3.47-.83a4.7 4.7 0 0 1-1.97-2.2l2.5-1.3c.3.58.7 1.02 1.2 1.32.5.3 1.07.45 1.72.45.78 0 1.4-.22 1.87-.66.47-.45.7-1.05.7-1.8 0-.74-.23-1.32-.7-1.75-.46-.44-1.08-.66-1.85-.66-.5 0-.95.09-1.34.27-.39.18-.72.44-.98.79l-2.32-.83 1.03-8.1h8.05v2.7h-5.7l-.45 3.5c.3-.2.65-.35 1.04-.45.4-.1.83-.16 1.3-.16 1.02 0 1.93.22 2.72.66.8.44 1.42 1.05 1.87 1.84.45.78.67 1.7.67 2.73 0 1.06-.24 2-.72 2.82a4.94 4.94 0 0 1-2.03 1.9c-.87.44-1.86.66-2.98.66Z"/>
+    <path d="M27.62 38.05l5.6-12.15h-7.3v-2.7h10.6v2.5l-5.7 12.35h-3.2Z"/>
+  </g>
+</svg>

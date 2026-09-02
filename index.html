@@ -3,9 +3,29 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="apple-mobile-web-app-title" content="Lead Studio" />
     <title>Physique 57 | Lead Studio</title>
     <meta name="description" content="Lead management portal for Physique 57 studio locations" />
-    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%23f43f5e'/%3E%3Cstop offset='.55' stop-color='%23d946ef'/%3E%3Cstop offset='1' stop-color='%238b5cf6'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='100' height='100' rx='24' fill='url(%23g)'/%3E%3Cpath d='M18 62 C30 36 70 36 82 62' fill='none' stroke='white' stroke-opacity='.9' stroke-width='5' stroke-linecap='round'/%3E%3Ccircle cx='50' cy='50' r='43' fill='none' stroke='white' stroke-opacity='.45' stroke-width='3' stroke-dasharray='1 8' stroke-linecap='round'/%3E%3Ctext x='50' y='68' font-size='40' font-family='Arial Black' font-weight='900' fill='white' text-anchor='middle'%3E57%3C/text%3E%3C/svg%3E" />
+    <!-- The mark lives in public/favicon.svg, kept in step with
+         src/components/Logo.jsx. SVG first for browsers that take it; the .ico
+         is the fallback and carries three sizes, with a barre-less variant in
+         the 16px slot where the full mark turns to mush. -->
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="alternate icon" type="image/x-icon" href="/favicon.ico" sizes="16x16 32x32 48x48" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+    <meta name="theme-color" content="#e11d48" />
+
+    <!-- Link previews. The portal is private, but its URLs get pasted into
+         Slack and WhatsApp constantly, and an unfurl with no card looks broken. -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Physique 57 Lead Studio" />
+    <meta property="og:title" content="Physique 57 | Lead Studio" />
+    <meta property="og:description" content="Lead management portal for Physique 57 studio locations" />
+    <meta property="og:image" content="/icon-512.png" />
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:title" content="Physique 57 | Lead Studio" />
+    <meta name="twitter:description" content="Lead management portal for Physique 57 studio locations" />
+    <meta name="twitter:image" content="/icon-512.png" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600;700;800&family=Bricolage+Grotesque:opsz,wght@12..96,300..800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />

@@ -382,6 +382,31 @@ const isQualifiedMembershipSale = row => {
 // Trial completion is proven by the member's own attended-class history, not
 // a booking report — a booking can be made and never shown up to. Only counts
 // if the first attended class happened after the lead was created.
+// The lifecycle job's sales report covers the org's whole history, and
+// starting one makes Momence build a report server-side which we then poll for
+// up to 60 rounds. The 15s-after-boot run and the 6-hourly run (and any manual
+// trigger in between) were each paying for that in full. Same parameters
+// within the window means the same answer, so serve it from memory.
+//
+// Only the lifecycle path uses this; runHostReport stays uncached for callers
+// that are explicitly asking Momence for a fresh report right now.
+const REPORT_CACHE_TTL_MS = 60 * 60 * 1000
+const reportCache = new Map()
+
+async function runHostReportCached(db, reportType, params, { fresh = false } = {}) {
+  const key = JSON.stringify([reportType, params])
+  const hit = reportCache.get(key)
+  // `fresh` is how a human-triggered sync opts out: someone who just pressed
+  // "sync now" is asking Momence, not asking us what Momence said earlier.
+  if (!fresh && hit && Date.now() - hit.at < REPORT_CACHE_TTL_MS) return hit.rows
+  const rows = await runHostReport(db, reportType, params)
+  reportCache.set(key, { at: Date.now(), rows })
+  // One report per market per window; anything older than the window is dead
+  // weight, and this map must not grow for the life of the process.
+  for (const [k, v] of reportCache) if (Date.now() - v.at >= REPORT_CACHE_TTL_MS) reportCache.delete(k)
+  return rows
+}
+
 async function firstAttendedClassDate(db, memberId, market, retried = false) {
   try {
     const sessions = await getMemberSessions(db, memberId, market)
@@ -402,14 +427,45 @@ async function firstAttendedClassDate(db, memberId, market, retried = false) {
 
 export function applyLifecycleEvidence(leads, salesRows, trialDateByMemberId, market, db) {
   const expandedSales = salesRows.flatMap(row => Array.isArray(row?.items) && row.items.length ? row.items.map(item => ({ ...row, ...item, item, member: item.targetMember || item.payingMember || row.member, customer: item.targetMember || item.payingMember || row.customer })) : [row])
+
+  // matchesLead joins on exactly two exact-match keys: the Momence member id
+  // and the email. Scanning every sale row per lead made this O(leads x sales)
+  // -- 24k leads against a full sales history is hundreds of millions of
+  // comparisons per run. Indexing the sales side once makes it O(leads + sales)
+  // and returns the same rows, since both keys were already exact equality.
+  //
+  // Only qualified membership sales can ever produce evidence, so the filter
+  // moves up here too: rows that could never match are never indexed.
+  const byMemberId = new Map()
+  const byEmail = new Map()
+  const push = (map, key, row) => {
+    if (!key) return
+    const bucket = map.get(key)
+    if (bucket) bucket.push(row)
+    else map.set(key, [row])
+  }
+  for (const row of expandedSales) {
+    if (!isQualifiedMembershipSale(row)) continue
+    push(byMemberId, rowMemberId(row), row)
+    push(byEmail, rowEmail(row), row)
+  }
+
   let updated = 0
   const updatedLeadIds = []
   for (const lead of leads) {
     if (marketForLocation(lead.locationId, db) !== market) continue
     const createdAt = new Date(lead.createdAt || 0)
     if (Number.isNaN(createdAt.getTime())) continue
-    const firstPurchase = expandedSales
-      .filter(row => matchesLead(row, lead) && isQualifiedMembershipSale(row))
+    // A lead can match by id, by email, or by both — the union, de-duplicated,
+    // is what the old per-row `matchesLead` filter would have returned.
+    const candidates = new Set()
+    if (isValidMemberId(lead.memberId)) {
+      for (const row of byMemberId.get(String(lead.memberId)) || []) candidates.add(row)
+    }
+    if (lead.email) {
+      for (const row of byEmail.get(cleanEmail(lead.email)) || []) candidates.add(row)
+    }
+    const firstPurchase = [...candidates]
       .map(row => rowDate(row, ['saleDate', 'soldAt', 'purchaseDate', 'transactionDate', 'paymentDate', 'createdAt', 'date']))
       .filter(date => date && date > createdAt)
       .sort((a, b) => a - b)[0] || null
@@ -439,10 +495,15 @@ export function applyLifecycleEvidence(leads, salesRows, trialDateByMemberId, ma
 // Uncovered members just get picked up first next cycle (see hasEvidence sort).
 const MAX_MEMBERS_PER_MARKET_PER_RUN = 4000
 
-export async function syncLifecycleEvidence(db, leads = db.leads || []) {
+export async function syncLifecycleEvidence(db, leads = db.leads || [], { fresh = false } = {}) {
   const validDates = leads.map(lead => new Date(lead.createdAt)).filter(date => !Number.isNaN(date.getTime()))
   const startDate = (validDates.sort((a, b) => a - b)[0] || new Date(Date.now() - 365 * 86400000)).toISOString()
-  const endDate = new Date().toISOString()
+  // Rounded down to the hour so two runs inside the same hour produce the same
+  // cache key. The at-most-one-hour of sales this trims off is picked up by the
+  // next run, on a job that otherwise fires every six hours.
+  const endDate = fresh
+    ? new Date().toISOString()
+    : new Date(Math.floor(Date.now() / 3600000) * 3600000).toISOString()
   const summary = []
   const updatedLeadIds = []
   for (const market of ['mumbai', 'blr']) {
@@ -450,7 +511,7 @@ export async function syncLifecycleEvidence(db, leads = db.leads || []) {
     const marketLeads = leads.filter(lead => marketForLocation(lead.locationId, db) === market)
     let sales = []
     try {
-      sales = await runHostReport(db, 'total-sales', {
+      sales = await runHostReportCached(db, 'total-sales', {
         market,
         startDate,
         endDate,
@@ -459,19 +520,45 @@ export async function syncLifecycleEvidence(db, leads = db.leads || []) {
         includeRefunds: true,
         excludeGiftCardPaymentMethod: true,
         excludeTransactionFeesInSaleValue: false
-      })
+      }, { fresh })
     } catch (e) {
       summary.push({ market, skipped: true, reason: e.message })
       continue
     }
+    // A member's first attended class is a fact about the past: once we know
+    // it, it can never change. Re-fetching it every run was the single largest
+    // source of Momence traffic in the app -- up to 4,000 paginated
+    // /members/:id/sessions calls per market per run, on a job that fires 15s
+    // after every boot. Seed the known dates from the evidence already stored
+    // on the leads and only call Momence for the ones still unknown.
+    //
+    // A *missing* date is not reusable the same way: it means "has not attended
+    // yet", which can change tomorrow, so those are always re-checked.
+    const trialDateByMemberId = new Map()
+    if (!fresh) {
+      for (const lead of marketLeads) {
+        const evidence = lead.momenceEvidence
+        const known = evidence?.trialDate
+        if (!known || !isValidMemberId(lead.memberId)) continue
+        // Only reuse a date this same market established. Evidence carried
+        // over from the other market (a lead moved studios, or an early run
+        // before the location was mapped) has to be re-derived here, or a
+        // Bengaluru trial date would silently stand as Mumbai's answer.
+        if (evidence.market && evidence.market !== market) continue
+        const asDate = new Date(known)
+        if (!Number.isNaN(asDate.getTime())) trialDateByMemberId.set(String(lead.memberId), asDate)
+      }
+    }
+
     // Leads without any evidence yet go first, so a large backlog converges
     // over successive runs instead of an already-checked member starving out
     // a never-checked one within the same run's cap.
     const hasEvidence = new Set(marketLeads.filter(lead => lead.momenceEvidence).map(lead => String(lead.memberId)))
     const memberIds = [...new Set(marketLeads.map(lead => lead.memberId).filter(isValidMemberId).map(String))]
+      .filter(id => !trialDateByMemberId.has(id))
       .sort((a, b) => Number(hasEvidence.has(a)) - Number(hasEvidence.has(b)))
       .slice(0, MAX_MEMBERS_PER_MARKET_PER_RUN)
-    const trialDateByMemberId = new Map()
+    const reused = trialDateByMemberId.size
     const CONCURRENCY = 3
     for (let i = 0; i < memberIds.length; i += CONCURRENCY) {
       const batch = memberIds.slice(i, i + CONCURRENCY)
@@ -481,7 +568,7 @@ export async function syncLifecycleEvidence(db, leads = db.leads || []) {
     }
     const applied = applyLifecycleEvidence(marketLeads, sales, trialDateByMemberId, market, db)
     updatedLeadIds.push(...applied.updatedLeadIds)
-    summary.push({ market, sales: sales.length, members: memberIds.length, updated: applied.updated })
+    summary.push({ market, sales: sales.length, members: memberIds.length, membersReused: reused, updated: applied.updated })
   }
   save()
   return { summary, updatedLeadIds: [...new Set(updatedLeadIds)] }

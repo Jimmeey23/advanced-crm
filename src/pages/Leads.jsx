@@ -8,7 +8,7 @@ import {
   Trophy, PhoneOff, FlaskConical, CircleDot, PanelTop, Check, Pencil,
   MoreVertical, Tags, UserPlus, CalendarPlus, CreditCard, Eye, Lock, Keyboard,
   Pin, PinOff, Calendar, Copy, ExternalLink, RefreshCw, IndianRupee, Plus, Minus, Trash
-, Bookmark
+, Bookmark, CircleCheckBig, CalendarCheck, PhoneCall, Hourglass, Handshake, Ban, Snowflake, Monitor, Plane
 } from 'lucide-react'
 import { useApp } from '../store.jsx'
 import { useFetch } from '../hooks.js'
@@ -104,11 +104,31 @@ const channelMeta = (channel) => CHANNELS[channel] || { icon: MessageCircle, lab
 // index.css has colors for — so this classifies by pattern into a handful
 // of coarse categories with a consistent icon + color, rather than trying
 // to hand-maintain a color per exact stage string.
+// One glyph per thing that actually happens to a lead, ordered most specific
+// first — "Trial Completed" has to be read as a completed trial, not caught by
+// the generic /trial/ rule, and "Not Interested" must not be caught by /interest/.
+//
+// The colour still comes from stageColor (see stageTone in lib.js), so icon and
+// hue always agree: the trophy is always won-green, the ban is always lost-rose.
 const STAGE_CATEGORIES = [
-  { test: /won|sold|member/i, icon: Trophy, color: '#34d399' },
-  { test: /lost|unresponsive|no.?answer|invalid|not.?interested|didn.?t/i, icon: PhoneOff, color: '#fb7185' },
-  { test: /trial/i, icon: FlaskConical, color: '#22d3ee' },
-  { test: /new|enquiry/i, icon: Sparkles, color: '#818cf8' }
+  { test: /won|sold|enrolled|converted|member(ship)? purchased/i, icon: Trophy },
+  { test: /not.?interested|declin|disqual|invalid|junk|spam|language barrier/i, icon: Ban },
+  { test: /lost|dead|drop/i, icon: XCircle },
+  { test: /unresponsive|no.?response|no.?answer|not.?answer|didn.?t.?answer|unreachable/i, icon: PhoneOff },
+  { test: /trial.*(complete|attended|done|positive)|positive.*trial|attended/i, icon: CircleCheckBig },
+  { test: /trial.*(schedul|book|planned|rebook)|book/i, icon: CalendarCheck },
+  // Before the generic /trial/ rule: "Post Trial Follow Up" is a follow-up
+  // that happens to mention a trial, and reading it as a trial hid the one
+  // thing the row is actually waiting on.
+  { test: /follow|will get back|will come back|later|callback|revisit/i, icon: Hourglass },
+  { test: /out of town|travel/i, icon: Plane },
+  { test: /proposal|pricing|package|payment|quote|deal|offer/i, icon: Handshake },
+  { test: /shared|sent|messag|introduct|descript|benefit|whatsapp/i, icon: MessageSquareText },
+  { test: /virtual|online|zoom/i, icon: Monitor },
+  { test: /trial/i, icon: FlaskConical },
+  { test: /call|contact|spoke|reach/i, icon: PhoneCall },
+  { test: /new|enquiry|inquiry|fresh|lead/i, icon: Sparkles },
+  { test: /cold|nurtur|dorman|stale/i, icon: Snowflake }
 ]
 function stageVisual(stage) {
   const hit = STAGE_CATEGORIES.find(c => c.test.test(stage || ''))
@@ -1774,7 +1794,7 @@ function TableGrid({ items, groups = null, collapsed = {}, toggleGroup, boot, lo
                     return (
                       <Tip content={l.stage || 'No stage'}>
                         <div className={`stage-badge-wrap ${compact ? 'is-compact' : ''}`} style={badgeStyle}>
-                          <span className="stage-badge-icon"><StageIcon size={compact ? 12 : 14} /></span>
+                          <span className="stage-badge-icon"><StageIcon size={12} strokeWidth={2.75} absoluteStrokeWidth /></span>
                           <select
                             className={`stage-badge-select ${stageClass(l.stage)}`}
                             style={badgeStyle}
@@ -2040,15 +2060,12 @@ function SortHead({ label, field, resizeId, width, style, onResize, onAutoFit, c
     if (counts || countsLoading) return
     setCountsLoading(true)
     try {
-      const resp = await api.get(`/api/leads?${columnCountsQuery}&pageSize=5000`)
+      // Tallied server-side. This used to pull 5,000 fully enriched leads
+      // (~21MB) to count one column in the browser; the endpoint returns the
+      // counts themselves, for the same filter set.
       const key = field === 'createdAt' ? 'created' : field
-      const tally = new Map()
-      for (const l of (resp?.items || [])) {
-        const raw = baseColumnValue(key, l, lookup)
-        const val = (raw === null || raw === undefined || raw === '') ? 'Blank' : String(raw)
-        tally.set(val, (tally.get(val) || 0) + 1)
-      }
-      setCounts([...tally.entries()].sort((a, b) => b[1] - a[1]))
+      const resp = await api.get(`/api/leads/column-counts?${columnCountsQuery}&field=${encodeURIComponent(key)}`)
+      setCounts(resp?.counts || [])
     } catch (e) { setCounts([]) }
     finally { setCountsLoading(false) }
   }
