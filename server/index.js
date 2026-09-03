@@ -1658,10 +1658,19 @@ let reconcileInFlight = null
 // process died look identical from another instance.
 const SYNC_LOCK_HEARTBEAT_MS = 60 * 1000
 
+// Contention is not a failure of this instance: somebody else is doing the
+// work. Flagged so the caller records it as a skip rather than lighting up
+// "failing" on every dashboard until the next successful pass.
+function busyError(message) {
+  const error = new Error(message)
+  error.busy = true
+  return error
+}
+
 async function withSheetSyncLock(fn) {
-  if (reconcileInFlight) throw new Error('A sheet sync is already in progress — wait for it to finish.')
+  if (reconcileInFlight) throw busyError('A sheet sync is already in progress — wait for it to finish.')
   const gotLock = await supabase.acquireSyncLock(SHEET_SYNC_OWNER)
-  if (!gotLock) throw new Error('A sheet sync is already in progress on another server instance.')
+  if (!gotLock) throw busyError('A sheet sync is already in progress on another server instance.')
   const heartbeat = setInterval(() => {
     supabase.touchSyncLock(SHEET_SYNC_OWNER).catch(() => {})
   }, SYNC_LOCK_HEARTBEAT_MS)
@@ -1826,6 +1835,14 @@ async function runSheetReconcile(options = {}) {
     save()
     return counts
   } catch (e) {
+    // A pass refused because another instance holds the lock says nothing
+    // about whether syncing works, so it must not clear or set the error
+    // state the status badge reads.
+    if (e?.busy) {
+      logSheetSync('skipped', e.message)
+      save()
+      throw e
+    }
     db.settings.googleSheets.lastSyncError = e.message
     logSheetSync('error', e.message)
     save()

@@ -179,20 +179,38 @@ async function getAccessToken(db) {
 const MAX_RETRIES = 5
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms))
 
+// Errors that say "not now" rather than "not ever". Google returns 503 "The
+// service is currently unavailable." routinely — retrying rather than giving
+// up is the difference between a sync that occasionally takes a few seconds
+// longer and a dashboard that reads "failing" until the next scheduled pass.
+const TRANSIENT_STATUSES = new Set([408, 429, 500, 502, 503, 504])
+const TRANSIENT_GOOGLE_STATUSES = new Set(['RESOURCE_EXHAUSTED', 'UNAVAILABLE', 'INTERNAL', 'DEADLINE_EXCEEDED', 'ABORTED'])
+
+export function isTransientSheetsError({ status, googleStatus, cause } = {}) {
+  if (cause) return true // a socket-level failure: DNS, reset, timeout
+  if (TRANSIENT_STATUSES.has(status)) return true
+  return TRANSIENT_GOOGLE_STATUSES.has(String(googleStatus || '').toUpperCase())
+}
+
 export async function sheetsFetch(db, url, opts = {}) {
   for (let attempt = 0; ; attempt++) {
     const token = await getAccessToken(db)
-    const res = await fetch(url, {
-      ...opts,
-      headers: { ...(opts.headers || {}), Authorization: `Bearer ${token}` }
-    })
+    let res
+    try {
+      res = await fetch(url, {
+        ...opts,
+        headers: { ...(opts.headers || {}), Authorization: `Bearer ${token}` }
+      })
+    } catch (networkError) {
+      // fetch throws for DNS failures, resets and timeouts — none of which say
+      // anything about the request being wrong.
+      if (attempt < MAX_RETRIES) { await sleep(backoff(attempt)); continue }
+      throw new Error(`Google Sheets API error: ${networkError.message}`)
+    }
     const data = await res.json().catch(() => ({}))
     if (!res.ok) {
-      const isQuota = res.status === 429 || data.error?.status === 'RESOURCE_EXHAUSTED'
-      if (isQuota && attempt < MAX_RETRIES) {
-        // Exponential backoff with jitter: 1s, 2s, 4s, 8s, 16s (+/- jitter).
-        const delay = Math.round((2 ** attempt) * 1000 * (0.5 + Math.random()))
-        await sleep(delay)
+      if (isTransientSheetsError({ status: res.status, googleStatus: data.error?.status }) && attempt < MAX_RETRIES) {
+        await sleep(backoff(attempt))
         continue
       }
       const msg = data.error?.message || res.statusText
@@ -201,6 +219,10 @@ export async function sheetsFetch(db, url, opts = {}) {
     return data
   }
 }
+
+// Exponential backoff with jitter: ~1s, 2s, 4s, 8s, 16s. The jitter matters
+// when several instances retry the same 503 at the same instant.
+const backoff = attempt => Math.round((2 ** attempt) * 1000 * (0.5 + Math.random()))
 
 export async function readSheetRows(db) {
   const c = config(db)

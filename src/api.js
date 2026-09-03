@@ -9,6 +9,15 @@ const configuredApiBase = import.meta.env.VITE_API_BASE_URL?.trim()?.replace(/\/
 const localApiStartPort = Number(import.meta.env.VITE_API_PORT) || 3001
 let localDiscoveryPromise = null
 
+// Discovery is memoised, but the answer can go stale: the API server it found
+// may be restarted onto a different port, or killed outright. Every request
+// that fails at the network level clears this, so the next one re-probes
+// instead of aiming at a dead port forever (which showed up as a table stuck
+// on skeletons and "0 of 0 leads").
+export function forgetLocalApiBase() {
+  localDiscoveryPromise = null
+}
+
 async function discoverLocalApiBase() {
   if (typeof window === 'undefined' || !['localhost', '127.0.0.1'].includes(window.location.hostname)) return ''
   if (localDiscoveryPromise) return localDiscoveryPromise
@@ -88,7 +97,10 @@ async function req(method, path, body, isForm) {
       // But only if the 404 doesn't come with an explicit JSON application error.
       if (res.status !== 404 || data.error || data.message) break
     } catch (err) {
+      // A thrown fetch is a dead origin, not an application error: forget the
+      // discovered base so the next attempt (and the next request) re-probes.
       lastError = err
+      forgetLocalApiBase()
     }
   }
 
