@@ -1523,6 +1523,7 @@ app.post('/api/webhooks/momence/:market', async (req, res) => {
       const txn = await momence.getPaymentTransaction(db, event.payload.id, market)
       if (txn.paymentStatus !== 'succeeded') return res.json({ status: 'ignored', reason: 'not succeeded' })
       const item = txn.sales?.[0]?.items?.[0] || txn.transactionItems?.[0]
+      const saleRows = momence.mapTransactionSales(txn)
       const lead = momence.recordLeadPurchase(db, {
         market,
         memberId: txn.payingMember?.id,
@@ -1530,9 +1531,19 @@ app.post('/api/webhooks/momence/:market', async (req, res) => {
         purchaseDate: txn.createdAt,
         itemName: item?.itemName || null,
         amount: Number(txn.paidInCurrency) || 0,
+        items: saleRows.length ? saleRows : null,
         purchaseType: txn.purchaseType,
         membershipType: item?.usedBoughtMembership?.type || item?.membershipType
       })
+      // The cache is the member's sales history, not just the qualifying part
+      // of it: the drawer shows every transaction, so non-qualifying lines are
+      // cached too even when the purchase itself changed no lifecycle evidence.
+      const cacheTarget = lead || momence.findLeadForMember(db, { market, memberId: txn.payingMember?.id, email: txn.payingMember?.email })
+      if (cacheTarget && saleRows.length) {
+        momence.cacheLeadSales(cacheTarget, saleRows)
+        markDirty(cacheTarget.id)
+        save()
+      }
       if (lead) { markDirty(lead.id); log('lead', `Momence purchase matched: ${lead.fullName}`, lead.id) }
       return res.json({ status: lead ? 'applied' : 'no-match' })
     }
@@ -2289,7 +2300,15 @@ app.get('/api/momence/members', async (req, res) => {
 // Full member profile by Momence member ID directly — used by the schedule's
 // roster (members there may not correspond to any CRM lead at all).
 app.get('/api/momence/members/:memberId/profile', async (req, res) => {
-  try { res.json({ ok: true, profile: await momence.buildProfile(db, req.params.memberId, req.query.locationId) }) }
+  // A roster member need not correspond to any lead; when one does, its cached
+  // sales history spares the profile a paginated sales fetch.
+  const market = momence.marketForLocation(req.query.locationId, db)
+  const lead = momence.findLeadForMember(db, { market, memberId: req.params.memberId })
+  try {
+    const profile = await momence.buildProfile(db, req.params.memberId, req.query.locationId, { lead, fresh: req.query.fresh === '1' })
+    if (lead) { markDirty(lead.id); save() }
+    res.json({ ok: true, profile })
+  }
   catch (e) { res.status(502).json({ ok: false, error: e.message }) }
 })
 
@@ -2704,9 +2723,11 @@ app.post('/api/momence/sync/:leadId', async (req, res) => {
         return res.status(404).json({ ok: false, error: `No Momence member found matching ${lead.email || lead.phone || 'this lead'}.` })
       }
     }
+    // A user-clicked refresh bypasses the webhook-fed sales cache: it is the
+    // one path whose whole purpose is to reconcile with Momence.
     let profile
     try {
-      profile = await momence.syncLeadMomence(db, lead)
+      profile = await momence.syncLeadMomence(db, lead, { fresh: true })
     } catch (syncError) {
       // Imported member IDs can become stale or belong to another Momence host.
       // On a direct-profile 404, re-resolve by the lead's current contact details.
@@ -2721,7 +2742,7 @@ app.post('/api/momence/sync/:leadId', async (req, res) => {
         }
         return res.status(404).json({ ok: false, error: 'The saved Momence member no longer exists for this host, and no current member matched this lead. Relink the member.' })
       }
-      profile = await momence.syncLeadMomence(db, lead)
+      profile = await momence.syncLeadMomence(db, lead, { fresh: true })
     }
     lead.lastActivityAt = nowIso()
     markDirty(lead.id)

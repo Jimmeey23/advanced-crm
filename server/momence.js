@@ -815,6 +815,81 @@ export function isQualifyingPurchase({ purchaseType, membershipType, itemName } 
   return true
 }
 
+// Flattens a payment-transaction payload into the same row shape mapSalesDirect
+// produces, so a webhook-cached sale and a live-fetched one render identically.
+//
+// The transaction DTO gives per-unit figures excluding tax, so the line total
+// has to be reassembled: quantity * (price + tax - discount). Reading
+// txn.paidInCurrency instead would be wrong the moment a cart mixes a
+// membership with a product — that total covers lines we deliberately exclude.
+export function mapTransactionSales(txn) {
+  const paymentMethod = txn?.transactionItems?.[0]?.paymentMethod || 'unknown'
+  const payingMember = txn?.payingMember
+    ? `${txn.payingMember.firstName || ''} ${txn.payingMember.lastName || ''}`.trim() || null
+    : null
+  const rows = []
+  for (const sale of txn?.sales || []) {
+    for (const item of sale?.items || []) {
+      const quantity = Number(item.quantity) || 1
+      const unit = (Number(item.unitPriceExcludingTaxInCurrency) || 0) + (Number(item.unitTaxAmountInCurrency) || 0)
+      const discount = (Number(item.discountCode?.unitDiscountExcludingTaxInCurrency) || 0) +
+        (Number(item.discountCode?.unitDiscountTaxAmountInCurrency) || 0)
+      rows.push({
+        id: `${sale.id}:${item.saleItemId ?? item.id}`,
+        saleDate: sale.saleDate || txn.createdAt,
+        itemType: String(item.itemType || 'sale').toLowerCase(),
+        itemName: item.itemName || item.descriptiveItemName || 'Sale',
+        totalInCurrency: String(Math.max(0, quantity * (unit - discount))),
+        paymentMethod,
+        payingMember
+      })
+    }
+  }
+  return rows
+}
+
+// The webhook-doc join: a Momence member maps to the newest lead in the same
+// market matching on member id or email. `before` applies the extra rule that
+// only purchase evidence needs — a purchase predating the lead says nothing
+// about that lead's conversion — and is left off when merely locating the lead
+// a member's sales history belongs to.
+export function findLeadForMember(db, { market, memberId, email, before } = {}) {
+  const pseudoRow = { memberId, email }
+  return (db?.leads || [])
+    .filter(l => marketForLocation(l.locationId, db) === market)
+    .filter(l => matchesLead(pseudoRow, l))
+    .filter(l => !before || new Date(l.createdAt || 0) < before)
+    .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))[0] || null
+}
+
+const MAX_CACHED_SALES = 200
+
+// Appends webhook-derived sale rows to the lead's cache, newest first. Momence
+// redelivers a transaction on retry, so rows are keyed by sale-item id and the
+// newer copy wins.
+export function cacheLeadSales(lead, rows) {
+  if (!lead || !rows?.length) return lead
+  const byId = new Map((lead.momenceSales?.rows || []).map(row => [row.id, row]))
+  for (const row of rows) byId.set(row.id, row)
+  lead.momenceSales = {
+    rows: [...byId.values()]
+      .sort((a, b) => new Date(b.saleDate || 0) - new Date(a.saleDate || 0))
+      .slice(0, MAX_CACHED_SALES),
+    updatedAt: nowIso()
+  }
+  return lead
+}
+
+// The lead's cached sale rows, or null when the profile has to go to Momence
+// for them. The cache never goes stale on its own: every new transaction
+// arrives as a webhook and appends to it, so only an explicit refresh (or a
+// lead that predates the cache) needs the live call.
+export function usableCachedSales(lead, { fresh = false } = {}) {
+  if (fresh) return null
+  const rows = lead?.momenceSales?.rows
+  return rows?.length ? rows : null
+}
+
 // Applies one confirmed purchase (from a Momence webhook) to whichever lead it
 // belongs to. A purchase only counts if it can be matched to a lead created
 // before the purchase happened (webhook basics doc's memberId/email join,
@@ -823,16 +898,27 @@ export function isQualifyingPurchase({ purchaseType, membershipType, itemName } 
 // event that actually carries a paid amount) — bought-membership-activated
 // is used only to backfill date/item name when no transaction event matched,
 // and never contributes to ltv, so the same purchase can't be double-counted.
-export function recordLeadPurchase(db, { market, memberId, email, purchaseDate, itemName, amount, purchaseType, membershipType }) {
+export function recordLeadPurchase(db, { market, memberId, email, purchaseDate, itemName, amount, purchaseType, membershipType, items }) {
   if (!purchaseDate || Number.isNaN(new Date(purchaseDate).getTime())) return null
-  if (!isQualifyingPurchase({ purchaseType, membershipType, itemName })) return null
+  // With line items, each is gated on its own itemType/name and only the ones
+  // that survive contribute to LTV — a cart mixing a membership with retail
+  // must not bank the retail. Without them (bought-membership-activated), the
+  // whole event is gated as one, as before.
+  let qualifying = null
+  if (items) {
+    qualifying = items.filter(item => isQualifyingPurchase({
+      purchaseType: item.itemType,
+      membershipType,
+      itemName: item.itemName
+    }))
+    if (!qualifying.length) return null
+    amount = qualifying.reduce((sum, item) => sum + (Number(item.totalInCurrency) || 0), 0)
+    itemName = qualifying[0].itemName || itemName || null
+  } else if (!isQualifyingPurchase({ purchaseType, membershipType, itemName })) {
+    return null
+  }
   const date = new Date(purchaseDate)
-  const pseudoRow = { memberId, email }
-  const lead = (db.leads || [])
-    .filter(l => marketForLocation(l.locationId, db) === market)
-    .filter(l => matchesLead(pseudoRow, l))
-    .filter(l => new Date(l.createdAt || 0) < date)
-    .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))[0]
+  const lead = findLeadForMember(db, { market, memberId, email, before: date })
   if (!lead) return null
   const previous = lead.momenceEvidence || {}
   const isEarliest = !previous.firstPurchaseDate || date < new Date(previous.firstPurchaseDate)
@@ -962,7 +1048,7 @@ export function mapAppointments(appointments) {
     .sort((a, b) => new Date(b.startsAt) - new Date(a.startsAt))
 }
 
-export async function buildProfile(db, memberId, locationId) {
+export async function buildProfile(db, memberId, locationId, { lead = null, fresh = false } = {}) {
   const safeMemberId = String(memberId || '').trim()
   if (!isValidMemberId(safeMemberId)) {
     throw new Error('Momence member ID is missing or invalid.')
@@ -972,14 +1058,28 @@ export async function buildProfile(db, memberId, locationId) {
   // All member sub-resources fetched in parallel, all fast bounded GETs —
   // no report-run polling here, so opening a lead's drawer never waits on
   // Momence generating a whole-org report (see getMemberSalesDirect above).
+  //
+  // Sales are the exception: every sale arrives here as a
+  // payment-transaction-succeeded webhook and is cached on the lead, so a lead
+  // with a cache skips the sales call entirely and this becomes four requests
+  // instead of five. A lead whose cache is empty (created before the webhook,
+  // or never having bought anything) still fetches, and seeds the cache.
+  const cachedSales = usableCachedSales(lead, { fresh })
   const [sessions, memberships, notes, appointments, salesRaw] = await Promise.all([
     getMemberSessions(db, safeMemberId, market).catch(() => []),
     getMemberMemberships(db, safeMemberId, market).catch(() => []),
     getMemberNotes(db, safeMemberId, market).catch(() => []),
     getMemberAppointments(db, safeMemberId, market).catch(() => []),
-    getMemberSalesDirect(db, safeMemberId, market).catch(() => [])
+    cachedSales ? Promise.resolve([]) : getMemberSalesDirect(db, safeMemberId, market).catch(() => [])
   ])
-  const salesHistory = mapSalesDirect(salesRaw)
+  const salesHistory = cachedSales || mapSalesDirect(salesRaw)
+  // A forced refresh replaces the cache rather than merging into it: the live
+  // list is authoritative, so this is also how a row Momence has since voided
+  // leaves the cache.
+  if (!cachedSales && lead && salesHistory.length) {
+    if (fresh) lead.momenceSales = null
+    cacheLeadSales(lead, salesHistory)
+  }
   const customFields = member.customFields || member.customFieldValues || {}
   const profile = {
     member: {
@@ -1018,11 +1118,11 @@ function mapNotes(notes) {
     .sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0))
 }
 
-export async function syncLeadMomence(db, lead) {
+export async function syncLeadMomence(db, lead, { fresh = false } = {}) {
   if (!isValidMemberId(lead?.memberId)) {
     throw new Error('Lead is not linked to a valid Momence member yet.')
   }
-  const profile = await buildProfile(db, lead.memberId, lead.locationId)
+  const profile = await buildProfile(db, lead.memberId, lead.locationId, { lead, fresh })
   lead.momence = profile
   lead.momenceSyncedAt = nowIso()
   save()
