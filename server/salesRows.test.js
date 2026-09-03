@@ -163,9 +163,9 @@ test('one row per payment split', () => {
   assert.equal(rows([product]).length, 1)
 })
 
-test('the split is the row identity', () => {
+test('the split is the row identity, qualified by the sale item it pays for', () => {
   const out = rows([splitPaid])
-  assert.deepEqual(out.map(r => r.id), [258768103, 258768102, 258768101])
+  assert.deepEqual(out.map(r => r.id), ['311977750:258768103', '311977750:258768102', '311977750:258768101'])
   assert.deepEqual(out.map(r => r.splitPaymentMethod), ['cash', 'membership', 'membership'])
 })
 
@@ -252,7 +252,7 @@ test('market and month are stamped on every row', () => {
 test('a sale with no splits still produces one row carrying the whole value', () => {
   const bare = { ...product, transactionItems: [] }
   const [row] = rows([bare])
-  assert.equal(row.id, 'sale:311909781')
+  assert.equal(row.id, '311909781:sale')
   assert.equal(row.paidInCurrency, 115)
   assert.equal(row.splitPaymentMethod, 'UPI')
   assert.equal(row.isPrimarySplit, true)
@@ -276,4 +276,45 @@ test('monthRange spans the whole month in IST', () => {
   const { from, to } = monthRange('2026-08')
   assert.equal(from, '2026-07-31T18:30:00.000Z')
   assert.equal(to, '2026-08-31T18:30:00.000Z')
+})
+
+// --- de-duplication ---------------------------------------------------------
+// Two things in the live report break a naive row identity:
+//  * one payment split can pay for several sale items, so the split id is NOT
+//    unique across rows (4 single classes on one card charge share it);
+//  * the same split is sometimes listed twice under one sale item, which would
+//    count its money twice.
+
+test('the row id is unique when one split pays for several sale items', () => {
+  const shared = {
+    ...product,
+    transactionItems: [{ ...product.transactionItems[0], paymentTransactionItemId: 111 }]
+  }
+  const second = { ...shared, saleItemId: 999, paymentItem: 'Second class' }
+  const out = rows([shared, second])
+  assert.equal(out.length, 2)
+  assert.equal(new Set(out.map(r => r.id)).size, 2, 'ids collided')
+  assert.equal(out[0].id, '311909781:111')
+  assert.equal(out[1].id, '999:111')
+})
+
+test('a split repeated under the same sale item is counted once', () => {
+  const repeated = {
+    ...product,
+    transactionItems: [product.transactionItems[0], { ...product.transactionItems[0] }]
+  }
+  const out = rows([repeated])
+  assert.equal(out.length, 1)
+  assert.equal(out[0].paidInCurrency, 115)
+  assert.equal(out[0].splitCount, 1)
+})
+
+test('genuinely different splits of one sale are all kept', () => {
+  assert.equal(rows([splitPaid]).length, 3)
+  assert.equal(new Set(rows([splitPaid]).map(r => r.id)).size, 3)
+})
+
+test('the same sale item appearing twice in one report is emitted once', () => {
+  const out = rows([product, { ...product }])
+  assert.equal(out.length, 1)
 })

@@ -23,7 +23,25 @@ export const DEFAULT_COLUMNS = [
   { id: 'firstPurchaseDate', kind: 'base', field: 'firstPurchaseDate', label: 'First purchase', type: 'date', hidden: false },
   { id: 'valueEstimate', kind: 'base', field: 'valueEstimate', label: 'Value', type: 'currency', decimals: 0, hidden: true },
   { id: 'classType', kind: 'base', field: 'classType', label: 'Class type', type: 'text', hidden: true },
-  { id: 'missedCount', kind: 'base', field: 'missedCount', label: 'Missed follow-ups', type: 'number', decimals: 0, unit: '', hidden: true }
+  { id: 'missedCount', kind: 'base', field: 'missedCount', label: 'Missed follow-ups', type: 'number', decimals: 0, unit: '', hidden: true },
+  // ---- Momence sales. Shown by default only where they answer the question
+  // the table exists to answer: did this lead convert, and for how much.
+  { id: 'conversionLabel', kind: 'base', field: 'conversionLabel', label: 'Conversion', type: 'text', hidden: false },
+  { id: 'lifetimeValue', kind: 'base', field: 'lifetimeValue', label: 'Lifetime value', type: 'currency', decimals: 0, hidden: false },
+  { id: 'purchaseCount', kind: 'base', field: 'purchaseCount', label: 'Purchases', type: 'number', decimals: 0, unit: '', hidden: false },
+  { id: 'lastPurchaseDate', kind: 'base', field: 'lastPurchaseDate', label: 'Last purchase', type: 'date', hidden: true },
+  { id: 'averageOrderValue', kind: 'base', field: 'averageOrderValue', label: 'Avg order value', type: 'currency', decimals: 0, hidden: true },
+  { id: 'firstPurchaseItem', kind: 'base', field: 'firstPurchaseItem', label: 'First item bought', type: 'text', hidden: true },
+  { id: 'firstPurchaseDateSales', kind: 'base', field: 'firstPurchaseDate', label: 'First purchase (paid)', type: 'date', hidden: true },
+  { id: 'lastPurchaseItem', kind: 'base', field: 'lastPurchaseItem', label: 'Last item bought', type: 'text', hidden: true },
+  { id: 'itemGroups', kind: 'base', field: 'itemGroups', label: 'What they bought', type: 'text', hidden: true },
+  { id: 'daysToConvert', kind: 'base', field: 'daysToConvert', label: 'Days to convert', type: 'number', decimals: 0, unit: '', hidden: true },
+  { id: 'daysSincePurchase', kind: 'base', field: 'daysSincePurchase', label: 'Days since purchase', type: 'number', decimals: 0, unit: '', hidden: true },
+  { id: 'discountTotal', kind: 'base', field: 'discountTotal', label: 'Discount given', type: 'currency', decimals: 0, hidden: true },
+  { id: 'discountCodes', kind: 'base', field: 'discountCodes', label: 'Discount codes', type: 'text', hidden: true },
+  { id: 'refundedTotal', kind: 'base', field: 'refundedTotal', label: 'Refunded', type: 'currency', decimals: 0, hidden: true },
+  { id: 'paidInCredits', kind: 'base', field: 'paidInCredits', label: 'Paid in credits', type: 'currency', decimals: 0, hidden: true },
+  { id: 'purchaseLocations', kind: 'base', field: 'purchaseLocations', label: 'Bought at', type: 'text', hidden: true }
 ]
 
 const TYPES = [

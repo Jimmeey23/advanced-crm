@@ -10,17 +10,18 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   RefreshCw, Search, Download, ChevronRight, ChevronDown, X, IndianRupee, Receipt,
-  Users, Percent, Undo2, Wallet, Layers, Database, Filter, SlidersHorizontal, Tag
+  Users, Percent, Undo2, Wallet, Layers, Database, Filter, SlidersHorizontal, Tag,
+  TrendingUp, Landmark
 } from 'lucide-react'
 import { api, buildQuery } from '../api.js'
 import { useApp } from '../store.jsx'
 import { Spinner, Empty, TableSkeleton } from '../ui.jsx'
-import { Section, StatTile, Segmented, RankTable, ChartFrame, csvRows } from '../components/report/kit.jsx'
+import { Section, Segmented, ChartFrame, csvRows } from '../components/report/kit.jsx'
 import MemberProfileModal from '../components/MemberProfileModal.jsx'
 import { money, fmtDateTime } from '../lib.js'
 import { salesKpis, groupSales, trendByDay, filterSales, distinctValues, istDay, GROUPINGS } from './salesModel.js'
 import { ITEM_GROUPS } from './salesItems.js'
-import { monthsInRange, planFetch } from './salesCachePlan.js'
+import { monthsInRange, planFetch, dedupeRows } from './salesCachePlan.js'
 import { cachedMonths, readMonths, writeMonth, clearCache } from './salesLocalCache.js'
 
 const MARKET_LABELS = { mumbai: 'Mumbai', blr: 'Bengaluru' }
@@ -75,6 +76,47 @@ const DEFAULT_COLUMNS = COLUMNS.filter(column => !column.detail).map(column => c
 // rest. Matches ITEM_GROUPS.
 const GROUP_TONES = Object.fromEntries(ITEM_GROUPS.map((group, index) => [group, index % 8]))
 
+// Twelve cards, six to a row. The ones with a `series` are also the chart's
+// selectable measures: clicking a card re-plots the trend below it, so the
+// headline number and the shape behind it are never separate questions.
+const METRICS = [
+  { key: 'netRevenue', label: 'Net revenue', icon: IndianRupee, tone: 'emerald',
+    value: k => money(k.netRevenue), detail: k => `${money(k.grossRevenue)} gross`,
+    series: [{ key: 'netRevenue', label: 'Net of refunds' }, { key: 'grossRevenue', label: 'Gross' }] },
+  { key: 'grossRevenue', label: 'Gross revenue', icon: TrendingUp, tone: 'emerald',
+    value: k => money(k.grossRevenue), detail: (k, d) => `${money(d.dailyAverage)} per day`,
+    series: [{ key: 'grossRevenue', label: 'Gross revenue' }] },
+  { key: 'transactions', label: 'Transactions', icon: Receipt, tone: 'blue',
+    value: k => k.transactions.toLocaleString('en-IN'), detail: k => `${k.splits.toLocaleString('en-IN')} payment splits`,
+    money: false, series: [{ key: 'transactions', label: 'Sales' }] },
+  { key: 'uniqueMembers', label: 'Unique members', icon: Users, tone: 'blue',
+    value: k => k.uniqueMembers.toLocaleString('en-IN'), detail: (k, d) => `${d.salesPerMember} sales each`,
+    money: false, series: [{ key: 'uniqueMembers', label: 'Members buying' }] },
+  { key: 'averageTransactionValue', label: 'Avg transaction', icon: Percent, tone: 'violet',
+    value: k => money(k.averageTransactionValue), detail: k => `across ${k.transactions.toLocaleString('en-IN')} sales`,
+    series: [{ key: 'averageTransactionValue', label: 'ATV' }] },
+  { key: 'averageRevenuePerMember', label: 'Revenue / member', icon: Users, tone: 'violet',
+    value: k => money(k.averageRevenuePerMember), detail: k => `${k.uniqueMembers.toLocaleString('en-IN')} members`,
+    series: [{ key: 'averageRevenuePerMember', label: 'Revenue per member' }] },
+  { key: 'paidInCurrency', label: 'Paid in currency', icon: Wallet, tone: 'blue',
+    value: k => money(k.paidInCurrency), detail: (k, d) => `${d.currencyShare} of collections`,
+    series: [{ key: 'paidInCurrency', label: 'Currency' }] },
+  { key: 'paidInMoneyCredits', label: 'Paid in credits', icon: Layers, tone: 'violet',
+    value: k => money(k.paidInMoneyCredits), detail: (k, d) => `${d.creditShare} of collections`,
+    series: [{ key: 'paidInMoneyCredits', label: 'Credits' }] },
+  { key: 'discount', label: 'Discounts given', icon: Tag, tone: 'amber',
+    value: k => money(k.discount), detail: k => `${k.discountedTransactions} sale${k.discountedTransactions === 1 ? '' : 's'} · ${money(k.listRevenue)} at list`,
+    series: [{ key: 'discount', label: 'Discount given' }] },
+  { key: 'refunded', label: 'Refunds', icon: Undo2, tone: k => (k.refunded ? 'rose' : 'emerald'),
+    value: k => money(k.refunded), detail: k => `${k.refundedTransactions} transaction${k.refundedTransactions === 1 ? '' : 's'}`,
+    series: [{ key: 'refunded', label: 'Refunded' }] },
+  { key: 'vat', label: 'Tax collected', icon: Landmark, tone: 'amber',
+    value: k => money(k.vat), detail: (k, d) => `${d.taxShare} of gross`,
+    series: [{ key: 'vat', label: 'Tax' }] },
+  { key: 'coverage', label: 'Discount detail', icon: Database, tone: 'blue',
+    value: (k, d) => d.enrichedShare, detail: (k, d) => `${d.enrichedRows.toLocaleString('en-IN')} of ${d.totalRows.toLocaleString('en-IN')} rows priced` }
+]
+
 const PRESETS = [
   { id: 'this-month', label: 'This month' },
   { id: 'last-month', label: 'Last month' },
@@ -109,6 +151,27 @@ function presetRange(preset) {
 }
 
 const pct = value => `${Math.round((value || 0) * 1000) / 10}%`
+
+/* ── Metric card ──────────────────────────────────────────────
+   Same anatomy as the lead drawer's Momence metrics (icon chip, uppercase
+   label, big value, detail line, tinted corner wash) so a number means the
+   same thing and looks the same wherever it appears in the app. */
+function Metric({ icon: Icon, label, value, detail, tone, onClick, active, disabled }) {
+  const Tag = onClick ? 'button' : 'div'
+  return (
+    <Tag
+      type={onClick ? 'button' : undefined}
+      className={`momence-metric tone-${tone} ${onClick && !disabled ? 'is-clickable' : ''} ${active ? 'is-active' : ''}`}
+      onClick={disabled ? undefined : onClick}
+      aria-pressed={onClick ? Boolean(active) : undefined}
+    >
+      <span className="momence-metric-icon"><Icon size={15} /></span>
+      <div className="momence-metric-label">{label}</div>
+      <div className="momence-metric-value" title={String(value)}>{value}</div>
+      <div className="momence-metric-detail">{detail}</div>
+    </Tag>
+  )
+}
 
 /* ── Multi-select filter chip ─────────────────────────────── */
 function FilterMenu({ label, options, selected, onChange, format }) {
@@ -291,6 +354,7 @@ export default function Sales() {
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [fetchingMonths, setFetchingMonths] = useState(0)
+  const [enriching, setEnriching] = useState(false)
   const [error, setError] = useState('')
   const [search, setSearch] = useState('')
   const [filters, setFilters] = useState({})
@@ -299,6 +363,8 @@ export default function Sales() {
   const [showColumns, setShowColumns] = useState(false)
   const [sort, setSort] = useState({ key: 'paymentDate', dir: 'desc' })
   const [expanded, setExpanded] = useState(null)
+  const [expandedGroup, setExpandedGroup] = useState(null)
+  const [chartMetric, setChartMetric] = useState('netRevenue')
   const [limit, setLimit] = useState(100)
   const [member, setMember] = useState(null)
 
@@ -326,9 +392,14 @@ export default function Sales() {
 
     try {
       const cached = await cachedMonths()
-      const { rows: cachedRows, fetchedAt } = await readMonths(months.filter(month => cached.includes(month)))
+      const { rows: cachedRows, fetchedAt, enriched } = await readMonths(months.filter(month => cached.includes(month)))
       const currentMonth = state?.currentMonth || months[months.length - 1]
-      const plan = planFetch({ months, cached, currentMonth, force, liveFetchedAt: fetchedAt[currentMonth] })
+      const plan = planFetch({
+        months, cached, currentMonth, force,
+        liveFetchedAt: fetchedAt[currentMonth],
+        enrichedNow: state?.enrichedTransactions || 0,
+        enrichedByMonth: enriched
+      })
 
       // Show what is already on the device immediately; the network fills in
       // the gaps behind it.
@@ -338,7 +409,7 @@ export default function Sales() {
         byMonth.get(row.month).push(row)
       }
       if (plan.reuse.length) {
-        setRows(plan.reuse.flatMap(month => byMonth.get(month) || []))
+        setRows(dedupeRows(plan.reuse.flatMap(month => byMonth.get(month) || [])))
         setLoading(false)
       }
 
@@ -353,13 +424,13 @@ export default function Sales() {
             byMonth.set(month, monthRows)
             // The live month is written too — it is re-fetched on age, not on
             // absence, so caching it saves the repeat within a session.
-            writeMonth(month, monthRows)
+            writeMonth(month, monthRows, data.enrichedTransactions)
           }
-          setRows(months.flatMap(month => byMonth.get(month) || []))
+          setRows(dedupeRows(months.flatMap(month => byMonth.get(month) || [])))
           setFetchingMonths(plan.fetch.length - Math.min(plan.fetch.length, index + 3))
         }
       } else {
-        setRows(months.flatMap(month => byMonth.get(month) || []))
+        setRows(dedupeRows(months.flatMap(month => byMonth.get(month) || [])))
       }
       const total = months.reduce((sum, month) => sum + (byMonth.get(month)?.length || 0), 0)
       setMeta({ total, truncated: false })
@@ -402,6 +473,24 @@ export default function Sales() {
     }
   }
 
+  // Discount detail is one Momence call per transaction, so the background
+  // pass fills it in slowly. This asks for the visible range now.
+  const enrichRange = async () => {
+    setEnriching(true)
+    try {
+      const { result } = await api.post('/api/sales/enrich', { from: range.from, to: range.to, limit: 600 })
+      await clearCache()
+      await load({ force: true })
+      toast?.(result.remaining
+        ? `Fetched ${result.fetched} transactions — ${result.remaining} still to go, run it again`
+        : `Discount detail complete for this range (${result.fetched} fetched)`)
+    } catch (e) {
+      toast?.(e.message || 'Could not fetch discount detail', 'error')
+    } finally {
+      setEnriching(false)
+    }
+  }
+
   const rebuildCache = async () => {
     await clearCache()
     setLoading(true)
@@ -423,23 +512,69 @@ export default function Sales() {
     return out
   }, [rows])
 
+  // Splits of one sale are indexed by their sale, so a parent row can expand
+  // into its own children rather than each payment method being a top-level
+  // row competing with the sale it belongs to.
+  const splitsBySale = useMemo(() => {
+    const index = new Map()
+    for (const row of filtered) {
+      const key = `${row.paymentTransactionId}:${row.saleItemId}`
+      if (!index.has(key)) index.set(key, [])
+      index.get(key).push(row)
+    }
+    return index
+  }, [filtered])
+
+  const parents = useMemo(() => {
+    // A filter can hide a sale's primary split (filtering to "cash" when the
+    // cash part is the second split); the first surviving split then stands in
+    // for the sale, so the row never disappears entirely.
+    const seen = new Set()
+    const out = []
+    for (const row of filtered) {
+      const key = `${row.paymentTransactionId}:${row.saleItemId}`
+      if (seen.has(key)) continue
+      seen.add(key)
+      out.push(splitsBySale.get(key).find(split => split.isPrimarySplit) || row)
+    }
+    return out
+  }, [filtered, splitsBySale])
+
   const sorted = useMemo(() => {
     const column = COLUMNS.find(c => c.key === sort.key)
     const dir = sort.dir === 'asc' ? 1 : -1
-    return [...filtered].sort((a, b) => {
+    return [...parents].sort((a, b) => {
       const va = a[sort.key], vb = b[sort.key]
       if (column?.numeric) return ((Number(va) || 0) - (Number(vb) || 0)) * dir
       if (sort.key === 'paymentDate') return (new Date(va) - new Date(vb)) * dir
       return String(va ?? '').localeCompare(String(vb ?? '')) * dir
     })
-  }, [filtered, sort])
+  }, [parents, sort])
 
   const page = useMemo(() => sorted.slice(0, limit), [sorted, limit])
   const columns = useMemo(() => COLUMNS.filter(column => visibleColumns.includes(column.key)), [visibleColumns])
   const splitsOf = useCallback(
-    row => filtered.filter(other => other.paymentTransactionId === row.paymentTransactionId && other.saleItemId === row.saleItemId),
-    [filtered]
+    row => splitsBySale.get(`${row.paymentTransactionId}:${row.saleItemId}`) || [row],
+    [splitsBySale]
   )
+  const toggleGroup = key => setExpandedGroup(previous => (previous === key ? null : key))
+
+  // The largest sales inside one breakdown group, for its child rows.
+  const groupChildren = useCallback(key => {
+    // Same bucketing rule groupSales uses, so a group's children are exactly
+    // the sales its numbers were computed from.
+    const bucketOf = row => {
+      const value = row?.[groupBy]
+      return value === null || value === undefined || value === '' ? 'Unspecified' : String(value)
+    }
+    return parents
+      .filter(row => bucketOf(row) === key)
+      .sort((a, b) => b.paymentValue - a.paymentValue)
+      .slice(0, 8)
+  }, [parents, groupBy])
+
+  const rowKey = row => `${row.paymentTransactionId}:${row.saleItemId}`
+  const toggleRow = row => setExpanded(previous => (previous === rowKey(row) ? null : rowKey(row)))
 
   const exportCsv = () => {
     const keys = [...new Set([...COLUMNS.map(c => c.key), ...Object.keys(sorted[0] || {})])]
@@ -451,6 +586,28 @@ export default function Sales() {
     link.click()
     URL.revokeObjectURL(url)
   }
+
+  // Everything a card's detail line needs that is not a raw KPI.
+  const derived = useMemo(() => {
+    const collections = kpis.paidInCurrency + kpis.paidInMoneyCredits
+    const enrichedRows = filtered.filter(row => row.enriched).length
+    const share = (part, whole) => (whole ? `${Math.round((part / whole) * 100)}%` : '—')
+    return {
+      dailyAverage: trend.length ? kpis.grossRevenue / trend.length : 0,
+      salesPerMember: kpis.uniqueMembers ? (kpis.transactions / kpis.uniqueMembers).toFixed(1) : '0',
+      currencyShare: share(kpis.paidInCurrency, collections),
+      creditShare: share(kpis.paidInMoneyCredits, collections),
+      taxShare: share(kpis.vat, kpis.grossRevenue),
+      enrichedRows,
+      totalRows: filtered.length,
+      enrichedShare: share(enrichedRows, filtered.length)
+    }
+  }, [kpis, trend, filtered])
+
+  const activeMetric = useMemo(
+    () => METRICS.find(metric => metric.key === chartMetric && metric.series) || METRICS[0],
+    [chartMetric]
+  )
 
   const activeFilterCount = Object.values(filters).reduce((sum, values) => sum + (values?.length || 0), 0)
   const backfillLine = useMemo(() => {
@@ -488,6 +645,9 @@ export default function Sales() {
           </button>
           <button type="button" className="btn" onClick={exportCsv} disabled={!sorted.length}>
             <Download size={14} /> Export
+          </button>
+          <button type="button" className="sales-link-btn" onClick={enrichRange} disabled={enriching} title="Fetch discount and fee detail from Momence for every transaction in this range">
+            {enriching ? 'Fetching discounts…' : 'Fetch discount detail'}
           </button>
           <button type="button" className="sales-link-btn" onClick={rebuildCache} title="Discard the months cached in this browser and fetch them again">
             Rebuild cache
@@ -543,31 +703,35 @@ export default function Sales() {
 
       {error && <div className="sales-error">{error}</div>}
 
-      <div className="sales-kpis">
-        <StatTile label="Net revenue" value={money(kpis.netRevenue)} sub={`${money(kpis.grossRevenue)} gross`} icon={IndianRupee} />
-        <StatTile label="Transactions" value={kpis.transactions.toLocaleString('en-IN')} sub={`${kpis.splits.toLocaleString('en-IN')} payment splits`} icon={Receipt} />
-        <StatTile label="Unique members" value={kpis.uniqueMembers.toLocaleString('en-IN')} sub={`${money(kpis.averageRevenuePerMember)} per member`} icon={Users} />
-        <StatTile label="Avg transaction" value={money(kpis.averageTransactionValue)} sub={`${money(kpis.vat)} tax`} icon={Percent} />
-        <StatTile label="Paid in currency" value={money(kpis.paidInCurrency)} sub="Cash, cards, UPI, transfers" icon={Wallet} />
-        <StatTile label="Paid in credits" value={money(kpis.paidInMoneyCredits)} sub="Redeemed from memberships" icon={Layers} />
-        <StatTile label="Discounts given" value={money(kpis.discount)} sub={`${kpis.discountedTransactions} discounted sale${kpis.discountedTransactions === 1 ? '' : 's'}`} icon={Tag} />
-        <StatTile label="Refunds" value={money(kpis.refunded)} sub={`${kpis.refundedTransactions} transaction${kpis.refundedTransactions === 1 ? '' : 's'}`} icon={Undo2} tone={kpis.refunded ? 'warn' : undefined} />
-        <StatTile label="Rows in view" value={sorted.length.toLocaleString('en-IN')} sub={meta.truncated ? `of ${meta.total.toLocaleString('en-IN')} (capped)` : 'after filters'} icon={Database} />
+      <div className="sales-kpis momence-metric-grid">
+        {METRICS.map(metric => (
+          <Metric
+            key={metric.key}
+            icon={metric.icon}
+            label={metric.label}
+            value={metric.value(kpis, derived)}
+            detail={metric.detail(kpis, derived)}
+            tone={typeof metric.tone === 'function' ? metric.tone(kpis) : metric.tone}
+            onClick={metric.series ? () => setChartMetric(metric.key) : undefined}
+            active={chartMetric === metric.key}
+          />
+        ))}
       </div>
 
-      <Section title="Revenue over time" subtitle="Gross sale value per day, in the selected range" icon={IndianRupee}>
+      <Section
+        title={`${activeMetric.label} over time`}
+        subtitle={activeMetric.chartSubtitle || 'Per day, in the selected range — pick a card above to change the series'}
+        icon={activeMetric.icon}
+      >
         {loading
           ? <TableSkeleton rows={4} cols={2} />
           : <ChartFrame
-              data={trend.map(point => ({ label: point.date, gross: point.grossRevenue, net: point.netRevenue, transactions: point.transactions }))}
-              series={[
-                { key: 'gross', label: 'Gross revenue' },
-                { key: 'net', label: 'Net of refunds' }
-              ]}
+              data={trend.map(point => ({ label: point.date, ...point }))}
+              series={activeMetric.series}
               xKey="label"
               defaultType="area"
-              height={260}
-              valueFormat={value => money(value)}
+              height={250}
+              valueFormat={value => (activeMetric.money === false ? value.toLocaleString('en-IN') : money(value))}
               emptyText="No sales in this range."
             />}
       </Section>
@@ -576,45 +740,117 @@ export default function Sales() {
         title="Breakdown"
         subtitle="Money always comes from the payment split; sale counts stay one per sale"
         icon={Layers}
-        actions={<Segmented size="sm" ariaLabel="Group by" value={groupBy} onChange={setGroupBy} options={GROUPINGS.map(group => ({ value: group.field, label: group.label }))} />}
+        actions={<span className="sales-section-note">{groups.length} {groups.length === 1 ? 'group' : 'groups'}</span>}
       >
-        <RankTable
-          rankKey="rank"
-          rows={groups.slice(0, 50).map(group => ({ ...group, id: group.key }))}
-          onRowClick={group => {
-            const field = groupBy
-            setFilters(previous => ({ ...previous, [field]: [group.key] }))
-          }}
-          initialSort={{ key: 'grossRevenue', dir: 'desc' }}
-          columns={[
-            {
-              key: 'key',
-              label: GROUPINGS.find(g => g.field === groupBy)?.label || 'Group',
-              width: '26%',
-              format: (value, group) => (
-                <div className="sales-group-cell">
-                  {groupBy === 'itemGroup'
-                    ? <span className="sales-tag" data-tone={GROUP_TONES[value] ?? 8}>{value}</span>
-                    : <span className="sales-group-name" title={value}>{value}</span>}
-                  <span className="sales-group-bar" aria-hidden="true">
-                    <span style={{ width: `${Math.max(1, Math.round((group.share || 0) * 100))}%` }} />
-                  </span>
-                </div>
-              )
-            },
-            { key: 'transactions', label: 'Sales', align: 'right', format: value => value.toLocaleString('en-IN') },
-            { key: 'uniqueMembers', label: 'Members', align: 'right', format: value => value.toLocaleString('en-IN') },
-            { key: 'grossRevenue', label: 'Gross', align: 'right', format: value => money(value) },
-            { key: 'paidInCurrency', label: 'Currency', align: 'right', format: value => money(value) },
-            { key: 'paidInMoneyCredits', label: 'Credits', align: 'right', format: value => money(value) },
-            { key: 'discount', label: 'Discount', align: 'right', format: value => (value ? money(value) : '—') },
-            { key: 'refunded', label: 'Refunded', align: 'right', format: value => (value ? money(value) : '—') },
-            { key: 'averageTransactionValue', label: 'ATV', align: 'right', format: value => money(value) },
-            { key: 'share', label: 'Share', align: 'right', format: value => pct(value) }
-          ]}
-          maxHeight={420}
-          emptyText="Nothing matches these filters."
-        />
+        <div className="sales-dimensions" role="tablist" aria-label="Group by">
+          <span className="sales-dimensions-label"><Layers size={11} /> Group by</span>
+          {GROUPINGS.map(dimension => (
+            <button
+              key={dimension.field}
+              type="button"
+              role="tab"
+              aria-selected={groupBy === dimension.field}
+              className={`sales-dimension ${groupBy === dimension.field ? 'is-active' : ''}`}
+              onClick={() => { setGroupBy(dimension.field); setExpandedGroup(null) }}
+            >
+              {dimension.label}
+              {groupBy === dimension.field && <span className="sales-dimension-count">{groups.length}</span>}
+            </button>
+          ))}
+        </div>
+
+        <div className="sales-breakdown-wrap scrollbar-thin">
+          <table className="sales-table sales-breakdown">
+            <thead>
+              <tr>
+                <th className="sales-th-expand" />
+                <th>{GROUPINGS.find(g => g.field === groupBy)?.label || 'Group'}</th>
+                <th className="is-right">Sales</th>
+                <th className="is-right">Members</th>
+                <th className="is-right">Gross</th>
+                <th className="is-right">Currency</th>
+                <th className="is-right">Credits</th>
+                <th className="is-right">Discount</th>
+                <th className="is-right">Refunded</th>
+                <th className="is-right">ATV</th>
+                <th className="is-right">Share</th>
+              </tr>
+            </thead>
+            <tbody>
+              {groups.slice(0, 60).map(group => {
+                const isOpen = expandedGroup === group.key
+                return (
+                  <React.Fragment key={group.key}>
+                    <tr
+                      className={`is-clickable ${isOpen ? 'is-expanded' : ''}`}
+                      onClick={() => toggleGroup(group.key)}
+                      aria-expanded={isOpen}
+                    >
+                      <td className="sales-td-expand">{isOpen ? <ChevronDown size={13} /> : <ChevronRight size={13} />}</td>
+                      <td>
+                        <div className="sales-group-cell">
+                          {groupBy === 'itemGroup'
+                            ? <span className="sales-tag" data-tone={GROUP_TONES[group.key] ?? 8}>{group.key}</span>
+                            : <span className="sales-group-name" title={group.key}>{group.key}</span>}
+                          <span className="sales-group-bar" aria-hidden="true">
+                            <span style={{ width: `${Math.max(1, Math.round((group.share || 0) * 100))}%` }} />
+                          </span>
+                        </div>
+                      </td>
+                      <td className="is-right">{group.transactions.toLocaleString('en-IN')}</td>
+                      <td className="is-right">{group.uniqueMembers.toLocaleString('en-IN')}</td>
+                      <td className="is-right">{money(group.grossRevenue)}</td>
+                      <td className="is-right">{money(group.paidInCurrency)}</td>
+                      <td className="is-right">{money(group.paidInMoneyCredits)}</td>
+                      <td className="is-right">{group.discount ? money(group.discount) : <span className="sales-muted">—</span>}</td>
+                      <td className="is-right">{group.refunded ? money(group.refunded) : <span className="sales-muted">—</span>}</td>
+                      <td className="is-right">{money(group.averageTransactionValue)}</td>
+                      <td className="is-right">{pct(group.share)}</td>
+                    </tr>
+
+                    {/* Child rows: the biggest sales inside this group, plus a
+                        way to push the group into the table's filters. */}
+                    {isOpen && groupChildren(group.key).map(child => (
+                      <tr key={`${group.key}-${child.id}`} className="sales-child-row" onClick={() => toggleGroup(group.key)}>
+                        <td className="sales-td-expand" />
+                        <td><span className="sales-child-marker">{child.customerName || 'Unnamed'}</span></td>
+                        <td className="is-right">{fmtDateTime(child.paymentDate)}</td>
+                        <td className="is-right">{child.itemName || child.paymentItem}</td>
+                        <td className="is-right">{money(child.paymentValue)}</td>
+                        <td className="is-right">{money(child.paidInCurrency)}</td>
+                        <td className="is-right">{money(child.splitPaidInMoneyCredits)}</td>
+                        <td className="is-right">{child.discountAmount ? money(child.discountAmount) : <span className="sales-muted">—</span>}</td>
+                        <td className="is-right">{child.refunded ? money(child.refunded) : <span className="sales-muted">—</span>}</td>
+                        <td className="is-right">{child.splitPaymentMethod || '—'}</td>
+                        <td className="is-right">{child.location || '—'}</td>
+                      </tr>
+                    ))}
+                    {isOpen && (
+                      <tr className="sales-child-row is-child-foot" onClick={event => event.stopPropagation()}>
+                        <td className="sales-td-expand" />
+                        <td colSpan={10}>
+                          <button
+                            type="button"
+                            className="sales-link-btn"
+                            onClick={() => setFilters(previous => ({ ...previous, [groupBy]: [group.key] }))}
+                          >
+                            Filter the whole dashboard to {group.key} <ChevronRight size={12} />
+                          </button>
+                          <span className="sales-child-note">
+                            Showing the {Math.min(8, group.transactions)} largest of {group.transactions.toLocaleString('en-IN')} sales
+                          </span>
+                        </td>
+                      </tr>
+                    )}
+                  </React.Fragment>
+                )
+              })}
+              {!groups.length && (
+                <tr><td colSpan={11} className="sales-empty-cell">Nothing matches these filters.</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
       </Section>
 
       <Section
@@ -673,28 +909,58 @@ export default function Sales() {
                       </tr>
                     </thead>
                     <tbody>
-                      {page.map(row => (
-                        <React.Fragment key={row.id}>
-                          <tr
-                            className={`is-clickable ${expanded === row.id ? 'is-expanded' : ''} ${row.isPrimarySplit ? '' : 'is-secondary-split'}`}
-                            onClick={() => setExpanded(previous => previous === row.id ? null : row.id)}
-                          >
-                            <td className="sales-td-expand">{expanded === row.id ? <ChevronDown size={13} /> : <ChevronRight size={13} />}</td>
-                            {columns.map(column => (
-                              <td key={column.key} className={column.align === 'right' ? 'is-right' : ''}>
-                                {column.format ? column.format(row) : (row[column.key] ?? <span className="sales-muted">—</span>)}
+                      {page.map(row => {
+                        const key = rowKey(row)
+                        const splits = splitsOf(row)
+                        const isOpen = expanded === key
+                        return (
+                          <React.Fragment key={key}>
+                            <tr
+                              className={`is-clickable ${isOpen ? 'is-expanded' : ''}`}
+                              onClick={() => toggleRow(row)}
+                              aria-expanded={isOpen}
+                            >
+                              <td className="sales-td-expand">
+                                {isOpen ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
                               </td>
-                            ))}
-                          </tr>
-                          {expanded === row.id && (
-                            <tr className="sales-detail-row">
-                              <td colSpan={columns.length + 1}>
-                                <RowDetail row={row} siblings={splitsOf(row)} onOpenMember={r => setMember({ memberId: r.memberId, locationId: r.location })} />
-                              </td>
+                              {columns.map(column => (
+                                <td key={column.key} className={column.align === 'right' ? 'is-right' : ''}>
+                                  {column.key === 'splitPaymentMethod' && splits.length > 1
+                                    ? <span className="sales-split-count">{splits.length} methods</span>
+                                    : column.format ? column.format(row) : (row[column.key] ?? <span className="sales-muted">—</span>)}
+                                </td>
+                              ))}
                             </tr>
-                          )}
-                        </React.Fragment>
-                      ))}
+
+                            {/* Child rows: one per payment split, in the same
+                                columns as their parent so the numbers line up. */}
+                            {isOpen && splits.length > 1 && splits.map(split => (
+                              <tr key={`${key}-${split.id}`} className="sales-child-row" onClick={() => toggleRow(row)}>
+                                <td className="sales-td-expand" />
+                                {columns.map(column => (
+                                  <td key={column.key} className={column.align === 'right' ? 'is-right' : ''}>
+                                    {column.key === 'splitPaymentMethod'
+                                      ? <span className="sales-child-marker">{split.splitPaymentMethod || '—'}</span>
+                                      : ['paidInCurrency', 'splitPaidInMoneyCredits', 'splitVatAmount'].includes(column.key)
+                                        ? money(split[column.key])
+                                        : column.key === 'paymentValue'
+                                          ? <span className="sales-muted">{split.paymentMethodWeight == null ? '—' : `${Math.round(split.paymentMethodWeight * 100)}%`}</span>
+                                          : <span className="sales-muted">—</span>}
+                                  </td>
+                                ))}
+                              </tr>
+                            ))}
+
+                            {isOpen && (
+                              <tr className="sales-detail-row">
+                                <td colSpan={columns.length + 1}>
+                                  <RowDetail row={row} siblings={splits} onOpenMember={r => setMember({ memberId: r.memberId, locationId: r.location })} />
+                                </td>
+                              </tr>
+                            )}
+                          </React.Fragment>
+                        )
+                      })}
                     </tbody>
                   </table>
                 </div>

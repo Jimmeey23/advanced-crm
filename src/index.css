@@ -10769,17 +10769,60 @@ html .pipeline-stage-badge {
   max-width: 1680px;
 }
 
-/* KPI strip: one bordered card of equal cells rather than eight tiles adrift
-   on the page background. auto-fit keeps them a sensible width at any zoom. */
-.sales-kpis {
-  display: grid; gap: 1px;
-  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
-  border: 1px solid var(--border-strong); border-radius: var(--radius-lg);
-  background: var(--border); overflow: hidden;
+/* KPI strip reuses the lead drawer's metric cards verbatim
+   (.momence-metric); this only re-flows them for a full-width page, where a
+   fixed four-column grid would leave each card far too wide. */
+/* Twelve cards, six to a row — two tidy rows rather than a ragged auto-fit. */
+.sales-kpis.momence-metric-grid {
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 8px; margin-bottom: 0;
 }
-.sales-kpis .rp-tile { padding: 11px 13px; gap: 3px; }
-.sales-kpis .rp-tile-value { font-size: 18px; }
-.sales-kpis .rp-tile-foot { min-height: 0; }
+@media (max-width: 1500px) { .sales-kpis.momence-metric-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+@media (max-width: 1040px) { .sales-kpis.momence-metric-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 720px)  { .sales-kpis.momence-metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.sales-kpis .momence-metric { min-height: 98px; }
+
+/* Click affordance: lift on hover, a real press on :active, and a lit ring
+   plus a sweep on the card whose series the chart is currently drawing. */
+.sales-kpis .momence-metric.is-clickable {
+  width: 100%; font: inherit; cursor: pointer; text-align: left;
+  transition: transform 140ms cubic-bezier(.2,.7,.3,1), border-color 140ms ease, background-color 140ms ease, box-shadow 140ms ease;
+}
+.sales-kpis .momence-metric.is-clickable:hover { transform: translateY(-2px); border-color: currentColor; background: var(--surface-2); }
+.sales-kpis .momence-metric.is-clickable:active { transform: translateY(0) scale(.985); transition-duration: 60ms; }
+.sales-kpis .momence-metric.is-clickable:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.sales-kpis .momence-metric.is-active {
+  border-color: currentColor;
+  box-shadow: inset 0 0 0 1px currentColor, 0 6px 18px -12px currentColor;
+  background: var(--surface-2);
+}
+.sales-kpis .momence-metric.is-active::before {
+  content: ""; position: absolute; inset: 0 auto 0 0; width: 3px;
+  background: currentColor; border-radius: 11px 0 0 11px;
+  animation: sales-metric-in 220ms cubic-bezier(.2,.7,.3,1);
+}
+.sales-kpis .momence-metric.is-active .momence-metric-icon { animation: sales-metric-pop 260ms cubic-bezier(.2,.7,.3,1); }
+@keyframes sales-metric-in { from { transform: scaleY(0); } to { transform: scaleY(1); } }
+@keyframes sales-metric-pop { 0% { transform: scale(1); } 45% { transform: scale(1.14); } 100% { transform: scale(1); } }
+@media (prefers-reduced-motion: reduce) {
+  .sales-kpis .momence-metric.is-clickable,
+  .sales-kpis .momence-metric.is-active::before,
+  .sales-kpis .momence-metric.is-active .momence-metric-icon { transition: none; animation: none; }
+  .sales-kpis .momence-metric.is-clickable:hover { transform: none; }
+}
+/* The drawer's cards sit on a dark glass panel; on the page surface they need
+   the page's own border token to stay visible in both themes. */
+.sales-kpis .momence-metric { border-color: var(--border-strong); background: var(--surface); }
+.sales-kpis .momence-metric-label { color: var(--text-mute); }
+.sales-kpis .momence-metric-value { color: var(--text); }
+.sales-kpis .momence-metric-detail { color: var(--text-mute); }
+.momence-metric.tone-rose { color: #fca5a5; }
+:root[data-theme="light"] .sales-kpis .momence-metric.tone-emerald { color: #0f6f4c; }
+:root[data-theme="light"] .sales-kpis .momence-metric.tone-blue { color: #1c5cab; }
+:root[data-theme="light"] .sales-kpis .momence-metric.tone-violet { color: #4034a0; }
+:root[data-theme="light"] .sales-kpis .momence-metric.tone-amber { color: #8a6b00; }
+:root[data-theme="light"] .sales-kpis .momence-metric.tone-rose { color: #b32f2f; }
+:root[data-theme="light"] .sales-kpis .momence-metric-icon svg { color: #ffffff; }
 
 .sales-head { display: flex; align-items: flex-start; gap: 12px; flex-wrap: wrap; }
 .sales-head h2 { margin: 0; font-size: var(--text-xl); font-weight: 660; letter-spacing: -.02em; }
@@ -10941,14 +10984,41 @@ html .pipeline-stage-badge {
 .sales-table tbody tr.is-clickable { cursor: pointer; }
 .sales-th-expand, .sales-td-expand { width: 30px; padding: 0 0 0 9px !important; color: var(--text-mute); }
 
-/* A secondary split belongs to the sale in the row above: shown with a left
-   rule and recessive ink, so the eye reads the pair as one sale. */
-.sales-table tbody tr.is-secondary-split td { color: var(--text-mute); }
-.sales-table tbody tr.is-secondary-split td:first-child {
-  box-shadow: inset 2px 0 0 var(--accent-border, var(--border-strong));
+/* Child rows: the payment splits of the expanded sale. Indented by an accent
+   rule and set in recessive ink so the parent stays the sale of record. */
+.sales-table tbody tr.sales-child-row { animation: sales-row-in 160ms ease-out; }
+@keyframes sales-row-in { from { opacity: 0; transform: translateY(-3px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .sales-table tbody tr.sales-child-row { animation: none; } }
+.sales-table tbody tr.sales-child-row td {
+  background: color-mix(in srgb, var(--accent-soft) 55%, var(--surface));
+  color: var(--text-dim); font-size: 11px;
+  border-bottom-color: var(--border);
+}
+.sales-table tbody tr.sales-child-row td:first-child {
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+/* Breakdown table shares the transaction table's chrome; its child rows are
+   the largest sales inside the group. */
+.sales-breakdown-wrap {
+  max-height: 460px; overflow: auto;
+  border: 1px solid var(--border-strong); border-radius: var(--radius-lg);
+  background: var(--surface);
+}
+.sales-breakdown { min-width: 1100px; }
+.sales-breakdown tbody tr.sales-child-row.is-child-foot td { text-align: left; }
+.sales-child-note { margin-left: 10px; color: var(--text-mute); }
+.sales-empty-cell { height: 60px; text-align: center; color: var(--text-mute); }
+
+.sales-child-marker { display: inline-flex; align-items: center; gap: 6px; color: var(--text); font-weight: 560; }
+.sales-child-marker::before { content: "└"; color: var(--text-mute); font-size: 10px; }
+.sales-split-count {
+  display: inline-block; padding: 1px 6px; border-radius: 4px;
+  border: 1px solid var(--accent-border); background: var(--accent-soft);
+  color: var(--accent-ink, var(--accent)); font-size: 10.5px; font-weight: 560;
 }
 .sales-table tbody tr.is-expanded td {
   background: var(--accent-soft) !important;
+  font-weight: 560;
   border-bottom-color: var(--accent-border);
   color: var(--text);
 }
@@ -11023,3 +11093,145 @@ html .pipeline-stage-badge {
 .sales-group-bar { display: block; height: 3px; border-radius: 2px; background: var(--surface-2); overflow: hidden; }
 .sales-group-bar > span { display: block; height: 100%; border-radius: 2px; background: var(--accent); }
 .sales-sort { margin-left: 4px; opacity: .85; }
+
+/* ── Table badges ──────────────────────────────────────────────────────────
+   Every badge rendered inside a table cell shares one size: same height, same
+   min/max width, same ellipsis. Badges that grow to fit their text make a
+   column of them read as ragged noise instead of a scannable state column. */
+.table-badge {
+  display: inline-flex; align-items: center; justify-content: center;
+  box-sizing: border-box;
+  width: 100%; min-width: 96px; max-width: 148px; height: 22px;
+  padding: 0 8px; border-radius: 6px;
+  border: 1px solid var(--border-strong); background: var(--surface-2);
+  color: var(--text-dim);
+  font-size: 10.5px; font-weight: 580; line-height: 1; letter-spacing: .01em;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.table-badge[data-tone="good"]    { color: var(--ok);   border-color: color-mix(in srgb, var(--ok) 40%, transparent);   background: color-mix(in srgb, var(--ok) 12%, transparent); }
+.table-badge[data-tone="warn"]    { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 40%, transparent); background: color-mix(in srgb, var(--warn) 12%, transparent); }
+.table-badge[data-tone="bad"]     { color: var(--bad);  border-color: color-mix(in srgb, var(--bad) 40%, transparent);  background: color-mix(in srgb, var(--bad) 12%, transparent); }
+.table-badge[data-tone="accent"]  { color: var(--accent-ink, var(--accent)); border-color: var(--accent-border); background: var(--accent-soft); }
+
+/* The sales dashboard's own tags obey the same dimensions, so item groups,
+   discount codes and split counts all line up down their columns. */
+.sales-table .sales-tag,
+.sales-table .sales-split-count,
+.sales-breakdown .sales-tag {
+  display: inline-flex; align-items: center; justify-content: center;
+  box-sizing: border-box;
+  width: 100%; min-width: 92px; max-width: 150px; height: 22px;
+  padding: 0 8px; line-height: 1;
+}
+/* Outside a table (a heading, the expanded detail) a tag sizes to its text. */
+.sales-detail .sales-tag, .sales-detail-head .sales-tag { width: auto; min-width: 0; }
+
+/* ── Pivot: themes, density, in-cell bars ─────────────────────────────────
+   The theme changes only chrome (rules, weight, contrast) — never the numbers
+   or their alignment, so switching it can't change what a report says. */
+.pivot-table-wrap { --pivot-heat-low: #3987e5; --pivot-heat-high: #d95926; }
+:root[data-theme="light"] .pivot-table-wrap { --pivot-heat-low: #2a78d6; --pivot-heat-high: #eb6834; }
+
+.pivot-table-wrap[data-density="comfortable"] .pivot-table :is(th, td) { height: 34px; padding: 0 12px; }
+.pivot-table-wrap[data-density="cosy"] .pivot-table :is(th, td) { height: 28px; padding: 0 10px; font-size: var(--text-2xs); }
+.pivot-table-wrap[data-density="compact"] .pivot-table :is(th, td) { height: 24px; padding: 0 8px; font-size: 10.5px; }
+
+.pivot-table-wrap[data-theme-style="grid"] .pivot-table :is(th, td) { border: 1px solid var(--border); }
+.pivot-table-wrap[data-theme-style="minimal"] .pivot-table :is(th, td) { border: 0; border-bottom: 1px solid color-mix(in srgb, var(--border) 55%, transparent); }
+.pivot-table-wrap[data-theme-style="minimal"] .pivot-table thead th { background: transparent; }
+.pivot-table-wrap[data-theme-style="contrast"] .pivot-table thead th {
+  background: var(--text); color: var(--surface); border-color: var(--text);
+  text-transform: uppercase; letter-spacing: .05em;
+}
+.pivot-table-wrap[data-theme-style="contrast"] .pivot-table :is(th, td) { border: 1px solid var(--border-strong); }
+.pivot-table-wrap[data-theme-style="contrast"] .pivot-cell-value { font-weight: 600; }
+
+.pivot-table-wrap.is-sticky .pivot-table thead th { position: sticky; top: 0; z-index: 4; }
+.pivot-table-wrap.is-sticky .pivot-table thead th.pivot-corner { left: 0; z-index: 5; }
+
+/* The bar sits behind the number, never in place of it. */
+.pivot-cell { position: relative; }
+.pivot-cell-bar {
+  position: absolute; left: 0; top: 50%; transform: translateY(-50%);
+  height: 62%; border-radius: 0 3px 3px 0;
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+  pointer-events: none;
+}
+.pivot-cell-value { position: relative; }
+
+/* ── Breakdown dimension picker ───────────────────────────────────────────
+   Fourteen dimensions do not fit a segmented control. This is a wrapped strip
+   of chips with the active one lit, which stays readable at any width. */
+.sales-dimensions {
+  display: flex; flex-wrap: wrap; gap: 5px;
+  padding: 8px 10px; margin-bottom: 10px;
+  border: 1px solid var(--border); border-radius: var(--radius-lg);
+  background: var(--surface-2);
+}
+.sales-dimension {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 26px; padding: 0 11px; border-radius: 999px;
+  border: 1px solid transparent; background: transparent;
+  color: var(--text-mute); font-size: var(--text-2xs); font-weight: 540;
+  cursor: pointer; white-space: nowrap;
+  transition: color 120ms ease, background-color 120ms ease, border-color 120ms ease, transform 120ms ease;
+}
+.sales-dimension:hover { color: var(--text); background: var(--surface); border-color: var(--border); }
+.sales-dimension:active { transform: scale(.97); }
+.sales-dimension.is-active {
+  color: var(--accent-ink, var(--accent));
+  background: var(--accent-soft); border-color: var(--accent-border);
+  font-weight: 600;
+}
+.sales-dimension-count {
+  min-width: 18px; padding: 0 5px; border-radius: 999px;
+  background: color-mix(in srgb, var(--text-mute) 18%, transparent);
+  color: var(--text-dim); font-size: 10px; line-height: 15px; text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.sales-dimension.is-active .sales-dimension-count { background: var(--accent); color: #fff; }
+.sales-dimensions-label {
+  display: inline-flex; align-items: center; gap: 5px; height: 26px; padding-right: 4px;
+  color: var(--text-mute); font-size: 10px; font-weight: 640;
+  text-transform: uppercase; letter-spacing: .07em;
+}
+
+/* ── Child sections ───────────────────────────────────────────────────────
+   A child block is visually inside its parent: inset panel, its own hairline
+   header, and a rule down the left so nesting depth is never ambiguous. */
+.sales-detail-block {
+  padding: 10px 11px;
+  border: 1px solid var(--border); border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--surface) 70%, transparent);
+}
+.sales-detail-block h5 {
+  padding-bottom: 7px; margin-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+}
+.sales-detail-block h5::before {
+  content: ""; width: 3px; height: 11px; border-radius: 2px;
+  background: var(--accent); display: inline-block; margin-right: 2px;
+}
+.sales-detail { border-left: 3px solid var(--accent-border); }
+.sales-section-note { font-size: var(--text-2xs); color: var(--text-mute); }
+
+/* ── Lead drawer: one scroll body, pinned tabs ─────────────────────────────
+   The hero used to be frozen above a short scroller, so a tall screen showed
+   a large fixed header and a small window of content. Now the whole body
+   scrolls and only the tab bar pins, which is the part you navigate with. */
+.ld-scroll {
+  flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain;
+  background: var(--surface);
+}
+.ld-scroll::-webkit-scrollbar { width: 6px; }
+.ld-scroll::-webkit-scrollbar-thumb { background: var(--ld-line); border-radius: 999px; }
+.ld-shell .ld-tabs {
+  position: sticky; top: 0; z-index: 20;
+  background: var(--surface);
+  /* A hairline shadow appears only once something has scrolled under it. */
+  box-shadow: 0 6px 12px -12px rgba(0,0,0,.6);
+}
+.ld-shell .ld-panels { min-height: 0; }
+/* The hero is content now, so it needs a floor under it rather than the
+   drawer's own border doing the work. */
+.ld-shell .ld-hero { border-bottom: 0; }

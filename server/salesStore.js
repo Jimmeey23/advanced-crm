@@ -16,7 +16,7 @@ import { fileURLToPath } from 'node:url'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const DEFAULT_FILE = path.join(__dirname, '..', 'data', 'salesCache.json')
-const VERSION = 1
+const VERSION = 2
 const WRITE_DEBOUNCE_MS = 2000
 
 export function createSalesStore({ file = DEFAULT_FILE } = {}) {
@@ -47,10 +47,20 @@ export function createSalesStore({ file = DEFAULT_FILE } = {}) {
 
   return {
     putMonth(market, month, rows) {
+      // Written de-duplicated so the count reported in the UI matches what the
+      // range query will actually return.
+      const seen = new Set()
+      const unique = []
+      for (const row of rows || []) {
+        const id = String(row.id)
+        if (seen.has(id)) continue
+        seen.add(id)
+        unique.push(row)
+      }
       state.months[key(market, month)] = {
         market,
         month,
-        rows: rows || [],
+        rows: unique,
         fetchedAt: new Date().toISOString()
       }
       schedule()
@@ -73,6 +83,11 @@ export function createSalesStore({ file = DEFAULT_FILE } = {}) {
       const fromMonth = from ? String(from).slice(0, 7) : null
       const toMonth = to ? String(to).slice(0, 7) : null
       const out = []
+      // Second line of defence against double counting: a row can sit in two
+      // month buckets when a month is re-fetched around a boundary, or when a
+      // cache written by an older build is still on disk. Identity is the row
+      // id, which is the sale-item/split pair.
+      const seen = new Set()
       for (const entry of Object.values(state.months)) {
         if (market && entry.market !== market) continue
         // A month is skipped only when it lies wholly outside the range. The
@@ -83,7 +98,11 @@ export function createSalesStore({ file = DEFAULT_FILE } = {}) {
         if (toMonth && entry.month > toMonth) continue
         for (const row of entry.rows) {
           const at = new Date(row.paymentDate).getTime()
-          if (at >= start && at <= end) out.push(row)
+          if (at < start || at > end) continue
+          const key = String(row.id)
+          if (seen.has(key)) continue
+          seen.add(key)
+          out.push(row)
         }
       }
       return out.sort((a, b) => new Date(b.paymentDate) - new Date(a.paymentDate))
@@ -161,10 +180,41 @@ const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000
 
 const emptyState = () => ({ version: VERSION, months: {}, backfill: {}, transactions: {} })
 
+// v1 identified a row by its payment-split id alone. That id is shared by
+// every sale item one split pays for, so v1 caches both collide (four single
+// classes on one charge looked like one row to anything keyed by id) and
+// duplicate (a split repeated under one sale item was stored twice). The data
+// itself is fine, so the cache is repaired in place rather than re-fetched:
+// re-pulling 80 months would mean 80 report builds for something computable
+// from fields already on the row.
+function migrateV1(months) {
+  const out = {}
+  for (const [key, entry] of Object.entries(months || {})) {
+    const seen = new Set()
+    const rows = []
+    for (const row of entry.rows || []) {
+      const id = String(row.id).includes(':') ? String(row.id) : `${row.saleItemId}:${row.id ?? 'sale'}`
+      if (seen.has(id)) continue
+      seen.add(id)
+      rows.push({ ...row, id })
+    }
+    out[key] = { ...entry, rows }
+  }
+  return out
+}
+
 function load(file) {
   try {
     const parsed = JSON.parse(fs.readFileSync(file, 'utf8'))
-    if (parsed?.version !== VERSION || !parsed.months) return emptyState()
+    if (!parsed?.months) return emptyState()
+    if (parsed.version === 1) {
+      const months = migrateV1(parsed.months)
+      const before = Object.values(parsed.months).reduce((sum, m) => sum + (m.rows?.length || 0), 0)
+      const after = Object.values(months).reduce((sum, m) => sum + m.rows.length, 0)
+      console.log(`[sales] migrated cache to v2: ${before - after} duplicate rows removed`)
+      return { version: VERSION, months, backfill: parsed.backfill || {}, transactions: parsed.transactions || {} }
+    }
+    if (parsed.version !== VERSION) return emptyState()
     return { version: VERSION, months: parsed.months, backfill: parsed.backfill || {}, transactions: parsed.transactions || {} }
   } catch {
     // No file yet, or one written by an older/interrupted version. Rebuilding

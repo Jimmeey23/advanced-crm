@@ -145,20 +145,56 @@ export function formatValue(value, format = {}) {
  * ------------------------------------------------------------------ */
 
 export const AGGREGATORS = [
-  { id: 'count', label: 'Count', needsField: false },
-  { id: 'countDistinct', label: 'Distinct count', needsField: true },
-  { id: 'sum', label: 'Sum', needsField: true },
-  { id: 'avg', label: 'Average', needsField: true },
-  { id: 'min', label: 'Minimum', needsField: true },
-  { id: 'max', label: 'Maximum', needsField: true },
-  { id: 'median', label: 'Median', needsField: true },
-  { id: 'share', label: '% of total', needsField: false }
+  { id: 'count', label: 'Count', needsField: false, group: 'Counts' },
+  { id: 'countDistinct', label: 'Distinct count', needsField: true, group: 'Counts' },
+  { id: 'countFilled', label: 'Filled count', needsField: true, group: 'Counts' },
+  { id: 'countEmpty', label: 'Empty count', needsField: true, group: 'Counts' },
+  { id: 'share', label: '% of total', needsField: false, group: 'Counts' },
+  { id: 'sum', label: 'Sum', needsField: true, group: 'Numbers' },
+  { id: 'avg', label: 'Average', needsField: true, group: 'Numbers' },
+  { id: 'median', label: 'Median', needsField: true, group: 'Numbers' },
+  { id: 'min', label: 'Minimum', needsField: true, group: 'Numbers' },
+  { id: 'max', label: 'Maximum', needsField: true, group: 'Numbers' },
+  { id: 'range', label: 'Range (max − min)', needsField: true, group: 'Numbers' },
+  { id: 'p25', label: '25th percentile', needsField: true, group: 'Distribution' },
+  { id: 'p75', label: '75th percentile', needsField: true, group: 'Distribution' },
+  { id: 'p90', label: '90th percentile', needsField: true, group: 'Distribution' },
+  { id: 'stddev', label: 'Std deviation', needsField: true, group: 'Distribution' },
+  { id: 'mode', label: 'Most common', needsField: true, group: 'Values' },
+  { id: 'first', label: 'First value', needsField: true, group: 'Values' },
+  { id: 'last', label: 'Last value', needsField: true, group: 'Values' },
+  { id: 'uniqueList', label: 'List of values', needsField: true, group: 'Values' },
+  { id: 'earliest', label: 'Earliest', needsField: true, group: 'Dates' },
+  { id: 'latest', label: 'Latest', needsField: true, group: 'Dates' }
 ]
 
+const isFilled = value => value !== null && value !== undefined && value !== ''
+
+// Linear-interpolated percentile, the same definition a spreadsheet's
+// PERCENTILE uses, so a number here matches the number someone checks it
+// against.
+function percentile(nums, fraction) {
+  if (!nums.length) return null
+  const sorted = [...nums].sort((a, b) => a - b)
+  const position = (sorted.length - 1) * fraction
+  const lower = Math.floor(position)
+  const upper = Math.ceil(position)
+  if (lower === upper) return sorted[lower]
+  return round2(sorted[lower] + (sorted[upper] - sorted[lower]) * (position - lower))
+}
+
+const round2 = value => Math.round(value * 1e6) / 1e6
+
+// A missing number is missing, not zero. Number(null) is 0 and Number('') is
+// 0, so without this guard a lead with no revenue recorded counted as a ₹0
+// sale -- dragging every average, median and minimum toward zero and making
+// "min revenue" always read 0 on any real dataset.
 function numbersFrom(rows, field) {
   const out = []
   for (const r of rows) {
-    const n = Number(r[field])
+    const raw = r[field]
+    if (raw === null || raw === undefined || raw === '') continue
+    const n = Number(raw)
     if (Number.isFinite(n)) out.push(n)
   }
   return out
@@ -167,9 +203,12 @@ function numbersFrom(rows, field) {
 // `share` is deliberately not computed here — a percentage of the grand
 // total cannot be known from a single cell's rows, so it is filled in by a
 // second pass once the grand total exists.
+const COUNT_AGGS = new Set(['count', 'countDistinct', 'countFilled', 'countEmpty', 'share'])
+const TEXT_AGGS = new Set(['mode', 'first', 'last', 'uniqueList', 'earliest', 'latest'])
+
 export function aggregate(rows, measure) {
   const { agg = 'count', field } = measure
-  if (!rows.length) return agg === 'count' || agg === 'countDistinct' ? 0 : null
+  if (!rows.length) return COUNT_AGGS.has(agg) ? 0 : TEXT_AGGS.has(agg) ? '' : null
 
   switch (agg) {
     case 'count':
@@ -204,6 +243,58 @@ export function aggregate(rows, measure) {
       if (!nums.length) return null
       const mid = Math.floor(nums.length / 2)
       return nums.length % 2 ? nums[mid] : (nums[mid - 1] + nums[mid]) / 2
+    }
+    case 'countFilled':
+      return rows.filter(r => isFilled(r[field])).length
+    case 'countEmpty':
+      return rows.filter(r => !isFilled(r[field])).length
+    case 'range': {
+      const nums = numbersFrom(rows, field)
+      return nums.length ? Math.max(...nums) - Math.min(...nums) : null
+    }
+    case 'p25': return percentile(numbersFrom(rows, field), 0.25)
+    case 'p75': return percentile(numbersFrom(rows, field), 0.75)
+    case 'p90': return percentile(numbersFrom(rows, field), 0.9)
+    case 'stddev': {
+      const nums = numbersFrom(rows, field)
+      if (!nums.length) return null
+      const mean = nums.reduce((a, b) => a + b, 0) / nums.length
+      return round2(Math.sqrt(nums.reduce((sum, n) => sum + (n - mean) ** 2, 0) / nums.length))
+    }
+    case 'mode': {
+      const counts = new Map()
+      for (const r of rows) {
+        const v = r[field]
+        if (!isFilled(v)) continue
+        counts.set(v, (counts.get(v) || 0) + 1)
+      }
+      if (!counts.size) return ''
+      return [...counts.entries()].sort((a, b) => b[1] - a[1])[0][0]
+    }
+    case 'first': {
+      const found = rows.find(r => isFilled(r[field]))
+      return found ? found[field] : ''
+    }
+    case 'last': {
+      for (let i = rows.length - 1; i >= 0; i--) if (isFilled(rows[i][field])) return rows[i][field]
+      return ''
+    }
+    case 'uniqueList': {
+      const seen = new Set()
+      for (const r of rows) if (isFilled(r[field])) seen.add(String(r[field]))
+      return [...seen].sort().join(', ')
+    }
+    // Dates are ISO strings throughout the dataset, so a string comparison IS
+    // a chronological one -- no parsing, and no timezone to get wrong.
+    case 'earliest': {
+      let best = ''
+      for (const r of rows) { const v = r[field]; if (isFilled(v) && (!best || String(v) < best)) best = String(v) }
+      return best
+    }
+    case 'latest': {
+      let best = ''
+      for (const r of rows) { const v = r[field]; if (isFilled(v) && String(v) > best) best = String(v) }
+      return best
     }
     default:
       return rows.length
@@ -341,8 +432,14 @@ export const EMPTY_SPEC = {
     layout: 'outline',
     showEmpty: false,
     heatmap: false,
+    heatPalette: 'accent',
     stripes: true,
-    compact: false
+    compact: false,
+    theme: 'default',
+    density: 'comfortable',
+    stickyHead: true,
+    barsInCells: false,
+    topN: 0
   }
 }
 

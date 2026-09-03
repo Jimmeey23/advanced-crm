@@ -176,7 +176,7 @@ export default function LeadDrawer() {
     setAutoSyncLeadId(lead.id)
     // Let the drawer paint first — this sync is a background enrichment,
     // not something the initial open should ever wait on.
-    const t = setTimeout(() => doSync({ silent: true }), 400)
+    const t = setTimeout(() => doSync({ silent: true }), 60)
     return () => clearTimeout(t)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lead?.id, lead?.momence, boot?.integrations?.momence])
@@ -297,7 +297,9 @@ export default function LeadDrawer() {
   const doSync = async ({ silent = false } = {}) => {
     setSyncing(true); setSyncError(''); setCandidates(null)
     try {
-      await api.post(`/api/momence/sync/${lead.id}`)
+      // A silent background sync serves from the cached profile; only a
+      // human pressing Sync pays for a full Momence round-trip.
+      await api.post(`/api/momence/sync/${lead.id}`, { fresh: !silent })
       if (!silent) toast('Momence profile synced')
       // A silent background sync only needs to refresh this one lead —
       // bumping the app-wide dataVersion (refreshData) would refetch every
@@ -409,6 +411,11 @@ export default function LeadDrawer() {
             <span className="ld-spine-value">{lead.ai.score}</span>
           </div>
 
+          {/* One scroll container for the whole drawer body: the hero scrolls
+              away with the content, and the tab bar sticks to the top of it,
+              so the panels get the height instead of a header nobody is
+              reading any more. */}
+          <div className="ld-scroll scrollbar-thin">
           {/* ── Profile hero ─────────────────────────────────────────── */}
           <header className="ld-hero">
             <div className="ld-hero-top">
@@ -602,7 +609,7 @@ export default function LeadDrawer() {
           </nav>
 
           {/* ── Tab panels ───────────────────────────────────────────── */}
-          <div className="ld-panels flex-1 overflow-y-auto scrollbar-thin">
+          <div className="ld-panels">
             <div key={tab} id="lead-tab-panel" className="ld-tab-panel" role="tabpanel" aria-labelledby={`lead-tab-${tab}`}>
 
               {tab === 'overview' && (
@@ -1026,6 +1033,7 @@ export default function LeadDrawer() {
               )}
 
             </div>
+          </div>
           </div>
         </aside>
       </div>

@@ -195,12 +195,65 @@ test('a batch is capped so one click cannot fetch ten thousand transactions', as
   assert.equal(result.remaining, 40)
 })
 
-test('a fetched transaction that does not carry this sale item still yields defined discount fields', () => {
-  const enrichment = { 325676800: transactionEnrichment(txn()) }
+test('a transaction carrying no sale items still yields defined discount fields', () => {
+  const enrichment = { 325676800: transactionEnrichment(txn({ sales: [] })) }
   const [enriched] = applyEnrichment([row({ saleItemId: 999999 })], enrichment)
   assert.equal(enriched.enriched, true)
   assert.equal(enriched.discountCode, null)
   assert.equal(enriched.discountAmount, 0)
   // Transaction-level detail is still useful on such a row.
   assert.equal(enriched.paymentSource, 'pos')
+})
+
+// --- the real id mismatch ---------------------------------------------------
+// Momence's payment-transaction endpoint numbers its sale items in a different
+// id space from the total-sales report: a report row's saleItemId 321148386 is
+// the transaction's item 395212. The join therefore cannot use the id at all.
+
+test('a single-item transaction attaches to every row of that transaction', () => {
+  const enrichment = { 325676800: transactionEnrichment(txn()) }
+  const [enriched] = applyEnrichment([row({ saleItemId: 321148386 })], enrichment)
+  assert.equal(enriched.discountCode, 'DIWALI20')
+  assert.equal(enriched.discountAmount, 420)
+})
+
+test('a multi-item transaction matches on item name', () => {
+  const multi = txn()
+  multi.sales[0].items.push({
+    id: 11, saleItemId: 2, itemType: 'product', itemName: 'Grip Socks',
+    quantity: 1, unitPriceExcludingTaxInCurrency: '500', unitTaxAmountInCurrency: '90',
+    discountCode: { type: 'value', code: 'SOCKS50', unitDiscountExcludingTaxInCurrency: '50', unitDiscountTaxAmountInCurrency: '9' }
+  })
+  const enrichment = { 325676800: transactionEnrichment(multi) }
+  const rows = applyEnrichment([
+    row({ id: 1, saleItemId: 900, paymentItem: 'Grip Socks' }),
+    row({ id: 2, saleItemId: 901, paymentItem: 'Studio Single Class' })
+  ], enrichment)
+  assert.equal(rows[0].discountCode, 'SOCKS50')
+  assert.equal(rows[1].discountCode, 'DIWALI20')
+})
+
+test('when two items share a name, the closest sale value wins', () => {
+  const multi = txn()
+  multi.sales[0].items[0].quantity = 1
+  multi.sales[0].items[0].discountCode = null
+  multi.sales[0].items.push({
+    id: 12, saleItemId: 3, itemType: 'membership', itemName: 'Studio Single Class',
+    quantity: 1, unitPriceExcludingTaxInCurrency: '2000', unitTaxAmountInCurrency: '100',
+    discountCode: { type: 'value', code: 'BIGONE', unitDiscountExcludingTaxInCurrency: '100', unitDiscountTaxAmountInCurrency: '5' }
+  })
+  const enrichment = { 325676800: transactionEnrichment(multi) }
+  const rows = applyEnrichment([
+    row({ id: 1, saleItemId: 900, paymentItem: 'Studio Single Class', paymentValue: 2100 }),
+    row({ id: 2, saleItemId: 901, paymentItem: 'Studio Single Class', paymentValue: 1050 })
+  ], enrichment)
+  assert.equal(rows[0].discountCode, 'BIGONE')
+  assert.equal(rows[1].discountCode, null)
+})
+
+test('an unmatchable row keeps transaction detail and empty item detail', () => {
+  const enrichment = { 325676800: transactionEnrichment(txn({ sales: [] })) }
+  const [enriched] = applyEnrichment([row()], enrichment)
+  assert.equal(enriched.paymentSource, 'pos')
+  assert.equal(enriched.discountAmount, 0)
 })

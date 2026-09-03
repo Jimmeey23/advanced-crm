@@ -32,6 +32,29 @@ function decodeDataset(payload) {
 }
 
 const uid = (p) => `${p}_${Math.random().toString(36).slice(2, 8)}`
+// Aggregations that only make sense over a numeric column; everything else
+// (counts, first/last, lists, earliest/latest) accepts any field.
+const NUMERIC_AGGS = new Set(['sum', 'avg', 'median', 'min', 'max', 'range', 'p25', 'p75', 'p90', 'stddev'])
+
+const THEMES = [
+  { id: 'default', label: 'Default' },
+  { id: 'grid', label: 'Grid lines' },
+  { id: 'minimal', label: 'Minimal' },
+  { id: 'contrast', label: 'High contrast' }
+]
+
+const DENSITIES = [
+  { id: 'comfortable', label: 'Comfortable' },
+  { id: 'cosy', label: 'Cosy' },
+  { id: 'compact', label: 'Compact' }
+]
+
+const HEAT_PALETTES = [
+  { id: 'accent', label: 'Accent' },
+  { id: 'heat', label: 'Cool → warm' },
+  { id: 'diverging', label: 'Diverging (± mid)' }
+]
+
 const LAYOUTS = [
   { id: 'outline', label: 'Outline', hint: 'Each level on its own line, indented' },
   { id: 'compact', label: 'Compact', hint: 'Levels share one column' },
@@ -405,7 +428,13 @@ function MeasureZone({ measures, fields, onDrop, onRemove, onPatch, onAdd }) {
                 <label>
                   <span>Aggregate</span>
                   <select className="input" value={m.agg} onChange={e => onPatch(i, { agg: e.target.value })}>
-                    {AGGREGATORS.map(a => <option key={a.id} value={a.id}>{a.label}</option>)}
+                    {[...new Set(AGGREGATORS.map(a => a.group || 'Other'))].map(group => (
+                      <optgroup key={group} label={group}>
+                        {AGGREGATORS.filter(a => (a.group || 'Other') === group).map(a => (
+                          <option key={a.id} value={a.id}>{a.label}</option>
+                        ))}
+                      </optgroup>
+                    ))}
                   </select>
                 </label>
                 {agg?.needsField && (
@@ -413,8 +442,11 @@ function MeasureZone({ measures, fields, onDrop, onRemove, onPatch, onAdd }) {
                     <span>Of field</span>
                     <select className="input" value={m.field || ''} onChange={e => onPatch(i, { field: e.target.value })}>
                       <option value="">Choose a field</option>
-                      {fields.filter(f => f.type === 'number' || m.agg === 'countDistinct').map(f => (
-                        <option key={f.field} value={f.field}>{f.label}</option>
+                      {/* Numeric aggregations need a number; counting, listing
+                          and date aggregations work on any column, so every
+                          field is offered for those. */}
+                      {fields.filter(f => (NUMERIC_AGGS.has(m.agg) ? f.type === 'number' : true)).map(f => (
+                        <option key={f.field} value={f.field}>{f.label}{f.type !== 'number' ? ` · ${f.type}` : ''}</option>
                       ))}
                     </select>
                   </label>
@@ -510,8 +542,9 @@ function OptionsBar({ options, setOption }) {
     ['grandTotalRow', 'Grand total row'],
     ['grandTotalCol', 'Total column'],
     ['stripes', 'Banded rows'],
-    ['heatmap', 'Heatmap'],
-    ['compact', 'Compact rows']
+    ['stickyHead', 'Sticky header'],
+    ['barsInCells', 'In-cell bars'],
+    ['showEmpty', 'Show empty groups']
   ]
   return (
     <div className="pivot-options">
@@ -520,6 +553,37 @@ function OptionsBar({ options, setOption }) {
         <select className="input" value={options.layout} onChange={e => setOption('layout', e.target.value)}>
           {LAYOUTS.map(l => <option key={l.id} value={l.id} title={l.hint}>{l.label}</option>)}
         </select>
+      </label>
+      <label className="pivot-option-select">
+        <span>Theme</span>
+        <select className="input" value={options.theme || 'default'} onChange={e => setOption('theme', e.target.value)}>
+          {THEMES.map(t => <option key={t.id} value={t.id}>{t.label}</option>)}
+        </select>
+      </label>
+      <label className="pivot-option-select">
+        <span>Density</span>
+        <select className="input" value={options.density || (options.compact ? 'compact' : 'comfortable')} onChange={e => setOption('density', e.target.value)}>
+          {DENSITIES.map(d => <option key={d.id} value={d.id}>{d.label}</option>)}
+        </select>
+      </label>
+      <label className="pivot-option-select">
+        <span>Heatmap</span>
+        <select className="input" value={options.heatmap ? (options.heatPalette || 'accent') : ''} onChange={e => {
+          setOption('heatmap', Boolean(e.target.value))
+          if (e.target.value) setOption('heatPalette', e.target.value)
+        }}>
+          <option value="">Off</option>
+          {HEAT_PALETTES.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
+        </select>
+      </label>
+      <label className="pivot-option-select">
+        <span>Top N rows</span>
+        <input
+          className="input" type="number" min="0" placeholder="All"
+          value={options.topN || ''}
+          onChange={e => setOption('topN', Number(e.target.value) || 0)}
+          title="Keep only the highest-ranking rows by the first value"
+        />
       </label>
       {toggles.map(([key, label]) => (
         <label key={key} className="pivot-check">
@@ -537,7 +601,21 @@ function OptionsBar({ options, setOption }) {
 
 function PivotTable({ pivot, spec, onToggle }) {
   if (!pivot) return <Empty icon={<Table2 size={20} />} title="No data to pivot" subtitle="Nothing matched the current filters." />
-  const { body, leaves, headerLevels, measures, grandCells, grandTotal, rowDims } = pivot
+  const { leaves, headerLevels, measures, grandCells, grandTotal, rowDims } = pivot
+  // Top N keeps the highest-ranking leaf rows by the first value, so a report
+  // of "the 10 studios that matter" does not need a filter per studio. Group
+  // and subtotal rows are always kept -- dropping them would leave orphans.
+  const body = (() => {
+    const limit = Number(pivot.spec?.options?.topN || spec.options.topN) || 0
+    if (!limit) return pivot.body
+    const scored = pivot.body
+      .filter(row => row.kind !== 'subtotal')
+      .map(row => ({ row, score: row.total?.[0] ?? row.cells?.[0]?.[0] ?? 0 }))
+      .sort((a, b) => (Number(b.score) || 0) - (Number(a.score) || 0))
+      .slice(0, limit)
+    const keep = new Set(scored.map(entry => entry.row))
+    return pivot.body.filter(row => row.kind === 'subtotal' || keep.has(row))
+  })()
   const { options } = spec
   const tabular = options.layout === 'tabular'
   const labelCols = tabular ? Math.max(1, rowDims.length) : 1
@@ -561,11 +639,40 @@ function PivotTable({ pivot, spec, onToggle }) {
     const r = ranges[mi]
     if (!r || r.max === r.min) return undefined
     const t = (value - r.min) / (r.max - r.min)
+    const palette = options.heatPalette || 'accent'
+    if (palette === 'heat') {
+      // One hue per end, never a rainbow: cool for the low end, warm for the
+      // high, with the strength carrying the magnitude.
+      const hue = t < 0.5 ? 'var(--pivot-heat-low)' : 'var(--pivot-heat-high)'
+      const strength = Math.round(Math.abs(t - 0.5) * 2 * 30)
+      return { background: `color-mix(in srgb, ${hue} ${strength}%, transparent)` }
+    }
+    if (palette === 'diverging') {
+      const mid = (r.max + r.min) / 2
+      const span = Math.max(r.max - mid, mid - r.min) || 1
+      const signed = (value - mid) / span
+      const hue = signed >= 0 ? 'var(--pivot-heat-high)' : 'var(--pivot-heat-low)'
+      return { background: `color-mix(in srgb, ${hue} ${Math.round(Math.abs(signed) * 30)}%, transparent)` }
+    }
     return { background: `color-mix(in srgb, var(--accent) ${Math.round(t * 26)}%, transparent)` }
   }
 
+  // An in-cell bar reads the same magnitude as the heatmap but keeps the
+  // number legible on any background, which matters in the printed export.
+  const bar = (value, mi) => {
+    if (!options.barsInCells || typeof value !== 'number') return null
+    const r = ranges[mi]
+    if (!r || r.max <= 0) return null
+    const t = Math.max(0, value) / r.max
+    return <span className="pivot-cell-bar" style={{ width: `${Math.round(t * 100)}%` }} aria-hidden="true" />
+  }
+
   return (
-    <div className={`pivot-table-wrap ${options.compact ? 'is-compact' : ''} ${options.stripes ? 'is-striped' : ''}`}>
+    <div
+      className={`pivot-table-wrap ${options.stripes ? 'is-striped' : ''} ${options.stickyHead ? 'is-sticky' : ''}`}
+      data-theme-style={options.theme || 'default'}
+      data-density={options.density || (options.compact ? 'compact' : 'comfortable')}
+    >
       <table className="pivot-table">
         <thead>
           {headerLevels.map((level, li) => (
@@ -617,7 +724,8 @@ function PivotTable({ pivot, spec, onToggle }) {
                   )}
                 {row.cells.map((cell, ci) => cell.map((value, mi) => (
                   <td key={`${ci}-${mi}`} className="pivot-cell" style={heat(value, mi)}>
-                    {formatValue(value, measures[mi].format)}
+                    {bar(value, mi)}
+                    <span className="pivot-cell-value">{formatValue(value, measures[mi].format)}</span>
                   </td>
                 )))}
                 {options.grandTotalCol && row.total.map((value, mi) => (

@@ -23,6 +23,32 @@ import { Modal, ModalHeader } from '../ui.jsx'
 import LeadsIntegrationRail from '../components/LeadsIntegrationRail.jsx'
 
 const COLUMNS_KEY = 'p57_leads_columns_v1'
+
+// Lifecycle labels derived server-side from the Momence sales cache
+// (server/salesLeadLink.js). The tone is fixed per label, so a filter that
+// removes rows never re-colours the ones that remain.
+const CONVERSION_TONES = {
+  'Repeat customer': 'good',
+  Converted: 'good',
+  'Trial purchase': 'warn',
+  'Retail only': 'warn',
+  Lapsed: 'bad',
+  Refunded: 'bad',
+  'Existing customer': 'neutral',
+  'Not converted': 'neutral'
+}
+
+function ConversionBadge({ label, sales }) {
+  const text = label || 'Not converted'
+  const detail = sales?.purchaseCount
+    ? `${sales.purchaseCount} purchase${sales.purchaseCount === 1 ? '' : 's'} · ${money(sales.lifetimeValue)}${sales.lastPurchaseDate ? ` · last ${fmtDate(sales.lastPurchaseDate)}` : ''}`
+    : 'No purchases on record'
+  return (
+    <span className="table-badge" data-tone={CONVERSION_TONES[text] || 'neutral'} title={`${text} — ${detail}`}>
+      {text}
+    </span>
+  )
+}
 const followUpText = value => {
   const text = String(value ?? '').trim()
   return text === '-' || text === '\u2014' ? '' : text
@@ -1881,6 +1907,16 @@ function TableGrid({ items, groups = null, collapsed = {}, toggleGroup, boot, lo
                   }
                   const val = getColumnValue(c, l, lookup)
                   const formatted = formatColumnValue(val, c)
+                  // The conversion column is a lifecycle state, not a string:
+                  // it reads as a badge in the same fixed dimensions every
+                  // other in-table badge uses.
+                  if (c.field === 'conversionLabel') {
+                    return (
+                      <td key={c.id} className={`px-4 ${py} text-sm`}>
+                        <ConversionBadge label={val} sales={l.sales} />
+                      </td>
+                    )
+                  }
                   return (
                     <td key={c.id} className={`px-4 ${py} text-sm ${c.type === 'number' || c.type === 'currency' || c.type === 'percent' ? 'mono text-slate-300' : 'text-slate-400'}`}>
                       {formatted === '—' ? <EmptyCell /> : <span className="table-cell-fit" title={String(formatted ?? '')} style={{ maxWidth: '100%' }}>{formatted}</span>}

@@ -15,6 +15,7 @@ import * as momence from './momence.js'
 import { createMomenceDashboardClient } from './momenceDashboardAuth.js'
 import { createDiscountCodeHandlers, createDiscountCodeService } from './momenceDiscountCodes.js'
 import { createSalesService, registerSalesRoutes } from './sales.js'
+import { indexSalesByMember, leadSalesFacts, CONVERSION_LABELS } from './salesLeadLink.js'
 import * as gpt from './gpt.js'
 import * as respondio from './respondio.js'
 import * as respondioInternal from './respondioInternal.js'
@@ -788,6 +789,24 @@ function applyFilters(list, q) {
   return out
 }
 
+// The sales index behind the Leads table's purchase columns. Rebuilt only when
+// the cache has actually changed -- indexing 24k rows on every request would
+// dominate the cost of rendering a page of 50 leads. (salesService is defined
+// further down; this only runs inside a request, long after that.)
+let salesIndexCache = { rows: -1, index: null }
+function currentSalesIndex() {
+  const rows = salesService.store.status().rows
+  if (salesIndexCache.rows !== rows) {
+    salesIndexCache = { rows, index: indexSalesByMember(salesService.rows({}).rows) }
+  }
+  return salesIndexCache.index
+}
+
+// One lead's purchase history, folded onto the record the table renders.
+function withSalesFacts(lead, index) {
+  return { ...lead, sales: leadSalesFacts(lead, index) }
+}
+
 app.get('/api/leads', (req, res) => {
   let list = [...db.leads]
   list = applyFilters(list, req.query)
@@ -817,13 +836,18 @@ app.get('/api/leads', (req, res) => {
   const total = list.length
   const sliced = list.slice(page * pageSize, page * pageSize + pageSize)
 
+  const salesIndex = currentSalesIndex()
   res.json({
-    items: enrichAll(sliced, db).map(withStripePayment),
+    items: enrichAll(sliced, db).map(withStripePayment).map(lead => withSalesFacts(lead, salesIndex)),
     total,
     page,
     pageSize
   })
 })
+
+// The labels and their tones, so the table, the filters and the pivot all
+// describe a lifecycle the same way.
+app.get('/api/leads/conversion-labels', (req, res) => res.json({ labels: CONVERSION_LABELS }))
 
 // Value distribution for one column, under the current filters. The column
 // header's breakdown popover used to get this by fetching
@@ -2730,11 +2754,14 @@ app.post('/api/momence/sync/:leadId', async (req, res) => {
         return res.status(404).json({ ok: false, error: `No Momence member found matching ${lead.email || lead.phone || 'this lead'}.` })
       }
     }
-    // A user-clicked refresh bypasses the webhook-fed sales cache: it is the
-    // one path whose whole purpose is to reconcile with Momence.
+    // A user-clicked refresh bypasses the caches -- reconciling with Momence
+    // is its whole purpose. The drawer's own background sync passes
+    // fresh:false and is served from cache, which is what makes opening a
+    // lead feel instant.
+    const fresh = req.body?.fresh !== false
     let profile
     try {
-      profile = await momence.syncLeadMomence(db, lead, { fresh: true })
+      profile = await momence.syncLeadMomence(db, lead, { fresh })
     } catch (syncError) {
       // Imported member IDs can become stale or belong to another Momence host.
       // On a direct-profile 404, re-resolve by the lead's current contact details.
@@ -2749,7 +2776,7 @@ app.post('/api/momence/sync/:leadId', async (req, res) => {
         }
         return res.status(404).json({ ok: false, error: 'The saved Momence member no longer exists for this host, and no current member matched this lead. Relink the member.' })
       }
-      profile = await momence.syncLeadMomence(db, lead, { fresh: true })
+      profile = await momence.syncLeadMomence(db, lead, { fresh })
     }
     lead.lastActivityAt = nowIso()
     markDirty(lead.id)
@@ -2798,6 +2825,22 @@ const PIVOT_FIELDS = [
   { field: 'purchasesMade', label: 'Purchases', type: 'number', measure: true },
   { field: 'score', label: 'Lead score', type: 'number', measure: true },
   { field: 'missedFollowUps', label: 'Missed follow-ups', type: 'number', measure: true },
+  // ---- Momence sales, joined per lead (server/salesLeadLink.js) ----
+  { field: 'conversionLabel', label: 'Conversion (sales)', type: 'text' },
+  { field: 'firstPurchaseItem', label: 'First item bought', type: 'text' },
+  { field: 'lastPurchaseItem', label: 'Last item bought', type: 'text' },
+  { field: 'itemGroups', label: 'What they bought', type: 'text' },
+  { field: 'discountCodes', label: 'Discount codes', type: 'text' },
+  { field: 'purchaseLocations', label: 'Bought at', type: 'text' },
+  { field: 'lastPurchaseDate', label: 'Last purchase', type: 'date' },
+  { field: 'lifetimeValue', label: 'Lifetime value', type: 'number', measure: true, currency: true },
+  { field: 'averageOrderValue', label: 'Avg order value', type: 'number', measure: true, currency: true },
+  { field: 'purchaseCount', label: 'Purchases (sales)', type: 'number', measure: true },
+  { field: 'discountTotal', label: 'Discount given', type: 'number', measure: true, currency: true },
+  { field: 'refundedTotal', label: 'Refunded', type: 'number', measure: true, currency: true },
+  { field: 'paidInCredits', label: 'Paid in credits', type: 'number', measure: true, currency: true },
+  { field: 'daysToConvert', label: 'Days to convert', type: 'number', measure: true },
+  { field: 'daysSincePurchase', label: 'Days since purchase', type: 'number', measure: true },
   { field: 'leadId', label: 'Lead id', type: 'text', hidden: true }
 ]
 
@@ -2808,10 +2851,12 @@ app.get('/api/pivot/dataset', (req, res) => {
   const asnById = new Map(db.associates.map(a => [a.id, a.name]))
   const scope = req.authUser?.locationIds
 
+  const salesIndex = currentSalesIndex()
   const rows = []
   for (const lead of db.leads) {
     if (scope && !scope.includes(lead.locationId)) continue
     const followUps = Array.isArray(lead.followUps) ? lead.followUps : []
+    const sales = leadSalesFacts(lead, salesIndex)
     rows.push({
       stage: lead.stage || '',
       status: lead.status || '',
@@ -2836,7 +2881,22 @@ app.get('/api/pivot/dataset', (req, res) => {
       visits: Number(lead.visits) || 0,
       purchasesMade: Number(lead.purchasesMade) || 0,
       score: Number(lead.ai?.score ?? lead.score) || 0,
-      missedFollowUps: followUps.filter(f => f && f.done === false && f.date && f.date !== '-').length
+      missedFollowUps: followUps.filter(f => f && f.done === false && f.date && f.date !== '-').length,
+      conversionLabel: sales.conversionLabel || '',
+      firstPurchaseItem: sales.firstPurchaseItem || '',
+      lastPurchaseItem: sales.lastPurchaseItem || '',
+      itemGroups: sales.itemGroups || '',
+      discountCodes: sales.discountCodes || '',
+      purchaseLocations: sales.purchaseLocations || '',
+      lastPurchaseDate: sales.lastPurchaseDate || '',
+      lifetimeValue: sales.lifetimeValue || 0,
+      averageOrderValue: sales.averageOrderValue || 0,
+      purchaseCount: sales.purchaseCount || 0,
+      discountTotal: sales.discountTotal || 0,
+      refundedTotal: sales.refundedTotal || 0,
+      paidInCredits: sales.paidInCredits || 0,
+      daysToConvert: sales.daysToConvert ?? 0,
+      daysSincePurchase: sales.daysSinceLastPurchase ?? 0
     })
   }
   // The payload is columnar, not a list of row objects. With 23k rows and
@@ -3003,11 +3063,51 @@ app.put('/api/lists', (req, res) => {
 // (e.g. two overlapping Google Sheets syncs racing before the fixed lock
 // existed). `dryRun` (default) reports what WOULD be removed without
 // touching anything, so an admin can sanity-check the count first.
-app.post('/api/leads/dedupe', (req, res) => {
-  const dryRun = req.body?.dryRun !== false
+// Shared by the manual endpoint and the automatic pass below, so a scheduled
+// run can never disagree with what the admin screen previewed.
+function planDedupe(leads) {
   // clusterDuplicates unions leads transitively (A~B by email, B~C by
   // phone+fuzzy-name) so the whole chain lands in one group, not split
   // across separate email/phone buckets like the old hash-by-one-key pass.
+  const rawGroups = clusterDuplicates(leads)
+  const toRemove = []
+  const groups = []
+  for (const group of rawGroups) {
+    // Oldest wins: it carries the original source attribution, and every
+    // follow-up logged against it.
+    group.sort((a, b) => String(a.createdAt || '').localeCompare(String(b.createdAt || '')))
+    toRemove.push(...group.slice(1))
+    groups.push(group)
+  }
+  return { toRemove, groups }
+}
+
+// Runs on boot and on a timer. Imports, sheet syncs and the inbound webhook
+// all create leads independently, so duplicates appear continuously rather
+// than only when someone remembers to press the button.
+let autoDedupeRunning = false
+function runAutoDedupe({ reason = 'scheduled' } = {}) {
+  if (autoDedupeRunning || !db?.leads?.length) return { removed: 0, skipped: true }
+  autoDedupeRunning = true
+  try {
+    const { toRemove } = planDedupe(db.leads)
+    if (!toRemove.length) return { removed: 0 }
+    const removeIds = new Set(toRemove.map(lead => lead.id))
+    db.leads = db.leads.filter(lead => !removeIds.has(lead.id))
+    for (const id of removeIds) markDeleted(id)
+    save()
+    log('lead', `Auto-dedupe (${reason}): removed ${removeIds.size} duplicate lead(s)`)
+    return { removed: removeIds.size }
+  } catch (error) {
+    console.warn(`[physique57-leads] auto-dedupe failed: ${error.message}`)
+    return { removed: 0, error: error.message }
+  } finally {
+    autoDedupeRunning = false
+  }
+}
+
+app.post('/api/leads/dedupe', (req, res) => {
+  const dryRun = req.body?.dryRun !== false
   const rawGroups = clusterDuplicates(db.leads)
 
   const toRemove = []
@@ -5132,6 +5232,10 @@ async function start() {
   console.log(`[physique57-leads] mailtrap: ${mailer.isConfigured(db) ? 'configured' : 'not configured'}`)
   console.log(`[physique57-leads] momence configured: ${momence.isConfigured(db)}`)
   salesService.start()
+  // Deduplicate on every run: once shortly after boot (after the sheet sync
+  // has had a chance to land), then hourly.
+  setTimeout(() => runAutoDedupe({ reason: 'startup' }), 45000)
+  setInterval(() => runAutoDedupe({ reason: 'hourly' }), 60 * 60 * 1000)
   setTimeout(() => syncMomenceLifecycleEvidence().catch(error => console.warn(`[physique57-leads] Momence evidence sync skipped: ${error.message}`)), 15000)
   setInterval(() => syncMomenceLifecycleEvidence().catch(error => console.warn(`[physique57-leads] Momence evidence sync failed: ${error.message}`)), 6 * 60 * 60 * 1000)
 }

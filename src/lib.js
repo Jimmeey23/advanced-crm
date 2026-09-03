@@ -222,16 +222,40 @@ export function baseColumnValue(id, l, lookup) {
     case 'status': return l.status || ''
     case 'statusGroup': return l.statusGroup || ''
     case 'trialDate': return l.trialDate || l.momenceEvidence?.trialDate || ''
-    case 'firstPurchaseDate': return l.firstPurchaseDate || l.momenceEvidence?.firstPurchaseDate || l.convertedAt || ''
+    // The member's first PAID purchase of a service, from the sales cache:
+    // retail, money-credit top-ups, newcomer 2-for-1s and zero-value comps are
+    // not first purchases. The stored fields are only a fallback for a lead
+    // whose sales history has not been cached yet.
+    case 'firstPurchaseDate': return l.sales?.firstPaidPurchaseDate || l.firstPurchaseDate || l.momenceEvidence?.firstPurchaseDate || ''
+    case 'firstPurchaseItem': return l.sales?.firstPaidPurchaseItem || ''
     case 'fullName': return l.fullName || ''
     case 'email': return l.email || ''
+    // ---- Momence sales (server folds these on as `lead.sales`) ----
+    case 'conversionLabel': return l.sales?.conversionLabel || 'Not converted'
+    case 'purchaseCount': return l.sales?.purchaseCount ?? 0
+    case 'lifetimeValue': return l.sales?.lifetimeValue ?? 0
+    case 'averageOrderValue': return l.sales?.averageOrderValue ?? 0
+    case 'lastPurchaseDate': return l.sales?.lastPurchaseDate || ''
+    case 'firstPurchaseItem': return l.sales?.firstPurchaseItem || ''
+    case 'lastPurchaseItem': return l.sales?.lastPurchaseItem || ''
+    case 'itemGroups': return l.sales?.itemGroups || ''
+    case 'discountTotal': return l.sales?.discountTotal ?? 0
+    case 'discountCodes': return l.sales?.discountCodes || ''
+    case 'refundedTotal': return l.sales?.refundedTotal ?? 0
+    case 'paidInCredits': return l.sales?.paidInCredits ?? 0
+    case 'daysToConvert': return l.sales?.daysToConvert ?? null
+    case 'daysSincePurchase': return l.sales?.daysSinceLastPurchase ?? null
+    case 'purchaseLocations': return l.sales?.purchaseLocations || ''
     default: return ''
   }
 }
 
 const FORMULA_CONTEXT_FIELDS = [
   'fullName', 'phone', 'email', 'source', 'owner', 'location', 'score', 'risk',
-  'valueEstimate', 'classType', 'missedCount', 'lastOutreachDays', 'created', 'remarks', 'stage', 'status', 'trialDate', 'firstPurchaseDate'
+  'valueEstimate', 'classType', 'missedCount', 'lastOutreachDays', 'created', 'remarks', 'stage', 'status', 'trialDate', 'firstPurchaseDate',
+  'conversionLabel', 'purchaseCount', 'lifetimeValue', 'averageOrderValue', 'lastPurchaseDate', 'firstPurchaseItem',
+  'firstPurchaseItem', 'lastPurchaseItem', 'itemGroups', 'discountTotal', 'discountCodes', 'refundedTotal', 'paidInCredits',
+  'daysToConvert', 'daysSincePurchase', 'purchaseLocations'
 ]
 
 export function buildFormulaContext(l, lookup) {

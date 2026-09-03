@@ -3,7 +3,7 @@
 // month in progress is the only one that is always re-fetched.
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { monthsInRange, planFetch } from './salesCachePlan.js'
+import { monthsInRange, planFetch, dedupeRows } from './salesCachePlan.js'
 
 test('monthsInRange lists every month a range touches, oldest first', () => {
   assert.deepEqual(monthsInRange('2026-07-15', '2026-09-02'), ['2026-07', '2026-08', '2026-09'])
@@ -58,4 +58,35 @@ test('a forced refresh re-fetches every month in the range', () => {
 test('fetches are ordered newest first, so the visible end of the table fills in first', () => {
   const plan = planFetch({ months: ['2026-01', '2026-02', '2026-03'], cached: [], currentMonth: '2026-08' })
   assert.deepEqual(plan.fetch, ['2026-03', '2026-02', '2026-01'])
+})
+
+test('a cached month is re-fetched once a batch of discount detail has landed', () => {
+  const base = { months: ['2026-06'], cached: ['2026-06'], currentMonth: '2026-08', enrichmentThreshold: 200 }
+  // 40 new transactions enriched since it was cached: not worth a refetch.
+  assert.deepEqual(planFetch({ ...base, enrichedNow: 1040, enrichedByMonth: { '2026-06': 1000 } }).fetch, [])
+  // 400 new: the month's rows are materially out of date.
+  assert.deepEqual(planFetch({ ...base, enrichedNow: 1400, enrichedByMonth: { '2026-06': 1000 } }).fetch, ['2026-06'])
+})
+
+test('a month cached before enrichment counts were tracked is not treated as stale', () => {
+  const plan = planFetch({ months: ['2026-06'], cached: ['2026-06'], currentMonth: '2026-08', enrichedNow: 5000, enrichedByMonth: {} })
+  assert.deepEqual(plan.fetch, [])
+})
+
+test('dedupeRows keeps one row per id, preferring the later copy', () => {
+  const rows = dedupeRows([
+    { id: 'a', paidInCurrency: 100 },
+    { id: 'b', paidInCurrency: 50 },
+    { id: 'a', paidInCurrency: 120 }
+  ])
+  assert.equal(rows.length, 2)
+  assert.equal(rows.find(r => r.id === 'a').paidInCurrency, 120)
+})
+
+test('dedupeRows treats numeric and string ids as the same row', () => {
+  assert.equal(dedupeRows([{ id: 1 }, { id: '1' }]).length, 1)
+})
+
+test('dedupeRows copes with nothing', () => {
+  assert.deepEqual(dedupeRows(), [])
 })

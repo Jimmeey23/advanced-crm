@@ -94,14 +94,40 @@ const EMPTY_ITEM = Object.freeze({
   discountAmount: 0, discountAmountExcludingTax: 0, grossBeforeDiscount: 0
 })
 
+const clean = value => String(value || '').replace(/\s+/g, ' ').trim().toLowerCase()
+
+// The two endpoints number sale items in DIFFERENT id spaces -- the report's
+// saleItemId 321148386 is the transaction's item 395212 -- so the id cannot be
+// the join key. What is stable across both is the item's name and what was
+// charged for it, and the overwhelmingly common case is a transaction with a
+// single item, where no matching is needed at all.
+export function matchSaleItem(row, entry) {
+  const items = Object.values(entry?.bySaleItem || {})
+  if (!items.length) return null
+  if (items.length === 1) return items[0]
+
+  const wanted = clean(row.paymentItem)
+  const named = items.filter(item => clean(item.itemNameFull) === wanted)
+  const candidates = named.length ? named : items
+  if (candidates.length === 1) return candidates[0]
+
+  // Several lines with the same name: take the one whose charged value is
+  // nearest this row's, which is what distinguishes a 1x from a 3x of the same
+  // product on one bill.
+  const target = Number(row.paymentValue) || 0
+  return candidates
+    .map(item => ({ item, distance: Math.abs((item.quantity || 1) * ((item.unitPriceExcludingTax || 0) + (item.unitTaxAmount || 0)) - target) }))
+    .sort((a, b) => a.distance - b.distance)[0].item
+}
+
 export function applyEnrichment(rows, enrichmentById = {}) {
   return (rows || []).map(row => {
     const entry = enrichmentById[String(row.paymentTransactionId)]
     if (!entry) return { ...row, ...EMPTY_ITEM, enriched: false }
-    // A transaction can be fetched without carrying this exact sale item (a
+    // A transaction can be fetched without carrying any usable sale item (a
     // refund row, a sale item Momence has since removed): the transaction-level
     // detail still applies, the per-item detail is simply empty.
-    const item = { ...EMPTY_ITEM, ...(entry.bySaleItem?.[String(row.saleItemId)] || {}) }
+    const item = { ...EMPTY_ITEM, ...(matchSaleItem(row, entry) || {}) }
     const primary = row.isPrimarySplit !== false
     const money = {}
     for (const field of MONEY_FIELDS) money[field] = primary ? (item[field] || 0) : 0

@@ -65,8 +65,24 @@ function detailFields(details) {
 
 export function flattenSalesRows(items, { market = 'mumbai' } = {}) {
   const rows = []
+  // Two kinds of repetition come out of the live report and both have to be
+  // collapsed here, before anything sums a column:
+  //
+  //  * the same sale item listed twice in one report run;
+  //  * the same payment split listed twice under one sale item -- which would
+  //    count its money a second time.
+  //
+  // What is NOT a duplicate: one split paying for several sale items (four
+  // single classes on one card charge). Those share a paymentTransactionItemId
+  // but are four real sales, so row identity is the pair, never the split
+  // alone.
+  const seenSaleItems = new Set()
+  const seenRowIds = new Set()
   for (const item of items || []) {
     if (!item?.paymentDate) continue
+    const saleItemKey = `${item.saleItemId}:${item.paymentTransactionId}`
+    if (seenSaleItems.has(saleItemKey)) continue
+    seenSaleItems.add(saleItemKey)
     const month = monthKey(item.paymentDate)
     const splits = item.transactionItems?.length
       ? item.transactionItems
@@ -83,9 +99,16 @@ export function flattenSalesRows(items, { market = 'mumbai' } = {}) {
           paymentMethodWeight: 1
         }]
 
-    splits.forEach((split, index) => {
-      rows.push({
-        id: split.paymentTransactionItemId ?? `sale:${item.saleItemId}`,
+    let kept = 0
+    const emitted = []
+    splits.forEach(split => {
+      const id = `${item.saleItemId}:${split.paymentTransactionItemId ?? 'sale'}`
+      if (seenRowIds.has(id)) return
+      seenRowIds.add(id)
+      const index = kept
+      kept += 1
+      emitted.push({
+        id,
         market,
         month,
 
@@ -131,12 +154,15 @@ export function flattenSalesRows(items, { market = 'mumbai' } = {}) {
         // sale, not to each of its splits. Aggregations that must not multiply
         // them count only the primary split.
         isPrimarySplit: index === 0,
-        splitCount: splits.length,
+        // Filled in below, once the duplicates have been dropped.
+        splitCount: 0,
 
         // --- polymorphic details -------------------------------------------
         ...detailFields(item.details)
       })
     })
+    for (const row of emitted) row.splitCount = kept
+    rows.push(...emitted)
   }
   return rows
 }
