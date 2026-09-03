@@ -10681,24 +10681,28 @@ html .stage-badge-wrap .stage-badge-select option { color: var(--text); backgrou
 /* No caret: 25 rows of carets is noise, and the whole capsule is the hit area. */
 html .stage-badge-wrap::after { display: none !important; }
 
-/* Compact density collapses to the dot alone — same 22px box, so the
-   column keeps its rhythm when the label goes away. */
+/* Compact keeps the stage NAME. It used to collapse to a bare icon, but eight
+   stages cannot be told apart by glyph alone — every row had to be hovered to
+   read one. The space comes back from padding and type size instead. */
 html .stage-badge-wrap.is-compact {
-  width: var(--stage-h);
-  justify-content: center;
-  padding: 0;
-  gap: 0;
+  width: auto;
+  justify-content: flex-start;
+  padding: 0 8px 0 4px;
+  gap: 5px;
 }
-html .stage-badge-wrap.is-compact .stage-badge-select { display: none; }
-/* Compact keeps the icon at full size and drops the disc — at 24px the capsule
-   IS the disc, so a second ring inside it reads as a target. */
+html .stage-badge-wrap.is-compact .stage-badge-select {
+  display: inline-flex;
+  font-size: 10.5px;
+  letter-spacing: -.01em;
+}
 html .stage-badge-wrap.is-compact .stage-badge-icon {
-  width: 100%;
-  height: 100%;
+  width: 16px;
+  height: 16px;
   margin: 0;
+  flex: 0 0 16px;
   background: transparent;
 }
-html .stage-badge-wrap.is-compact .stage-badge-icon > svg { width: 12px; height: 12px; }
+html .stage-badge-wrap.is-compact .stage-badge-icon > svg { width: 11px; height: 11px; }
 
 /* ---------- standalone pill (drawer, pipeline, kanban cards) ---------- */
 html .stage-badge:not(select) {
@@ -11235,3 +11239,17 @@ html .pipeline-stage-badge {
 /* The hero is content now, so it needs a floor under it rather than the
    drawer's own border doing the work. */
 .ld-shell .ld-hero { border-bottom: 0; }
+
+/* ── Name cell: one strong element ────────────────────────────────────────
+   The lead's name is the row's anchor and the only thing set in strong ink;
+   the source and owner beneath it are context, so they stay muted and light
+   at every density and in both themes. */
+.leads-data-table .lead-name { font-weight: 650; color: var(--text); }
+.leads-data-table .lead-compact-meta {
+  color: var(--text-mute);
+  font-weight: 450;
+  font-size: 10.5px;
+}
+.leads-data-table .lead-compact-meta span { color: inherit; font-weight: inherit; }
+.leads-data-table .lead-compact-meta span:first-child::after { color: color-mix(in srgb, var(--text-mute) 60%, transparent); }
+html[data-theme="light"] .leads-data-table .lead-compact-meta { color: var(--text-mute); }
