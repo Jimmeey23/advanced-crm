@@ -3,7 +3,7 @@ import {
   LayoutDashboard, KanbanSquare, Users, UploadCloud, Settings, Search,
   Plus, Sun, Moon, BarChart3,
   CalendarDays, CalendarRange, Activity, Inbox as InboxIcon, CalendarClock, LogOut, Table2, BadgePercent, Package,
-  RefreshCw
+  RefreshCw, Receipt
 } from 'lucide-react'
 import { AppProvider, Toasts, useApp } from './store.jsx'
 import { useFetch } from './hooks.js'
@@ -24,6 +24,7 @@ import SettingsPage from './pages/Settings.jsx'
 import Pivot from './pages/Pivot.jsx'
 import MomenceSchedule, { formatTone, personName, time as fmtSessionTime } from './pages/MomenceSchedule.jsx'
 import DiscountCodes from './pages/DiscountCodes.jsx'
+import Sales from './pages/Sales.jsx'
 import Memberships from './pages/Memberships.jsx'
 import LeadDrawer from './components/LeadDrawer.jsx'
 import AddLeadModal from './components/AddLeadModal.jsx'
@@ -44,6 +45,7 @@ const NAV_GROUPS = [
   { label: 'Reports', items: [
     { id: 'studio-weekly', label: 'Weekly studio report', title: 'Weekly Studio Pulse', icon: CalendarDays },
     { id: 'studio-monthly', label: 'Monthly studio report', title: 'Monthly Studio Review', icon: CalendarRange },
+    { id: 'sales', label: 'Live sales', title: 'Live Sales Dashboard', icon: Receipt },
     { id: 'pivot', label: 'Pivot builder', title: 'Pivot Builder', icon: Table2 }
   ] },
   { label: 'Work', items: [
@@ -507,6 +509,7 @@ function Shell() {
     case 'leads': return <Leads initialSearch={viewParams.search} initialAssociateId={viewParams.associateId} />
     case 'inbox': return <Inbox />
     case 'momence-schedule': return <MomenceSchedule />
+    case 'sales': return <Sales />
     case 'discount-codes': return <DiscountCodes />
     case 'memberships': return <Memberships />
     case 'import': return <Import />

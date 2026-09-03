@@ -14,6 +14,7 @@ import { assignLead } from './roundRobin.js'
 import * as momence from './momence.js'
 import { createMomenceDashboardClient } from './momenceDashboardAuth.js'
 import { createDiscountCodeHandlers, createDiscountCodeService } from './momenceDiscountCodes.js'
+import { createSalesService, registerSalesRoutes } from './sales.js'
 import * as gpt from './gpt.js'
 import * as respondio from './respondio.js'
 import * as respondioInternal from './respondioInternal.js'
@@ -1493,6 +1494,12 @@ function momenceWebhookSecret(market) {
   if (!db.settings.momence) db.settings.momence = {}
   return market === 'blr' ? (db.settings.momence.blr?.webhookSecret || '') : (db.settings.momence.webhookSecret || '')
 }
+
+// ---------- Momence sales dashboard ----------
+// Its own month-keyed cache on disk (data/salesCache.json), backfilled all the
+// way back once and thereafter only re-pulling the month still in progress.
+const salesService = createSalesService({ db: () => db })
+registerSalesRoutes(app, salesService)
 
 app.post('/api/webhooks/momence/:market', async (req, res) => {
   const market = req.params.market === 'blr' ? 'blr' : 'mumbai'
@@ -5124,6 +5131,7 @@ async function start() {
   console.log(`[physique57-leads] respondio: ${respondio.isConfigured(db) ? 'configured' : 'not configured'}`)
   console.log(`[physique57-leads] mailtrap: ${mailer.isConfigured(db) ? 'configured' : 'not configured'}`)
   console.log(`[physique57-leads] momence configured: ${momence.isConfigured(db)}`)
+  salesService.start()
   setTimeout(() => syncMomenceLifecycleEvidence().catch(error => console.warn(`[physique57-leads] Momence evidence sync skipped: ${error.message}`)), 15000)
   setInterval(() => syncMomenceLifecycleEvidence().catch(error => console.warn(`[physique57-leads] Momence evidence sync failed: ${error.message}`)), 6 * 60 * 60 * 1000)
 }

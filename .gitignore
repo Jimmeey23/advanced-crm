@@ -177,3 +177,7 @@ data/db.json
 *.lz
 *.lzma
 *.iso
+
+# Momence sales cache — rebuildable from the API, and grows to tens of MB
+data/salesCache.json
+data/salesCache.json.tmp

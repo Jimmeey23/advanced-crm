@@ -10754,3 +10754,272 @@ html .pipeline-stage-badge {
   overflow: hidden;
   max-width: 100%;
 }
+
+/* ── Live sales dashboard ──────────────────────────────────────────────────
+   Built from the report kit's primitives (rp-section, tiles), with this
+   page's own table: a dense, bordered grid whose rows are capped at 40px so
+   a thousand transactions stay scannable, and whose expanded detail is a
+   set of nested tables rather than a wall of key/value text. */
+.sales-page {
+  display: grid; gap: 14px;
+  /* The rail sits hard against the content, so the page carries its own
+     gutter; the max-width stops a 20-column table from stretching to a
+     2000px monitor's edge and leaving the KPI strip looking abandoned. */
+  padding: 2px 16px 24px 18px;
+  max-width: 1680px;
+}
+
+/* KPI strip: one bordered card of equal cells rather than eight tiles adrift
+   on the page background. auto-fit keeps them a sensible width at any zoom. */
+.sales-kpis {
+  display: grid; gap: 1px;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  border: 1px solid var(--border-strong); border-radius: var(--radius-lg);
+  background: var(--border); overflow: hidden;
+}
+.sales-kpis .rp-tile { padding: 11px 13px; gap: 3px; }
+.sales-kpis .rp-tile-value { font-size: 18px; }
+.sales-kpis .rp-tile-foot { min-height: 0; }
+
+.sales-head { display: flex; align-items: flex-start; gap: 12px; flex-wrap: wrap; }
+.sales-head h2 { margin: 0; font-size: var(--text-xl); font-weight: 660; letter-spacing: -.02em; }
+.sales-head p { margin: 3px 0 0; font-size: var(--text-xs); color: var(--text-mute); max-width: 62ch; }
+.sales-head-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; flex-wrap: wrap; }
+
+.sales-live {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 4px 9px; border-radius: 999px;
+  border: 1px solid var(--border); background: var(--surface-2);
+  font-size: var(--text-2xs); color: var(--text-mute); white-space: nowrap;
+}
+.sales-live-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--ok); }
+/* The dot pulses only while a sync is actually in flight — a permanently
+   animated "live" badge stops meaning anything. */
+.sales-live.is-running .sales-live-dot { background: var(--warn); animation: sales-pulse 1.4s ease-in-out infinite; }
+@keyframes sales-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .25; } }
+
+.sales-backfill {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 7px 11px; border-radius: var(--radius-lg);
+  border: 1px solid var(--border); background: var(--surface-2);
+  font-size: var(--text-2xs); color: var(--text-mute);
+}
+.sales-backfill-sep { padding-left: 10px; border-left: 1px solid var(--border); }
+
+.sales-toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.sales-dates { display: inline-flex; align-items: center; gap: 6px; font-size: var(--text-2xs); color: var(--text-mute); }
+.sales-dates input {
+  padding: 5px 8px; border-radius: var(--radius-md);
+  border: 1px solid var(--border); background: var(--surface-2);
+  color: var(--text); font-size: var(--text-2xs); color-scheme: dark light;
+}
+.sales-search {
+  display: inline-flex; align-items: center; gap: 7px; min-width: 260px; flex: 1 1 260px;
+  padding: 6px 10px; border-radius: var(--radius-md);
+  border: 1px solid var(--border); background: var(--surface-2); color: var(--text-mute);
+}
+.sales-search input { flex: 1; border: 0; background: none; outline: none; color: var(--text); font-size: var(--text-xs); min-width: 0; }
+.sales-search button { border: 0; background: none; color: var(--text-mute); cursor: pointer; display: inline-flex; }
+
+.sales-filters { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
+.sales-filters-label { display: inline-flex; align-items: center; gap: 5px; font-size: var(--text-2xs); color: var(--text-mute); }
+.sales-filter { position: relative; }
+.sales-filter-btn {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 5px 9px; border-radius: 999px;
+  border: 1px solid var(--border); background: var(--surface-2);
+  color: var(--text-dim); font-size: var(--text-2xs); cursor: pointer;
+}
+.sales-filter-btn:hover { border-color: var(--border-strong); }
+.sales-filter-btn.is-active { color: var(--accent-ink, var(--accent)); background: var(--accent-soft); border-color: var(--accent-border); }
+.sales-filter-count {
+  min-width: 16px; padding: 0 4px; border-radius: 999px;
+  background: var(--accent); color: #fff; font-size: 10px; line-height: 15px; text-align: center;
+}
+.sales-filter-menu {
+  position: absolute; z-index: 70; top: calc(100% + 5px); left: 0;
+  min-width: 220px; max-height: 300px; overflow-y: auto;
+  padding: 6px; border-radius: var(--radius-lg);
+  border: 1px solid var(--border-strong); background: var(--surface);
+  box-shadow: 0 12px 32px rgba(0,0,0,.32);
+}
+.sales-filter-option {
+  display: flex; align-items: center; gap: 8px;
+  padding: 5px 7px; border-radius: var(--radius-md);
+  font-size: var(--text-2xs); color: var(--text-dim); cursor: pointer;
+}
+.sales-filter-option:hover { background: var(--surface-2); }
+.sales-filter-option span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sales-filter-empty { padding: 8px; font-size: var(--text-2xs); color: var(--text-mute); }
+.sales-filter-clear {
+  width: 100%; margin-top: 4px; padding: 5px; border-radius: var(--radius-md);
+  border: 0; background: var(--surface-2); color: var(--text-mute);
+  font-size: var(--text-2xs); cursor: pointer;
+}
+.sales-col-picker { position: relative; }
+.sales-col-picker .sales-filter-menu { left: auto; right: 0; }
+
+.sales-link-btn {
+  display: inline-flex; align-items: center; gap: 4px;
+  border: 0; background: none; padding: 0; cursor: pointer;
+  color: var(--accent-ink, var(--accent)); font-size: var(--text-2xs);
+}
+.sales-error {
+  padding: 9px 12px; border-radius: var(--radius-lg);
+  border: 1px solid color-mix(in srgb, var(--bad) 30%, transparent);
+  background: color-mix(in srgb, var(--bad) 10%, transparent);
+  color: var(--bad); font-size: var(--text-xs);
+}
+.sales-muted { color: var(--text-mute); }
+
+/* ── Item-group tag ──────────────────────────────────────────
+   Tone slot is fixed per group (see GROUP_TONES), so filtering never
+   repaints the groups that remain. Text always carries the name — colour
+   is a secondary cue, never the only one. */
+.sales-tag {
+  display: inline-block; max-width: 100%;
+  padding: 2px 7px; border-radius: 5px;
+  border: 1px solid var(--border-strong);
+  font-size: 10.5px; font-weight: 560; line-height: 15px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  color: var(--text-dim); background: var(--surface-2);
+}
+.sales-tag[data-tone="0"] { color: #7fb2f0; border-color: rgba(57,135,229,.42); background: rgba(57,135,229,.12); }
+.sales-tag[data-tone="1"] { color: #f0a07a; border-color: rgba(217,89,38,.42);  background: rgba(217,89,38,.12); }
+.sales-tag[data-tone="2"] { color: #5fc3a1; border-color: rgba(25,158,112,.42); background: rgba(25,158,112,.12); }
+.sales-tag[data-tone="3"] { color: #e0b658; border-color: rgba(201,133,0,.42);  background: rgba(201,133,0,.12); }
+.sales-tag[data-tone="4"] { color: #e295b3; border-color: rgba(213,81,129,.42); background: rgba(213,81,129,.12); }
+.sales-tag[data-tone="5"] { color: #6cbf6c; border-color: rgba(0,131,0,.45);    background: rgba(0,131,0,.14); }
+.sales-tag[data-tone="6"] { color: #b0a8f2; border-color: rgba(144,133,233,.42);background: rgba(144,133,233,.12); }
+.sales-tag[data-tone="7"] { color: #ef8f8f; border-color: rgba(230,103,103,.42);background: rgba(230,103,103,.12); }
+.sales-tag.is-discount { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 42%, transparent); background: color-mix(in srgb, var(--warn) 12%, transparent); }
+:root[data-theme="light"] .sales-tag[data-tone="0"] { color: #1c5cab; }
+:root[data-theme="light"] .sales-tag[data-tone="1"] { color: #a8400f; }
+:root[data-theme="light"] .sales-tag[data-tone="2"] { color: #0f6f4c; }
+:root[data-theme="light"] .sales-tag[data-tone="3"] { color: #8a6b00; }
+:root[data-theme="light"] .sales-tag[data-tone="4"] { color: #a8365f; }
+:root[data-theme="light"] .sales-tag[data-tone="5"] { color: #056105; }
+:root[data-theme="light"] .sales-tag[data-tone="6"] { color: #4034a0; }
+:root[data-theme="light"] .sales-tag[data-tone="7"] { color: #b32f2f; }
+
+/* ── Transaction table ───────────────────────────────────────
+   Every cell is bordered and every row is capped at 40px: with 20 columns
+   and thousands of rows, a row that grows to fit its content destroys the
+   vertical rhythm that makes the table scannable at all. Overflowing text
+   ellipsises and is readable in full in the expanded detail. */
+.sales-table-wrap {
+  max-height: 660px; overflow: auto;
+  border: 1px solid var(--border-strong); border-radius: var(--radius-lg);
+  background: var(--surface);
+}
+.sales-table {
+  width: 100%; min-width: 1500px;
+  border-collapse: separate; border-spacing: 0; table-layout: fixed;
+}
+.sales-table th, .sales-table td {
+  height: 40px; max-height: 40px; padding: 0 10px;
+  border-right: 1px solid var(--border); border-bottom: 1px solid var(--border);
+  font-size: var(--text-2xs); text-align: left; vertical-align: middle;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.sales-table th:last-child, .sales-table td:last-child { border-right: 0; }
+.sales-table thead th {
+  position: sticky; top: 0; z-index: 3;
+  height: 36px;
+  background: var(--surface-2); color: var(--text-dim);
+  font-weight: 620; letter-spacing: .02em; text-transform: uppercase; font-size: 10.5px;
+  border-bottom: 1px solid var(--border-strong);
+  cursor: pointer; user-select: none;
+}
+.sales-table thead th:hover { color: var(--text); background: var(--surface-3, var(--surface-2)); }
+.sales-table thead th.is-sorted { color: var(--accent-ink, var(--accent)); }
+.sales-table thead th .sales-sort { margin-left: 4px; opacity: .8; }
+.sales-table td.is-right, .sales-table th.is-right { text-align: right; font-variant-numeric: tabular-nums; }
+.sales-table tbody td { color: var(--text); }
+.sales-table tbody tr:nth-child(4n+1) td { background: color-mix(in srgb, var(--surface-2) 45%, transparent); }
+.sales-table tbody tr:hover td { background: var(--surface-2); }
+.sales-table tbody tr.is-clickable { cursor: pointer; }
+.sales-th-expand, .sales-td-expand { width: 30px; padding: 0 0 0 9px !important; color: var(--text-mute); }
+
+/* A secondary split belongs to the sale in the row above: shown with a left
+   rule and recessive ink, so the eye reads the pair as one sale. */
+.sales-table tbody tr.is-secondary-split td { color: var(--text-mute); }
+.sales-table tbody tr.is-secondary-split td:first-child {
+  box-shadow: inset 2px 0 0 var(--accent-border, var(--border-strong));
+}
+.sales-table tbody tr.is-expanded td {
+  background: var(--accent-soft) !important;
+  border-bottom-color: var(--accent-border);
+  color: var(--text);
+}
+
+/* ── Expanded detail ─────────────────────────────────────── */
+.sales-detail-row > td {
+  height: auto !important; max-height: none !important;
+  white-space: normal !important; padding: 0 !important;
+  background: var(--surface-2);
+  border-bottom: 2px solid var(--border-strong);
+}
+.sales-detail { display: grid; gap: 12px; padding: 13px 14px 15px; }
+.sales-detail-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.sales-detail-title strong { display: block; font-size: var(--text-sm); }
+.sales-detail-title small { font-size: var(--text-2xs); color: var(--text-mute); }
+.sales-detail-head .sales-link-btn { margin-left: auto; }
+
+.sales-detail-block { display: grid; gap: 7px; }
+.sales-detail-block h5 {
+  display: flex; align-items: baseline; gap: 8px; margin: 0;
+  font-size: 10.5px; text-transform: uppercase; letter-spacing: .06em;
+  color: var(--text-mute); font-weight: 640;
+}
+.sales-detail-block h5 span { color: var(--text-dim); text-transform: none; letter-spacing: 0; font-weight: 520; }
+
+.sales-nested-wrap { border: 1px solid var(--border-strong); border-radius: var(--radius-md); overflow: hidden; background: var(--surface); }
+.sales-nested { width: 100%; border-collapse: separate; border-spacing: 0; }
+.sales-nested th, .sales-nested td {
+  height: 32px; padding: 0 10px; font-size: var(--text-2xs);
+  border-bottom: 1px solid var(--border); border-right: 1px solid var(--border);
+  text-align: left; white-space: nowrap;
+}
+.sales-nested th:last-child, .sales-nested td:last-child { border-right: 0; }
+.sales-nested thead th { background: var(--surface-2); color: var(--text-mute); font-weight: 620; text-transform: uppercase; font-size: 10px; letter-spacing: .04em; }
+.sales-nested td.is-right, .sales-nested th.is-right { text-align: right; font-variant-numeric: tabular-nums; }
+.sales-nested tbody tr.is-current td { background: var(--accent-soft); color: var(--text); font-weight: 560; }
+.sales-nested tfoot td { background: var(--surface-2); color: var(--text-dim); font-weight: 620; border-bottom: 0; }
+
+.sales-detail-fields {
+  display: grid; gap: 1px;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  border: 1px solid var(--border); border-radius: var(--radius-md);
+  background: var(--border); overflow: hidden;
+}
+.sales-detail-field { display: grid; gap: 1px; min-width: 0; padding: 6px 9px; background: var(--surface); }
+.sales-detail-field small { font-size: 10px; text-transform: uppercase; letter-spacing: .05em; color: var(--text-mute); }
+.sales-detail-field span { font-size: var(--text-2xs); color: var(--text); overflow-wrap: anywhere; }
+
+.sales-more {
+  width: 100%; margin-top: 8px; padding: 8px; border-radius: var(--radius-lg);
+  border: 1px dashed var(--border-strong); background: none;
+  color: var(--text-mute); font-size: var(--text-2xs); cursor: pointer;
+}
+.sales-more:hover { border-color: var(--accent-border); color: var(--text-dim); }
+
+/* Breakdown table sits in the same visual family as the transaction grid. */
+.sales-page .rp-table-wrap { border: 1px solid var(--border-strong); border-radius: var(--radius-lg); }
+.sales-page .rp-table th, .sales-page .rp-table td { border-bottom: 1px solid var(--border); height: 38px; }
+.sales-page .rp-table thead th { background: var(--surface-2); border-bottom: 1px solid var(--border-strong); }
+.sales-page .rp-table tbody tr:hover td { background: var(--surface-2); }
+
+@media (max-width: 780px) {
+  .sales-page { padding-left: 2px; }
+  .sales-head-actions { margin-left: 0; }
+  .sales-search { min-width: 100%; }
+}
+
+/* Group cell: the name, and a bar showing its share of the range's revenue —
+   the ranking is readable without reading the numbers. */
+.sales-group-cell { display: grid; gap: 4px; min-width: 0; }
+.sales-group-name { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); font-weight: 560; }
+.sales-group-bar { display: block; height: 3px; border-radius: 2px; background: var(--surface-2); overflow: hidden; }
+.sales-group-bar > span { display: block; height: 100%; border-radius: 2px; background: var(--accent); }
+.sales-sort { margin-left: 4px; opacity: .85; }
