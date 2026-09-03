@@ -16,6 +16,7 @@ import { createMomenceDashboardClient } from './momenceDashboardAuth.js'
 import { createDiscountCodeHandlers, createDiscountCodeService } from './momenceDiscountCodes.js'
 import { createSalesService, registerSalesRoutes } from './sales.js'
 import { indexSalesByMember, leadSalesFacts, CONVERSION_LABELS } from './salesLeadLink.js'
+import { planDedupe } from './leadDedupe.js'
 import * as gpt from './gpt.js'
 import * as respondio from './respondio.js'
 import * as respondioInternal from './respondioInternal.js'
@@ -3063,25 +3064,6 @@ app.put('/api/lists', (req, res) => {
 // (e.g. two overlapping Google Sheets syncs racing before the fixed lock
 // existed). `dryRun` (default) reports what WOULD be removed without
 // touching anything, so an admin can sanity-check the count first.
-// Shared by the manual endpoint and the automatic pass below, so a scheduled
-// run can never disagree with what the admin screen previewed.
-function planDedupe(leads) {
-  // clusterDuplicates unions leads transitively (A~B by email, B~C by
-  // phone+fuzzy-name) so the whole chain lands in one group, not split
-  // across separate email/phone buckets like the old hash-by-one-key pass.
-  const rawGroups = clusterDuplicates(leads)
-  const toRemove = []
-  const groups = []
-  for (const group of rawGroups) {
-    // Oldest wins: it carries the original source attribution, and every
-    // follow-up logged against it.
-    group.sort((a, b) => String(a.createdAt || '').localeCompare(String(b.createdAt || '')))
-    toRemove.push(...group.slice(1))
-    groups.push(group)
-  }
-  return { toRemove, groups }
-}
-
 // Runs on boot and on a timer. Imports, sheet syncs and the inbound webhook
 // all create leads independently, so duplicates appear continuously rather
 // than only when someone remembers to press the button.
@@ -3090,8 +3072,16 @@ function runAutoDedupe({ reason = 'scheduled' } = {}) {
   if (autoDedupeRunning || !db?.leads?.length) return { removed: 0, skipped: true }
   autoDedupeRunning = true
   try {
-    const { toRemove } = planDedupe(db.leads)
-    if (!toRemove.length) return { removed: 0 }
+    // Strict: only fold in duplicates whose email and phone the survivor
+    // already carries. A cluster joined by a fuzzy name match alone is left
+    // for a human -- deleting one of those would lose a contact key, and the
+    // sheet mirror (which resolves rows by email/phone) would re-create it on
+    // the next sync, to be deleted again on the next pass, forever.
+    const { toRemove, skipped } = planDedupe(db.leads, { strict: true })
+    if (!toRemove.length) {
+      if (skipped.length) log('lead', `Auto-dedupe (${reason}): ${skipped.length} possible duplicate(s) need review`)
+      return { removed: 0, skippedForReview: skipped.length }
+    }
     const removeIds = new Set(toRemove.map(lead => lead.id))
     db.leads = db.leads.filter(lead => !removeIds.has(lead.id))
     for (const id of removeIds) markDeleted(id)

@@ -392,9 +392,29 @@ function scheduleRemoteWrite() {
 // instance). Patches just the affected row/meta fields — a full reload would
 // mean re-fetching every page of a large leads table on every single edit.
 let remoteLeadChangeCount = 0
+
+// Remote lead ids we have already folded into a local row: remote id -> local
+// id. Bounded, because a workspace can accumulate duplicates indefinitely and
+// this must not become a leak.
+const mergedRemoteLeadIds = new Map()
+const MAX_MERGED_REMOTE_IDS = 5000
+function rememberMergedRemote(remoteId, localId) {
+  mergedRemoteLeadIds.set(remoteId, localId)
+  if (mergedRemoteLeadIds.size > MAX_MERGED_REMOTE_IDS) {
+    // Oldest first -- Map preserves insertion order.
+    const oldest = mergedRemoteLeadIds.keys().next().value
+    mergedRemoteLeadIds.delete(oldest)
+  }
+}
+
 function applyRemoteLeadChange({ eventType, id, data }) {
   if (!state || !id) return
   const idx = leadIndexOf(id)
+  if (eventType === 'DELETE' && mergedRemoteLeadIds.has(id)) {
+    // Our own deletion of the duplicate coming back to us. Nothing to apply.
+    mergedRemoteLeadIds.delete(id)
+    return
+  }
   if (idx !== -1) {
     // Known local row: this event can be an echo of our own recent write
     // reflected back through Realtime — skip it to avoid clobbering newer
@@ -413,6 +433,26 @@ function applyRemoteLeadChange({ eventType, id, data }) {
       dupIndexLen = -1
     }
   } else if (eventType !== 'DELETE' && data) {
+    // Already reconciled once: fold the update into the row it was merged
+    // into and stop. Without this the same remote row is "merged" on every
+    // event it ever emits -- and since each merge schedules a write, which
+    // produces more events, the two sides ping-pong forever. That loop was
+    // observed doing thousands of merges of six ids and starving the
+    // Supabase writer until it hit a statement timeout.
+    const mergedInto = mergedRemoteLeadIds.get(id)
+    if (mergedInto) {
+      const targetIdx = leadIndexOf(mergedInto)
+      if (targetIdx !== -1) {
+        state.leads[targetIdx] = { ...state.leads[targetIdx], ...data, id: mergedInto }
+        dupIndex = null
+        dupIndexLen = -1
+      } else {
+        // The row we merged into has since gone; forget the mapping so the
+        // next event is reconciled from scratch rather than dropped.
+        mergedRemoteLeadIds.delete(id)
+      }
+      return
+    }
     // An id we don't recognize locally usually means this row was created
     // by another server instance sharing this Supabase project. If it's
     // actually the same person as a lead we already have (another instance
@@ -425,7 +465,17 @@ function applyRemoteLeadChange({ eventType, id, data }) {
       state.leads[existingIdx] = { ...existing, ...data, id: existing.id }
       dupIndex = null
       dupIndexLen = -1
-      console.log(`[db] merged remote duplicate lead ${data.id} into existing ${existing.id}`)
+      rememberMergedRemote(id, existing.id)
+      // The duplicate still exists in Supabase, so it will keep being
+      // replayed to us (and to every other instance) until somebody removes
+      // it. Merging without deleting is why this kept coming back.
+      dirty.add(existing.id)
+      markDeleted(id)
+      console.log(`[db] merged remote duplicate lead ${data.id} into existing ${existing.id} (removing the duplicate row)`)
+      // Push the merge and the removal to Supabase now; leaving them in the
+      // pending sets until some unrelated write happens is what lets the
+      // duplicate keep being replayed in the meantime.
+      save()
     } else {
       state.leads.push(data)
       // Cheaper than a rebuild: the new row is the last position, and it is
@@ -543,5 +593,9 @@ export const __testing = {
   setState: next => { state = next; invalidateIndexes() },
   leadIndexOf,
   findDuplicateIndexed,
-  invalidateIndexes
+  invalidateIndexes,
+  applyRemoteLeadChange,
+  getDeletedIds: () => [...deleted],
+  resetMergeTracking: () => { mergedRemoteLeadIds.clear(); deleted.clear(); dirty.clear() },
+  mergedRemoteCount: () => mergedRemoteLeadIds.size
 }
